@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
-# Build build/Herdr Island.app (ad-hoc signed, LSUIElement menu bar app).
+# Build build/Atoll.app (ad-hoc signed, LSUIElement menu bar app).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 CONFIG="${1:-release}"
-swift build -c "$CONFIG" --product HerdrIsland
+swift build -c "$CONFIG" --product Atoll
 BIN="$(swift build -c "$CONFIG" --show-bin-path)"
-APP="build/Herdr Island.app"
+APP="build/Atoll.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN/HerdrIsland" "$APP/Contents/MacOS/HerdrIsland"
-cp -R Sources/HerdrIsland/Resources/Sprites "$APP/Contents/Resources/Sprites"
+cp "$BIN/Atoll" "$APP/Contents/MacOS/Atoll"
+cp -R Sources/Atoll/Resources/Sprites "$APP/Contents/Resources/Sprites"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleIdentifier</key><string>local.herdr-island</string>
-  <key>CFBundleName</key><string>Herdr Island</string>
-  <key>CFBundleDisplayName</key><string>Herdr Island</string>
-  <key>CFBundleExecutable</key><string>HerdrIsland</string>
+  <key>CFBundleIdentifier</key><string>local.atoll</string>
+  <key>CFBundleName</key><string>Atoll</string>
+  <key>CFBundleDisplayName</key><string>Atoll</string>
+  <key>CFBundleExecutable</key><string>Atoll</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.1.0</string>
   <key>CFBundleVersion</key><string>1</string>

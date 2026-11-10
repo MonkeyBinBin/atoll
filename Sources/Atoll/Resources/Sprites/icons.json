@@ -1,0 +1,75 @@
+{
+ "frames": [
+  {
+   "frame": {
+    "x": 0,
+    "y": 0,
+    "w": 8,
+    "h": 8
+   },
+   "duration": 1000
+  },
+  {
+   "frame": {
+    "x": 8,
+    "y": 0,
+    "w": 8,
+    "h": 8
+   },
+   "duration": 1000
+  },
+  {
+   "frame": {
+    "x": 16,
+    "y": 0,
+    "w": 8,
+    "h": 8
+   },
+   "duration": 1000
+  }
+ ],
+ "meta": {
+  "app": "atoll art/final/make_sprites.py (B / Toy Chunky)",
+  "image": "icons.png",
+  "size": {
+   "w": 24,
+   "h": 8
+  },
+  "frameSize": {
+   "w": 8,
+   "h": 8
+  },
+  "pivot": {
+   "x": 4,
+   "y": 7
+  },
+  "accessoryKey": "#ff00ff",
+  "accessoryKeyDark": "#b000b0",
+  "frameTags": [
+   {
+    "name": "question",
+    "from": 0,
+    "to": 0,
+    "direction": "forward",
+    "loop": false,
+    "hold": "last"
+   },
+   {
+    "name": "permission",
+    "from": 1,
+    "to": 1,
+    "direction": "forward",
+    "loop": false,
+    "hold": "last"
+   },
+   {
+    "name": "auth",
+    "from": 2,
+    "to": 2,
+    "direction": "forward",
+    "loop": false,
+    "hold": "last"
+   }
+  ]
+ }
+}

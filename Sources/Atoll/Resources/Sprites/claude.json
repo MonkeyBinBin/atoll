@@ -1,0 +1,389 @@
+{
+ "frames": [
+  {
+   "frame": {
+    "x": 0,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 125
+  },
+  {
+   "frame": {
+    "x": 16,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 125
+  },
+  {
+   "frame": {
+    "x": 32,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 125
+  },
+  {
+   "frame": {
+    "x": 48,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 125
+  },
+  {
+   "frame": {
+    "x": 64,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 167
+  },
+  {
+   "frame": {
+    "x": 80,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 167
+  },
+  {
+   "frame": {
+    "x": 96,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 167
+  },
+  {
+   "frame": {
+    "x": 112,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 167
+  },
+  {
+   "frame": {
+    "x": 128,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 167
+  },
+  {
+   "frame": {
+    "x": 144,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 167
+  },
+  {
+   "frame": {
+    "x": 160,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 333
+  },
+  {
+   "frame": {
+    "x": 176,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 333
+  },
+  {
+   "frame": {
+    "x": 192,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 333
+  },
+  {
+   "frame": {
+    "x": 208,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 333
+  },
+  {
+   "frame": {
+    "x": 224,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 167
+  },
+  {
+   "frame": {
+    "x": 240,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 167
+  },
+  {
+   "frame": {
+    "x": 256,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 167
+  },
+  {
+   "frame": {
+    "x": 272,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 167
+  },
+  {
+   "frame": {
+    "x": 288,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 167
+  },
+  {
+   "frame": {
+    "x": 304,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 167
+  },
+  {
+   "frame": {
+    "x": 320,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 1000
+  },
+  {
+   "frame": {
+    "x": 336,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 1000
+  },
+  {
+   "frame": {
+    "x": 352,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 1000
+  },
+  {
+   "frame": {
+    "x": 368,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 1000
+  },
+  {
+   "frame": {
+    "x": 384,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 125
+  },
+  {
+   "frame": {
+    "x": 400,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 125
+  },
+  {
+   "frame": {
+    "x": 416,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 125
+  },
+  {
+   "frame": {
+    "x": 432,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 125
+  },
+  {
+   "frame": {
+    "x": 448,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 167
+  },
+  {
+   "frame": {
+    "x": 464,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 167
+  },
+  {
+   "frame": {
+    "x": 480,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 167
+  },
+  {
+   "frame": {
+    "x": 496,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 1000
+  },
+  {
+   "frame": {
+    "x": 512,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 1000
+  }
+ ],
+ "meta": {
+  "app": "atoll art/final/make_sprites.py (B / Toy Chunky)",
+  "image": "claude.png",
+  "size": {
+   "w": 528,
+   "h": 16
+  },
+  "frameSize": {
+   "w": 16,
+   "h": 16
+  },
+  "pivot": {
+   "x": 8,
+   "y": 15
+  },
+  "accessoryKey": "#ff00ff",
+  "accessoryKeyDark": "#b000b0",
+  "frameTags": [
+   {
+    "name": "starting",
+    "from": 0,
+    "to": 3,
+    "direction": "forward",
+    "loop": false,
+    "next": "working"
+   },
+   {
+    "name": "working",
+    "from": 4,
+    "to": 9,
+    "direction": "forward",
+    "loop": true
+   },
+   {
+    "name": "needs_you",
+    "from": 10,
+    "to": 13,
+    "direction": "forward",
+    "loop": true
+   },
+   {
+    "name": "done",
+    "from": 14,
+    "to": 19,
+    "direction": "forward",
+    "loop": false,
+    "next": "idle"
+   },
+   {
+    "name": "idle",
+    "from": 20,
+    "to": 23,
+    "direction": "forward",
+    "loop": true
+   },
+   {
+    "name": "error",
+    "from": 24,
+    "to": 27,
+    "direction": "forward",
+    "loop": false,
+    "hold": "last"
+   },
+   {
+    "name": "interrupted",
+    "from": 28,
+    "to": 30,
+    "direction": "forward",
+    "loop": false
+   },
+   {
+    "name": "exited",
+    "from": 31,
+    "to": 31,
+    "direction": "forward",
+    "loop": false,
+    "hold": "last"
+   },
+   {
+    "name": "unknown",
+    "from": 32,
+    "to": 32,
+    "direction": "forward",
+    "loop": false,
+    "hold": "last"
+   }
+  ]
+ }
+}

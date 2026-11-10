@@ -2,19 +2,19 @@
 import PackageDescription
 
 let package = Package(
-    name: "HerdrIsland",
+    name: "Atoll",
     platforms: [.macOS(.v15)],
     products: [
-        .executable(name: "HerdrIsland", targets: ["HerdrIsland"]),
+        .executable(name: "Atoll", targets: ["Atoll"]),
     ],
     targets: [
         // Domain core: no AppKit/SwiftUI, fully testable with a fake HerdrClient.
-        .target(name: "IslandCore"),
+        .target(name: "AtollCore"),
         .executableTarget(
-            name: "HerdrIsland",
-            dependencies: ["IslandCore"],
+            name: "Atoll",
+            dependencies: ["AtollCore"],
             resources: [.copy("Resources/Sprites")]
         ),
-        .testTarget(name: "IslandCoreTests", dependencies: ["IslandCore"]),
+        .testTarget(name: "AtollCoreTests", dependencies: ["AtollCore"]),
     ]
 )

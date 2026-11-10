@@ -1,0 +1,197 @@
+import Foundation
+
+public enum AgentTool: String, Equatable, Sendable, CaseIterable {
+    case claudeCode
+    case codex
+    case generic
+
+    /// Maps the OSC 7501 `app` word to an appearance.
+    public static func from(app: String?) -> AgentTool {
+        guard let app = app?.lowercased() else { return .generic }
+        if app.hasPrefix("claude") { return .claudeCode }
+        if app.hasPrefix("codex") { return .codex }
+        return .generic
+    }
+}
+
+public enum BlockedKind: String, Equatable, Sendable {
+    case question, permission, auth, unspecified
+
+    public static func from(kind: String?) -> BlockedKind {
+        switch kind?.lowercased() {
+        case "question": .question
+        case "permission": .permission
+        case "auth": .auth
+        default: .unspecified
+        }
+    }
+
+    public var label: String {
+        switch self {
+        case .question: "Question"
+        case .permission: "Permission"
+        case .auth: "Sign-in required"
+        case .unspecified: "Needs input"
+        }
+    }
+}
+
+/// The user-visible state, derived by AgentStore from Herdr's facts.
+public enum AgentState: Equatable, Sendable, Hashable {
+    case starting
+    case working
+    case needsYou(BlockedKind)
+    case done
+    case idle
+    case error
+    case exited
+    case unknown
+
+    public var label: String {
+        switch self {
+        case .starting: "Starting"
+        case .working: "Working"
+        case .needsYou: "Needs you"
+        case .done: "Done"
+        case .idle: "Idle"
+        case .error: "Error"
+        case .exited: "Exited"
+        case .unknown: "Unknown"
+        }
+    }
+
+    /// Lower sorts first: Needs you > Error > Unknown > Working > Done > Idle > Exited.
+    public var priority: Int {
+        switch self {
+        case .needsYou: 0
+        case .error: 1
+        case .unknown: 2
+        case .working, .starting: 3
+        case .done: 4
+        case .idle: 5
+        case .exited: 6
+        }
+    }
+
+    /// Pinned to the left wing and announced in the hint line.
+    public var needsAttention: Bool {
+        switch self {
+        case .needsYou, .error: true
+        default: false
+        }
+    }
+
+    public var isNeedsYou: Bool {
+        if case .needsYou = self { return true }
+        return false
+    }
+
+    public var blockedKind: BlockedKind? {
+        if case .needsYou(let kind) = self { return kind }
+        return nil
+    }
+}
+
+/// How the panel may reply to an agent, decided by its state.
+public enum ReplyMode: Equatable, Sendable {
+    /// Free text; `force` lets it reach a blocked program (answering a question).
+    case text(force: Bool)
+    /// Only the generic key row (permission prompts).
+    case keys
+    /// Blocked without a known kind (herdr CLI, cmux): answer by text (forced) or by key.
+    case textAndKeys
+    /// Sign-in flows stay in the full terminal.
+    case openInHerdrOnly
+    /// Nothing to send to (exited).
+    case none
+
+    public static func forState(_ state: AgentState) -> ReplyMode {
+        switch state {
+        case .needsYou(.question): .text(force: true)
+        case .needsYou(.permission): .keys
+        case .needsYou(.unspecified): .textAndKeys
+        case .needsYou(.auth): .openInHerdrOnly
+        case .exited: .none
+        default: .text(force: false)
+        }
+    }
+}
+
+public struct Agent: Identifiable, Equatable, Sendable {
+    public var id: String { address }
+    public var address: String
+    /// The terminal's own name (set at launch), if any.
+    public var name: String?
+    public var tool: AgentTool
+    /// The raw OSC 7501 `app` word last reported, if any.
+    public var app: String?
+    public var state: AgentState
+    public var statusMessage: String?
+    public var projectPath: String
+    /// When the current state began (Herdr's `status_ms` when known).
+    public var stateSince: Date?
+    /// When the agent started waiting for the user (only while Needs you).
+    public var waitingSince: Date?
+    /// Last status / turn / foreground event seen locally.
+    public var lastStatusChange: Date?
+    /// Individual color, fixed for the session.
+    public var colorIndex: Int
+    /// Done and already opened in the panel: celebrate no more.
+    public var acknowledged: Bool
+    public var turn: UInt64
+    public var title: String
+    /// One-shot interrupt feedback, cleared after a short while.
+    public var interruptFeedback: InterruptOutcome?
+    /// Bundle id (or TERM_PROGRAM) of the terminal app it was started from outside Herdr,
+    /// from the `atoll.origin` label set by scripts/shell/atoll.zsh.
+    public var origin: String?
+    /// The backend this agent comes from.
+    public var source: AgentSource = .core
+
+    public init(
+        address: String, name: String? = nil, tool: AgentTool = .generic, app: String? = nil,
+        state: AgentState = .unknown, statusMessage: String? = nil, projectPath: String = "/",
+        stateSince: Date? = nil, waitingSince: Date? = nil, lastStatusChange: Date? = nil,
+        colorIndex: Int = 0, acknowledged: Bool = false, turn: UInt64 = 0, title: String = "",
+        interruptFeedback: InterruptOutcome? = nil, origin: String? = nil
+    ) {
+        self.address = address
+        self.name = name
+        self.tool = tool
+        self.app = app
+        self.state = state
+        self.statusMessage = statusMessage
+        self.projectPath = projectPath
+        self.stateSince = stateSince
+        self.waitingSince = waitingSince
+        self.lastStatusChange = lastStatusChange
+        self.colorIndex = colorIndex
+        self.acknowledged = acknowledged
+        self.turn = turn
+        self.title = title
+        self.interruptFeedback = interruptFeedback
+        self.origin = origin
+    }
+
+    public var projectName: String {
+        let last = (projectPath as NSString).lastPathComponent
+        return last.isEmpty ? projectPath : last
+    }
+
+    public var toolName: String {
+        switch tool {
+        case .claudeCode: return "Claude Code"
+        case .codex: return "Codex"
+        case .generic:
+            guard let app, !app.isEmpty else { return "Terminal" }
+            return app.prefix(1).uppercased() + app.dropFirst()
+        }
+    }
+
+    /// "Codex · project-x" — the label used everywhere a target is named.
+    public var displayName: String {
+        "\(toolName) · \(name ?? projectName)"
+    }
+
+    public var replyMode: ReplyMode { .forState(state) }
+}

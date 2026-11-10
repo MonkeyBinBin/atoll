@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate programmatic placeholder sprites in the app's final asset format.
 
-Output (Sources/HerdrIsland/Resources/Sprites/):
+Output (Sources/Atoll/Resources/Sprites/):
   <appearance>.png   transparent sprite sheet, 16x16 frames in one row
   <appearance>.json  Aseprite-style: frames[] (frame rect, duration ms) and
                      meta.frameTags[] (name, from, to, loop, next, hold) + pivot
@@ -16,7 +16,7 @@ import sys
 
 from PIL import Image
 
-# Final art lives in Sources/HerdrIsland/Resources/Sprites (art/final/make_sprites.py); placeholders go to build/.
+# Final art lives in Sources/Atoll/Resources/Sprites (art/final/make_sprites.py); placeholders go to build/.
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "build", "placeholder-sprites")
 S = 16
 KEY = (255, 0, 255, 255)
@@ -245,7 +245,7 @@ def write_sheet(name, ordered, tags_meta, size, extra_meta=None):
     doc = {
         "frames": out_frames,
         "meta": {
-            "app": "herdr-agent-island placeholder generator",
+            "app": "atoll placeholder generator",
             "image": f"{name}.png",
             "size": {"w": img.width, "h": img.height},
             "frameSize": {"w": size, "h": size},
