@@ -1,0 +1,17 @@
+#7A3F6E  outline (plum)
+#E39A63  body shadow (tan)
+#FFE2B5  body mid (cream)
+#FFF8EC  body light
+#4A2A58  visor / painted eyes base
+#3A1F45  painted eye
+#7FD6C6  joints / bolts (teal)
+#FFFFFF  specular dot
+#FF4A3D  state: error
+#FFC93C  state: waiting
+#9A8F8A  state: unknown
+#5EC8FF  individual 1 light
+#2A6FB0  individual 1 dark
+#6EE07A  individual 2 light
+#2F8A4A  individual 2 dark
+#D78BFF  individual 3 light
+#7E43B0  individual 3 dark

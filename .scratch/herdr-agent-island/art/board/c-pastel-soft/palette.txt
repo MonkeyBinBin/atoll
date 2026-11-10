@@ -1,0 +1,17 @@
+#FFFFFF  rim light
+#F1ECFF  body light
+#CFC4FF  body mid (lilac)
+#9483DA  body shadow / edge
+#6E5DB8  deep edge (selective)
+#4A3E8E  visor
+#7CFFD9  eye glow (mint)
+#B8F0FF  bolts
+#FF5A6E  state: error
+#FFE066  state: waiting
+#A7A3B8  state: unknown
+#6FE6FF  individual 1 light
+#2E8FB5  individual 1 dark
+#FF8FD8  individual 2 light
+#B04E93  individual 2 dark
+#A6F28C  individual 3 light
+#4E9B4E  individual 3 dark

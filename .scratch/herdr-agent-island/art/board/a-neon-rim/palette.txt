@@ -1,0 +1,17 @@
+#2E3584  outline (deep indigo)
+#4058B0  body shadow
+#6F90E8  body mid
+#AFC8FF  body light
+#8CF8FF  rim light (cyan)
+#161B4A  visor
+#ECFFFF  eye glow
+#9AA6D6  joints / bolts
+#FF3B5C  state: error
+#FFD23F  state: waiting
+#7E849E  state: unknown
+#FF6AD5  individual 1 light
+#A3338C  individual 1 dark
+#7DFF8A  individual 2 light
+#2F9C4C  individual 2 dark
+#B98BFF  individual 3 light
+#5E40B5  individual 3 dark

@@ -1,0 +1,65 @@
+{
+  "direction": "B / Toy Chunky",
+  "character": {
+    "o": "#7A3F6E",
+    "d": "#E39A63",
+    "b": "#FFE2B5",
+    "l": "#FFF8EC",
+    "v": "#4A2A58",
+    "e": "#3A1F45",
+    "k": "#7FD6C6",
+    "r": "#FFFFFF"
+  },
+  "states": {
+    "error": "#FF4A3D",
+    "waiting": "#FFC93C",
+    "unknown": "#9A8F8A",
+    "working": "#7FD6C6",
+    "done": "#B9F2A6",
+    "idle": "#C9B8D8",
+    "exited": "#7A6A80"
+  },
+  "dim": {
+    "body": "#6A4A62",
+    "outline": "#43283F",
+    "sleep": "#A9B4FF"
+  },
+  "individuals": [
+    {
+      "light": "#5EC8FF",
+      "dark": "#2A6FB0"
+    },
+    {
+      "light": "#6EE07A",
+      "dark": "#2F8A4A"
+    },
+    {
+      "light": "#D78BFF",
+      "dark": "#7E43B0"
+    },
+    {
+      "light": "#7A8CFF",
+      "dark": "#3A47B0"
+    },
+    {
+      "light": "#F06BE6",
+      "dark": "#9A2E92"
+    },
+    {
+      "light": "#5EF0E8",
+      "dark": "#1F8F8A"
+    },
+    {
+      "light": "#F4F4FF",
+      "dark": "#9A9AB8"
+    },
+    {
+      "light": "#A8F060",
+      "dark": "#5A9A2A"
+    }
+  ],
+  "accessoryKeys": {
+    "light": "#FF00FF",
+    "dark": "#B000B0"
+  }
+}
