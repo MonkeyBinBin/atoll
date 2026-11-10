@@ -1,0 +1,110 @@
+{
+ "frames": [
+  {
+   "frame": {
+    "x": 0,
+    "y": 0,
+    "w": 5,
+    "h": 5
+   },
+   "duration": 500
+  },
+  {
+   "frame": {
+    "x": 5,
+    "y": 0,
+    "w": 5,
+    "h": 5
+   },
+   "duration": 500
+  },
+  {
+   "frame": {
+    "x": 10,
+    "y": 0,
+    "w": 5,
+    "h": 5
+   },
+   "duration": 500
+  },
+  {
+   "frame": {
+    "x": 15,
+    "y": 0,
+    "w": 5,
+    "h": 5
+   },
+   "duration": 500
+  },
+  {
+   "frame": {
+    "x": 20,
+    "y": 0,
+    "w": 5,
+    "h": 5
+   },
+   "duration": 500
+  },
+  {
+   "frame": {
+    "x": 25,
+    "y": 0,
+    "w": 5,
+    "h": 5
+   },
+   "duration": 500
+  },
+  {
+   "frame": {
+    "x": 30,
+    "y": 0,
+    "w": 5,
+    "h": 5
+   },
+   "duration": 500
+  },
+  {
+   "frame": {
+    "x": 35,
+    "y": 0,
+    "w": 5,
+    "h": 5
+   },
+   "duration": 500
+  }
+ ],
+ "meta": {
+  "app": "herdr-agent-island art/final/make_sprites.py (B / Toy Chunky)",
+  "image": "deco.png",
+  "size": {
+   "w": 40,
+   "h": 5
+  },
+  "frameSize": {
+   "w": 5,
+   "h": 5
+  },
+  "pivot": {
+   "x": 2,
+   "y": 4
+  },
+  "accessoryKey": "#ff00ff",
+  "accessoryKeyDark": "#b000b0",
+  "frameTags": [
+   {
+    "name": "twinkle",
+    "from": 0,
+    "to": 3,
+    "direction": "forward",
+    "loop": true
+   },
+   {
+    "name": "twinkle_teal",
+    "from": 4,
+    "to": 7,
+    "direction": "forward",
+    "loop": true
+   }
+  ]
+ }
+}

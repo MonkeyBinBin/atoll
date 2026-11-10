@@ -1,0 +1,146 @@
+{
+ "frames": [
+  {
+   "frame": {
+    "x": 0,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 83
+  },
+  {
+   "frame": {
+    "x": 16,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 83
+  },
+  {
+   "frame": {
+    "x": 32,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 83
+  },
+  {
+   "frame": {
+    "x": 48,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 83
+  },
+  {
+   "frame": {
+    "x": 64,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 83
+  },
+  {
+   "frame": {
+    "x": 80,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 83
+  },
+  {
+   "frame": {
+    "x": 96,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 100
+  },
+  {
+   "frame": {
+    "x": 112,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 100
+  },
+  {
+   "frame": {
+    "x": 128,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 100
+  },
+  {
+   "frame": {
+    "x": 144,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 100
+  },
+  {
+   "frame": {
+    "x": 160,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 100
+  },
+  {
+   "frame": {
+    "x": 176,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 100
+  }
+ ],
+ "meta": {
+  "app": "herdr-agent-island art/final/make_sprites.py (B / Toy Chunky)",
+  "image": "effects.png",
+  "size": {
+   "w": 192,
+   "h": 16
+  },
+  "frameSize": {
+   "w": 16,
+   "h": 16
+  },
+  "pivot": {
+   "x": 8,
+   "y": 15
+  },
+  "accessoryKey": "#ff00ff",
+  "accessoryKeyDark": "#b000b0",
+  "frameTags": [
+   {
+    "name": "send",
+    "from": 0,
+    "to": 5,
+    "direction": "forward",
+    "loop": false
+   },
+   {
+    "name": "celebrate",
+    "from": 6,
+    "to": 11,
+    "direction": "forward",
+    "loop": false
+   }
+  ]
+ }
+}
