@@ -151,3 +151,13 @@ python3 .scratch/atoll/art/final/make_sprites.py
 ### QA 檔
 
 `final/qa-all-tags@8x.png`（三種外觀 × 全部幀，套個體色）、`final/qa-effects@8x.png`、`final/island@1x.png` / `island@2x.png`（動態島尺寸）。
+
+## App 圖示
+
+`codex exec`（built-in ImageGen，`--sandbox workspace-write`，附 `b-toy-chunky/claude-idle@8x.png` 與動態島截圖當參考）產出三個候選：`app-icon/icon-a.png`（膠囊島＋探頭機器人）、`icon-b.png`（俯視環礁＋機器人）、`icon-c.png`（大頭特寫）。prompt 與過程見 `app-icon/prompt.txt`、`app-icon/codex-log.txt`，對照圖（含 64／32／16px）為 `app-icon/compare.png`。
+
+採用 **B / 環礁**：直接對應 Atoll 名稱，16px 下仍能辨識環形與青色潟湖。
+
+- 原始檔：`assets/AppIcon.icon`（Icon Composer 格式）。圖層 `Assets/atoll.png` 是從 `icon-b.png` 裁出 tile、以背景色 `#230822` 鋪滿的 1024² 無遮罩圖，圓角與陰影交給系統。
+- `scripts/build-app.sh` 以 `actool` 編譯成 `Assets.car`＋`AppIcon.icns`（`CFBundleIconName` / `CFBundleIconFile`）；沒有 Xcode 時改複製預先編好的 `assets/AppIcon.icns`。
+- 直接放 legacy `.icns`（自帶 squircle）會被 macOS 26 包進灰色外框，所以改走 `.icon`。

@@ -1,0 +1,7 @@
+Use your built-in image generation tool to create 3 separate macOS app icon candidates (1024x1024 PNG each) for a menu bar app called Atoll: a pixel-art "dynamic island" that shows tiny robot agents working in the notch. Attached refs: ref-sprite.png is the app's mascot style (warm cream/tan vinyl-toy pixel robot, plum #7A3F6E outlines, teal #7FD6C6 joints, sky-blue scarf); ref-island.png shows the app UI.
+Follow the macOS Big Sur+ icon grid: a rounded-square (squircle) tile occupying ~824px centered with transparent margin around it and a subtle drop shadow. Crisp chunky pixel-art style, readable at 16px. Palette: plum #7A3F6E, cream #FFE2B5, tan #E39A63, teal #7FD6C6, deep plum-black #1C0E1E, accent sky #5EC8FF. No text, no letters, no company logos or mascots (no starburst, no knot).
+Variants:
+- icon-a.png: deep plum-black tile with a black pill-shaped island at the top, a single cream pixel robot peeking up from it, a tiny twinkle star.
+- icon-b.png: atoll motif — a ring-shaped pixel island (teal lagoon, cream sand ring) seen from above on a dark plum tile, with a tiny robot standing on the ring.
+- icon-c.png: close-up big cream robot head (wide dome head, painted dark eyes, plum outline) filling the tile on a teal-to-plum gradient.
+After generating, copy each output from $CODEX_HOME/generated_images (default ~/.codex/generated_images) into the current directory with those exact filenames, then list them with sizes.
