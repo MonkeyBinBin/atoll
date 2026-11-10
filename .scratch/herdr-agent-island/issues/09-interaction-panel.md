@@ -4,11 +4,15 @@
 
 **Blocked by:** 05
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] 點角色直接開面板；切換 agent 時替換內容，不疊多個面板
-- [ ] 輸出讀取、自動刷新、手動刷新、擷取時間、`Screen only` 標示都正確
-- [ ] 輸出只存在記憶體，面板關閉即丟棄
-- [ ] `Open in Herdr` 呼叫 `agent.focus`（依 04 的結果決定是否另外帶 Herdr 到前景）
-- [ ] 已確認只改本機狀態，不發出任何寫回 Herdr 的指令（有 fake client 測試）
-- [ ] `Esc` 從面板回到上一層
+- [x] 點角色直接開面板；切換 agent 時替換內容，不疊多個面板
+- [x] 輸出讀取、自動刷新、手動刷新、擷取時間、`Screen only` 標示都正確
+- [x] 輸出只存在記憶體，面板關閉即丟棄
+- [x] `Open in Herdr` 呼叫 `agent.focus`（依 04 的結果決定是否另外帶 Herdr 到前景）
+- [x] 已確認只改本機狀態，不發出任何寫回 Herdr 的指令（有 fake client 測試）
+- [x] `Esc` 從面板回到上一層
+
+## Comments
+
+- 2026-11-10（agent）：面板讀 200 行、`Fetched at`、`Screen only`、status／turn 事件自動刷新、Refresh；輸出只在 `PanelState` 記憶體中，關閉即丟棄。`Open in Herdr` = `agent.focus` ＋ activate Herdr（依 04 結果）。已確認只存本機。

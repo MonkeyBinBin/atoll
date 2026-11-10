@@ -4,10 +4,14 @@
 
 **Blocked by:** 03, 09
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] 通知觸發規則（哪些狀態轉換會通知）有 fake client 測試
-- [ ] 通知內容不含終端機輸出或任務內容
-- [ ] 點通知打開對應 agent 的面板，而不是總清單
-- [ ] 設定中可開關全部通知，以及依 agent／專案開啟 Done 通知
-- [ ] 同一次狀態轉換不重複通知
+- [x] 通知觸發規則（哪些狀態轉換會通知）有 fake client 測試
+- [x] 通知內容不含終端機輸出或任務內容
+- [x] 點通知打開對應 agent 的面板，而不是總清單
+- [x] 設定中可開關全部通知，以及依 agent／專案開啟 Done 通知
+- [x] 同一次狀態轉換不重複通知
+
+## Comments
+
+- 2026-11-10（agent）：`NotificationRules`（Needs you／Error 預設通知、Done 依 agent／專案開啟、master switch、同轉換不重複、離線不通知），`Notifier` 用 UNUserNotificationCenter，點擊打開該 agent 面板；內容只有「工具 · 專案」與狀態字。需從 .app 執行（`swift run` 無 bundle 時只寫 log）。

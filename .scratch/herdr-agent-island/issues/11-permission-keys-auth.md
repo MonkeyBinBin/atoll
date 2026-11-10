@@ -4,9 +4,13 @@
 
 **Blocked by:** 10
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] permission 時顯示畫面擷取與按鍵排，每個按鍵都明確屬於目前目標 agent
-- [ ] 按鍵送出結果（成功／錯誤 kind）有回饋，不自動重送
-- [ ] auth 時沒有任何輸入控件
-- [ ] blocked kind → 可用回覆方式的對應有 fake client 測試
+- [x] permission 時顯示畫面擷取與按鍵排，每個按鍵都明確屬於目前目標 agent
+- [x] 按鍵送出結果（成功／錯誤 kind）有回饋，不自動重送
+- [x] auth 時沒有任何輸入控件
+- [x] blocked kind → 可用回覆方式的對應有 fake client 測試
+
+## Comments
+
+- 2026-11-10（agent）：permission 顯示畫面擷取＋`1 2 3 y n Enter Esc`，每次送出有結果回饋；auth 只有說明與 Open in Herdr。已對 probe terminal 驗證按鍵送達。

@@ -4,12 +4,16 @@
 
 **Blocked by:** 01, 03
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] 狀態對映涵蓋 spec 表格每一列，含 blocked kind（Question / Permission / Sign-in required）
-- [ ] 超過 heartbeat 期限未收資料 → 全部 Unknown；收到 `missed` → 以新 snapshot 重建
-- [ ] socket 斷線 → 膠囊轉灰、顯示最後更新時間，agent 保留不移除；重連後自動重新同步
-- [ ] 排序：Needs you > Error > Unknown > Working > Done > Idle > Exited；Needs you 同級依開始等待時間由早到晚
-- [ ] `status.app` 過濾與設定開關，關閉時未回報的 terminal 不出現，打開時以 Unknown 顯示
-- [ ] 本機記錄每個 agent 的 Last status change 時間
-- [ ] 以上每條規則都有 fake client 測試
+- [x] 狀態對映涵蓋 spec 表格每一列，含 blocked kind（Question / Permission / Sign-in required）
+- [x] 超過 heartbeat 期限未收資料 → 全部 Unknown；收到 `missed` → 以新 snapshot 重建
+- [x] socket 斷線 → 膠囊轉灰、顯示最後更新時間，agent 保留不移除；重連後自動重新同步
+- [x] 排序：Needs you > Error > Unknown > Working > Done > Idle > Exited；Needs you 同級依開始等待時間由早到晚
+- [x] `status.app` 過濾與設定開關，關閉時未回報的 terminal 不出現，打開時以 Unknown 顯示
+- [x] 本機記錄每個 agent 的 Last status change 時間
+- [x] 以上每條規則都有 fake client 測試
+
+## Comments
+
+- 2026-11-10（agent）：狀態對映、排序、heartbeat 40 秒過期（並自動要求重連）、`missed` 後 snapshot 重建、斷線轉灰保留 agent、`status.app` 過濾與開關，全部有 fake client 測試（`StateModelTests`、`ConnectionTests`）。

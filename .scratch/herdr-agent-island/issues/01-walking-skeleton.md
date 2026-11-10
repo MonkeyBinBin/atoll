@@ -4,11 +4,15 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Swift + SwiftUI 專案建立，最低 macOS 15，以 menu bar app（無 Dock icon）形式執行
-- [ ] `CoreRPCAdapter` 透過 Unix socket 以 JSON-RPC 連上 core，訂閱事件串流並處理 snapshot 與 status 事件
-- [ ] `AgentStore` 只依 `HerdrClient` 介面運作，不直接接觸 socket
-- [ ] 浮動膠囊不搶焦點、位於螢幕頂部中央、層級高於一般視窗
-- [ ] 本機有 agent 在跑時，每個 terminal 顯示一個圓點與英文狀態文字，狀態改變時更新
-- [ ] 至少一個 fake `HerdrClient` 注入事件序列、驗證 `AgentStore` 輸出的測試通過
+- [x] Swift + SwiftUI 專案建立，最低 macOS 15，以 menu bar app（無 Dock icon）形式執行
+- [x] `CoreRPCAdapter` 透過 Unix socket 以 JSON-RPC 連上 core，訂閱事件串流並處理 snapshot 與 status 事件
+- [x] `AgentStore` 只依 `HerdrClient` 介面運作，不直接接觸 socket
+- [x] 浮動膠囊不搶焦點、位於螢幕頂部中央、層級高於一般視窗
+- [x] 本機有 agent 在跑時，每個 terminal 顯示一個圓點與英文狀態文字，狀態改變時更新
+- [x] 至少一個 fake `HerdrClient` 注入事件序列、驗證 `AgentStore` 輸出的測試通過
+
+## Comments
+
+- 2026-11-10（agent）：SwiftPM 專案（`IslandCore` 函式庫＋`HerdrIsland` app＋`IslandCoreTests`），`scripts/build-app.sh` 打包成 LSUIElement 的 `build/Herdr Island.app`。`CoreRPCAdapter` 走 Unix socket JSON-RPC，訂閱專用連線＋每個指令一條短連線。圓點已在 06 換成像素角色。

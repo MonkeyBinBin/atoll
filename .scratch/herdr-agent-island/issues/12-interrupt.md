@@ -4,9 +4,13 @@
 
 **Blocked by:** 09
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] 只有在 1.5 秒內第二次按下才發出 interrupt 指令（有 fake client 測試）
-- [ ] 四種中斷結果都有對應的一次性回饋
-- [ ] 回饋結束後狀態由 Herdr 事件決定，不殘留「已中斷」狀態
-- [ ] 介面上沒有任何結束或刪除 session 的操作
+- [x] 只有在 1.5 秒內第二次按下才發出 interrupt 指令（有 fake client 測試）
+- [x] 四種中斷結果都有對應的一次性回饋
+- [x] 回饋結束後狀態由 Herdr 事件決定，不殘留「已中斷」狀態
+- [x] 介面上沒有任何結束或刪除 session 的操作
+
+## Comments
+
+- 2026-11-10（agent）：1.5 秒二次確認、四種結果一次性回饋（4 秒後消失，不是狀態）、UI 無 kill/rm。已對 probe terminal 驗證（still working）。

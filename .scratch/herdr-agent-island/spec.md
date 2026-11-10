@@ -95,7 +95,7 @@ Status: ready-for-agent
 
 ### 隱私
 
-64. As a 使用者, I want 程式只與本機 herdr-core 溝通, so that prompt 與終端機輸出不會離開本機
+64. As a 使用者, I want 程式只與本機的 herdr-core、herdr CLI 與 cmux 溝通, so that prompt 與終端機輸出不會離開本機
 65. As a 使用者, I want 近期輸出只在面板開著時存在記憶體中、關閉即丟棄, so that 沒有殘留的本機快取
 
 ### 美術
@@ -137,9 +137,12 @@ Status: ready-for-agent
 
 ### Herdr 整合邊界
 
-- 唯一後端是 herdr-core（目前 `hc` 0.1.19）。直接連 core 的 Unix socket，走 JSON-RPC 2.0（一行一則訊息），不 spawn `hc` CLI。協定處於 preview（generation 1，只增不減），因此所有 RPC 包在薄 adapter 後面，啟動時以 `rpc.discover`／版本檢查相容性。
+- 主要後端是 herdr-core（目前 `hc` 0.1.19），另外直接讀取 herdr CLI／TUI（`herdr` 0.9.x）與 cmux 自己整合的 agent（ticket 19–21）。三者都不需要改 shell 設定。herdr-core 的說明：直接連 core 的 Unix socket，走 JSON-RPC 2.0（一行一則訊息），不 spawn `hc` CLI。協定處於 preview（generation 1，只增不減），因此所有 RPC 包在薄 adapter 後面，啟動時以 `rpc.discover`／版本檢查相容性。
 - Herdr GUI（`herdr-app`）擁有 space／tab；啟動與聚焦走 `herdr-app` 的公開指令（`do tab.new`、`do agent.focus`）。GUI 沒開時這兩項停用，其餘功能照常。
-- 舊版 `herdr` TUI 與 Herdr mods 不在整合範圍（mods 只能畫在 Herdr 視窗內，不滿足需求）。
+- 一般終端機（Ghostty、cmux、iTerm 等）啟動的 agent：經 `scripts/shell/herdr-island.zsh` 的包裝函式改以 `hc run` 執行，仍只透過 herdr-core 整合（ticket 18）；來源 app 記在 label `island.origin`。
+- herdr CLI／TUI：socket `~/.config/herdr/herdr.sock`，狀態來自 `agent.list`（約 2 秒輪詢＋pane 事件即時刷新），位址 `herdr:<terminal_id>`（ticket 20）。
+- cmux：以 `cmux events` 的 `agent.hook.*` 事件推得每個 session 的狀態，位址 `cmux:<session_id>`；cmux 沒開時不呼叫任何 cmux 指令。從 cmux surface 啟動的程序（例如 herdr server）會繼承 `CMUX_SURFACE_ID`，其 session 若屬於 herdr／herdr-core（環境有 `HERDR_PANE_ID`／`HC_TERMINAL_ID`）就不在 cmux 來源重複顯示（ticket 21）。
+- Herdr mods 不在整合範圍（mods 只能畫在 Herdr 視窗內，不滿足需求）。
 
 ### 模組
 
@@ -242,12 +245,20 @@ Status: ready-for-agent
 
 ### 開工前要先驗證的事實
 
-以下項目在第一批 ticket 中以 adapter 契約測試或手動實驗確認，結果回寫本 spec；確認前相關 UI 依「無法確認」路徑實作：
+以下 4 項已於 2026-11-10 對 `hc` 0.1.19 ＋ Herdr app 0.1.14 驗證（ticket 04），可用 `HERDR_CONTRACT=1 swift test --filter Contract` 重跑協定部分：
 
-1. Codex（`codex --no-daemon`）是否透過 OSC 7501 回報狀態。若否，Codex 只能在「顯示未回報狀態的 terminal」開關下以狀態未知出現。
-2. `herdr-app do agent.focus` 是否會把 Herdr 視窗帶到前景；若否，需搭配啟動 Herdr app。
-3. `herdr-app do tab.new --task` 是否回報初始任務已送出；決定啟動成功判定是否還需要等 `working`。
-4. 是否有 RPC 能把「已看過」寫回 Herdr（P0 不依賴）。
+1. **Codex 會回報 OSC 7501**：`codex --no-daemon` 啟動後 `reported = true`、`status = {app: "codex", state: "idle"}`。Codex 與 Claude Code 同樣走一般狀態路徑。（附帶：core 的 PATH 不含 nvm，`terminal.run` 直接以 argv `codex` 啟動會 `spawn_failed`；本 app 的啟動走 `herdr-app do tab.new`，不受影響，見第 3 點。）
+2. **`herdr-app do agent.focus` 不會把 Herdr 視窗帶到前景**：只切到該 tab／pane（`herdr-app status` 的 `agent` 改變，前景 app 不變）。`Open in Herdr` 因此在 focus 後另外 activate Herdr app（bundle id `dev.herdr.app`）。
+3. **`herdr-app do tab.new` 不回報初始任務是否被處理**：立即回傳 `{space, tab, terminal}`。實測 terminal 的 argv 為 `/bin/zsh -lic '"$@"; exec "$0" -li' /bin/zsh <argv…> <task>`：tab.new 自己以 login＋interactive shell 包裝（nvm／PATH 會載入），並把 task 當成程式的最後一個參數傳入（`claude "<task>"`），`first_message` 為 null。因此內建工具直接用 argv `claude`／`codex --no-daemon`，不可再自行包 shell（會把 task 吃掉）。啟動成功判定維持「拿到 terminal 且 30 秒內收到 `working`」；實測 Claude Code 約 3 秒內 Launched。
+4. **「已看過」寫回：未確認，P0 不依賴**：live terminal 帶有 label `herdr.seen`，其值等於該 terminal 的 `turn`，推測是 Herdr app 寫入的「已看過」標記（可能經 `terminal.label`），但未觀察到寫入過程。P0 的「已確認」只存本機，不呼叫任何寫回指令。
+
+實作中確定的協定細節：
+
+- 不需 `hello` 即可呼叫 RPC；訂閱後的 plain 連線只收通知，指令各自開短連線（`terminal.send` 可能等使用者停止打字數秒）。
+- 事件格式 `{"method":"event","params":{"seq","terminal","type","data"}}`；`status` 事件帶完整 `status`（可為 null），`turn` 事件為 `{state, turn}`，`created` 帶完整 terminal；heartbeat 為 `{"method":"heartbeat","params":{"seq"}}`。快速連續的狀態可能被合併，不保證每次轉換都有事件，因此以 snapshot／created 的資料為底。
+- OSC 7501 格式：`ESC ] 7501 ; state=<s>:kind=<k>:app=<a>:msg=<m> BEL`。
+- live 且曾回報、但 `status` 變為 null（例如 agent 退回 shell）→ 狀態未知。
+- 啟動前就已 finished、從未在本次 session 看過 `app` 的 terminal 預設不顯示（設定「Show terminals without status」打開時以 Exited 顯示）。
 
 ## Testing Decisions
 
@@ -277,7 +288,7 @@ Status: ready-for-agent
 - 自訂角色、色盤、動畫與動態島配置
 - 解析各 agent 工具的原生選單或對話 UI
 - notarization、對外發佈、onboarding、遙測、診斷匯出
-- 舊版 `herdr` TUI 的整合與 Herdr mods
+- Herdr mods
 - 依畫面文字推測 agent 狀態
 
 ## Further Notes
