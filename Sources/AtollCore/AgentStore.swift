@@ -145,6 +145,21 @@ public final class AgentStore {
         }
     }
 
+    /// Groups agents by git working tree to warn when several are active in one; nil = off (no git).
+    public var treeProbe: (any WorkingTreeProbing)? {
+        didSet {
+            guard treeProbe == nil, oldValue != nil else { return }
+            treeGeneration += 1
+            treeCache.removeAll()
+            pendingTrees.removeAll()
+            sharedAnnounced.removeAll()
+            rebuild()
+        }
+    }
+    /// An agent became active in a working tree another active agent already works in. Once per newcomer
+    /// while the tree keeps two or more agents; announced again only after it drops below two.
+    public var onSharedTree: ((_ agent: Agent) -> Void)?
+
     // MARK: Internals
 
     private struct Record {
@@ -199,6 +214,12 @@ public final class AgentStore {
     private var toplevels: [String: String] = [:]
     /// Bumped per turn start / finish so a late git result never lands on a newer turn.
     private var summaryGeneration: [String: Int] = [:]
+    /// Working-tree top level per project path ("" = not in a repo). Resolved once per path, never polled.
+    private var treeCache: [String: String] = [:]
+    private var pendingTrees: Set<String> = []
+    private var treeGeneration = 0
+    /// Per top level: agents already covered by a shared-tree announcement.
+    private var sharedAnnounced: [String: Set<String>] = [:]
 
     public convenience init(client: HerdrClient, scheduler: IslandScheduler, timing: Timing = Timing()) {
         self.init(clients: [(.core, client)], scheduler: scheduler, timing: timing)
@@ -575,7 +596,9 @@ public final class AgentStore {
             }
             return ao < bo
         }
-        agents = list.map(\.0)
+        var built = list.map(\.0)
+        let newcomers = treeProbe == nil ? [] : markSharedTrees(&built)
+        agents = built
         notifyWhenDone = notifyWhenDone.filter { records[$0] != nil }
         for address in Set(openTurns.keys).union(changeSummaries.keys).union(toplevels.keys) where records[address] == nil {
             openTurns.removeValue(forKey: address)?.cancel()
@@ -584,6 +607,58 @@ public final class AgentStore {
             summaryGeneration[address] = nil
         }
         reconcileReminders()
+        for address in newcomers {
+            if let agent = agent(address) { onSharedTree?(agent) }
+        }
+    }
+
+    // MARK: Shared working tree
+
+    /// Resolves unknown project paths in the background, flags active agents that share a tree,
+    /// and returns the agents whose arrival should be announced.
+    private func markSharedTrees(_ list: inout [Agent]) -> [String] {
+        let paths = Set(list.map(\.projectPath))
+        treeCache = treeCache.filter { paths.contains($0.key) }
+        if let probe = treeProbe {
+            for path in paths where treeCache[path] == nil && !pendingTrees.contains(path) {
+                pendingTrees.insert(path)
+                let generation = treeGeneration
+                Task {
+                    let toplevel = await probe.toplevel(in: path)
+                    guard generation == self.treeGeneration else { return }
+                    self.pendingTrees.remove(path)
+                    self.treeCache[path] = toplevel ?? ""
+                    self.rebuild()
+                }
+            }
+        }
+        var groups: [String: [Int]] = [:]
+        for (index, agent) in list.enumerated() where agent.state != .exited {
+            guard let toplevel = treeCache[agent.projectPath], !toplevel.isEmpty else { continue }
+            groups[toplevel, default: []].append(index)
+        }
+        var newcomers: [String] = []
+        for (toplevel, members) in groups {
+            let memberAddresses = Set(members.map { list[$0].address })
+            guard members.count >= 2 else {
+                sharedAnnounced[toplevel] = nil
+                continue
+            }
+            let active = members.filter { list[$0].state.isActiveInTree }
+            guard active.count >= 2 else { continue }
+            for index in active {
+                list[index].sharedTreeWith = active.filter { $0 != index }.map { list[$0].address }
+            }
+            let announced = (sharedAnnounced[toplevel] ?? []).intersection(memberAddresses)
+            let fresh = active.filter { !announced.contains(list[$0].address) }
+            // Point at the one that just started; the others were already working there.
+            if let newest = fresh.max(by: { (list[$0].stateSince ?? .distantPast) < (list[$1].stateSince ?? .distantPast) }) {
+                newcomers.append(list[newest].address)
+            }
+            sharedAnnounced[toplevel] = announced.union(active.map { list[$0].address })
+        }
+        sharedAnnounced = sharedAnnounced.filter { groups[$0.key] != nil }
+        return newcomers
     }
 
     // MARK: Change summary
@@ -643,7 +718,8 @@ public final class AgentStore {
         toplevels[address] = summary.toplevel
         // Another agent still around in the same tree: the diff can't be pinned on this one.
         summary.sharedTree = agents.contains {
-            $0.address != address && $0.state != .exited && toplevels[$0.address] == summary.toplevel
+            let tree = treeCache[$0.projectPath].flatMap { $0.isEmpty ? nil : $0 } ?? toplevels[$0.address]
+            return $0.address != address && $0.state != .exited && tree == summary.toplevel
         }
         changeSummaries[address] = summary
         rebuild()

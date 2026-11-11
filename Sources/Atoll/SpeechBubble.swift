@@ -34,7 +34,7 @@ final class SpeechBubbleController {
         panel.level = NSWindow.Level(rawValue: island.level.rawValue + 1)
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
         panel.animationBehavior = .none
-        host = FirstMouseHostingView(rootView: SpeechBubbleView(key: "", state: .unknown, detail: nil, tailX: 0, animate: false, onTap: {}))
+        host = FirstMouseHostingView(rootView: SpeechBubbleView(key: "", state: .unknown, kind: .state, detail: nil, tailX: 0, animate: false, onTap: {}))
         panel.contentView = host
         trackChanges { [weak self] in self?.update() }
     }
@@ -46,6 +46,12 @@ final class SpeechBubbleController {
         // Full screen, attention only: no character to point at for the others.
         guard model.showsInCollapsedIsland(agent.address) else { return }
         enqueue(bubble)
+    }
+
+    /// Another active agent already works in this agent's git working tree (the store dedupes).
+    func sharedTree(_ agent: Agent) {
+        guard model.showsInCollapsedIsland(agent.address) else { return }
+        enqueue(AgentBubble(address: agent.address, state: agent.state, key: "shared#\(UUID().uuidString)", kind: .sharedTree))
     }
 
     /// Re-announce an agent still waiting past the reminder delay; its own key so it shows again.
@@ -85,7 +91,7 @@ final class SpeechBubbleController {
     }
 
     private func isStillTrue(_ bubble: AgentBubble) -> Bool {
-        model.store.agent(bubble.address)?.state.label == bubble.state.label
+        bubble.stillApplies(to: model.store.agent(bubble.address))
     }
 
     private func advance() {
@@ -125,7 +131,7 @@ final class SpeechBubbleController {
             return
         }
         if let shown = current {
-            let stale = !agents.contains { $0.address == shown.address && $0.state.label == shown.state.label }
+            let stale = !shown.stillApplies(to: agents.first { $0.address == shown.address })
             // A hover card takes the same spot under the island; hovering the bubble's own character means
             // the user is already looking.
             if stale || hover?.address == shown.address { advance() }
@@ -139,11 +145,20 @@ final class SpeechBubbleController {
         let isNew = shownKey != shown.key
         let animate = settings.animationsEnabled
         // A stopped agent's change counts (numbers only, no paths), once git has answered.
-        let detail: String? = switch shown.state {
-        case .done, .idle, .exited: agents.first { $0.address == shown.address }?.changeSummary?.text
-        default: nil
+        let shownAgent = agents.first { $0.address == shown.address }
+        let detail: String?
+        if shown.kind == .sharedTree {
+            // Names only (tool · project or terminal name), like everywhere else a target is named.
+            detail = shownAgent.map { agent in
+                "with " + agent.sharedTreeWith.compactMap { other in agents.first { $0.address == other }?.displayName }.joined(separator: ", ")
+            }
+        } else {
+            detail = switch shown.state {
+            case .done, .idle, .exited: shownAgent?.changeSummary?.text
+            default: nil
+            }
         }
-        var view = SpeechBubbleView(key: shown.key, state: shown.state, detail: detail, tailX: 0, animate: animate) { [weak self] in
+        var view = SpeechBubbleView(key: shown.key, state: shown.state, kind: shown.kind, detail: detail, tailX: 0, animate: animate) { [weak self] in
             guard let self else { return }
             self.dismissAll()
             self.hide()
@@ -194,6 +209,7 @@ final class SpeechBubbleController {
 struct SpeechBubbleView: View {
     let key: String
     let state: AgentState
+    var kind: AgentBubble.Kind = .state
     var detail: String?
     /// Tail position from the bubble's leading edge, pointing up at the character.
     var tailX: CGFloat
@@ -205,14 +221,19 @@ struct SpeechBubbleView: View {
 
     var body: some View {
         // A new identity per bubble so each one pops in.
-        SpeechBubbleBody(state: state, detail: detail, tailX: tailX, animate: animate, onTap: onTap)
+        SpeechBubbleBody(state: state, kind: kind, detail: detail, tailX: tailX, animate: animate, onTap: onTap)
             .id(key)
     }
 }
 
 private struct SpeechBubbleBody: View {
     let state: AgentState
+    let kind: AgentBubble.Kind
     let detail: String?
+
+    private var symbol: String { kind == .sharedTree ? "arrow.triangle.branch" : state.symbol }
+    private var title: String { kind == .sharedTree ? "Shared working tree" : state.fullLabel }
+    private var color: Color { kind == .sharedTree ? PixelPalette.waiting.color : state.color }
     let tailX: CGFloat
     let animate: Bool
     let onTap: () -> Void
@@ -221,8 +242,8 @@ private struct SpeechBubbleBody: View {
     var body: some View {
         let shape = BubbleShape(tailX: tailX, tailHeight: SpeechBubbleView.tailHeight, radius: SpeechBubbleView.radius)
         HStack(spacing: 5) {
-            Image(systemName: state.symbol)
-            Text(state.fullLabel)
+            Image(systemName: symbol)
+            Text(title)
                 .lineLimit(1)
             if let detail {
                 Text("· \(detail)")
@@ -231,13 +252,13 @@ private struct SpeechBubbleBody: View {
             }
         }
         .font(.system(size: 11, weight: .semibold))
-        .foregroundStyle(state.color)
+        .foregroundStyle(color)
         .padding(.horizontal, 9)
         .padding(.vertical, 5)
         .padding(.top, SpeechBubbleView.tailHeight)
         .fixedSize()
         .background(shape.fill(Color(white: 0.1)))
-        .overlay(shape.stroke(state.color.opacity(0.7), lineWidth: 1))
+        .overlay(shape.stroke(color.opacity(0.7), lineWidth: 1))
         .contentShape(shape)
         .scaleEffect(shown || !animate ? 1 : 0.6, anchor: UnitPoint(x: 0.5, y: 0))
         .opacity(shown || !animate ? 1 : 0)
@@ -247,7 +268,7 @@ private struct SpeechBubbleBody: View {
         .onTapGesture(perform: onTap)
         .environment(\.colorScheme, .dark)
         .accessibilityElement()
-        .accessibilityLabel(detail.map { "\(state.fullLabel), \($0)" } ?? state.fullLabel)
+        .accessibilityLabel(detail.map { "\(title), \($0)" } ?? title)
         .accessibilityAddTraits(.isButton)
     }
 }

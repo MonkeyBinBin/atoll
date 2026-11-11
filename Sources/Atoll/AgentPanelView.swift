@@ -97,6 +97,7 @@ struct AgentPanelView: View {
                 if let summary = agent.changeSummary {
                     ChangeSummaryLabel(summary: summary)
                 }
+                SharedTreeLabel(agent: agent, store: store, lineLimit: 2)
             }
             Spacer()
             queueBadge

@@ -160,6 +160,11 @@ final class IslandController {
         bubbles?.handle(agent, from: previous)
     }
 
+    /// Store: an agent became active in a working tree another active agent already uses.
+    func handleSharedTree(_ agent: Agent) {
+        bubbles?.sharedTree(agent)
+    }
+
     /// Store reminder: bubble the still-waiting agent again.
     func handleReminder(_ agent: Agent) {
         bubbles?.remind(agent)

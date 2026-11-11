@@ -86,6 +86,14 @@ public enum AgentState: Equatable, Sendable, Hashable {
         return false
     }
 
+    /// Counts toward a shared-working-tree warning: running, or stopped mid-turn on the user / an error.
+    public var isActiveInTree: Bool {
+        switch self {
+        case .starting, .working, .needsYou, .error: true
+        default: false
+        }
+    }
+
     public var blockedKind: BlockedKind? {
         if case .needsYou(let kind) = self { return kind }
         return nil
@@ -149,6 +157,8 @@ public struct Agent: Identifiable, Equatable, Sendable {
     public var source: AgentSource = .core
     /// What its last finished turn changed in git; cleared when the next turn starts.
     public var changeSummary: ChangeSummary?
+    /// Other active agents in the same git working tree (addresses); empty unless this one is active too.
+    public var sharedTreeWith: [String] = []
 
     public init(
         address: String, name: String? = nil, tool: AgentTool = .generic, app: String? = nil,

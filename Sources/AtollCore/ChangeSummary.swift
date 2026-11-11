@@ -113,12 +113,17 @@ public protocol ChangeProbing: Sendable {
     func summary(in directory: String, since baseline: TurnBaseline?) async -> ChangeSummary?
 }
 
+/// Which git working tree a directory belongs to; nil when it isn't in one (or git failed).
+public protocol WorkingTreeProbing: Sendable {
+    func toplevel(in directory: String) async -> String?
+}
+
 /// Runs one git command in a directory; nil on failure, nonzero exit or timeout.
 public protocol GitRunner: Sendable {
     func run(_ arguments: [String], in directory: String) async -> String?
 }
 
-public struct GitProbe: ChangeProbing {
+public struct GitProbe: ChangeProbing, WorkingTreeProbing {
     private let runner: GitRunner
 
     public init(runner: GitRunner = ProcessGitRunner()) {
@@ -155,6 +160,10 @@ public struct GitProbe: ChangeProbing {
             baseline: base == nil ? .head : base!.dirty ? .turnStartDirty : .turnStart,
             toplevel: toplevel
         )
+    }
+
+    public func toplevel(in directory: String) async -> String? {
+        await toplevel(directory)
     }
 
     private func toplevel(_ directory: String) async -> String? {

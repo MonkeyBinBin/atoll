@@ -118,6 +118,7 @@ struct AgentCard: View {
                 if let summary = agent.changeSummary {
                     ChangeSummaryLabel(summary: summary)
                 }
+                SharedTreeLabel(agent: agent, store: store)
                 HStack(spacing: 4) {
                     Text(Format.abbreviatePath(agent.projectPath))
                         .lineLimit(1)
@@ -156,5 +157,23 @@ struct ChangeSummaryLabel: View {
             .foregroundStyle(.secondary)
             .lineLimit(lineLimit)
             .help(summary.help)
+    }
+}
+
+/// "Shares working tree with Codex · project-x"; nothing unless the agent shares one.
+struct SharedTreeLabel: View {
+    let agent: Agent
+    let store: AgentStore
+    var lineLimit = 1
+
+    var body: some View {
+        if !agent.sharedTreeWith.isEmpty {
+            let names = agent.sharedTreeWith.compactMap { store.agent($0)?.displayName }
+            Label("Shares working tree with \(names.joined(separator: ", "))", systemImage: "arrow.triangle.branch")
+                .font(.system(size: 11))
+                .foregroundStyle(PixelPalette.waiting.color)
+                .lineLimit(lineLimit)
+                .help("Several active agents in \(Format.abbreviatePath(agent.projectPath))'s git working tree can overwrite or commit each other's changes. Separate worktrees avoid that.")
+        }
     }
 }

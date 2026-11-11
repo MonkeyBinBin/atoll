@@ -38,9 +38,10 @@ final class HoverCardController {
             panel.orderOut(nil)
             return
         }
+        let store = model.store
         host.rootView = AnyView(
             TimelineView(.periodic(from: .now, by: 1)) { context in
-                HoverCardView(agent: agent, now: context.date)
+                HoverCardView(agent: agent, store: store, now: context.date)
             }
             .environment(\.colorScheme, .dark)
         )
@@ -64,6 +65,7 @@ final class HoverCardController {
 
 struct HoverCardView: View {
     let agent: Agent
+    let store: AgentStore
     let now: Date
 
     var body: some View {
@@ -87,6 +89,7 @@ struct HoverCardView: View {
             if let summary = agent.changeSummary {
                 ChangeSummaryLabel(summary: summary, lineLimit: 2)
             }
+            SharedTreeLabel(agent: agent, store: store, lineLimit: 2)
             Text(Format.abbreviatePath(agent.projectPath) + (agent.whereLabel.map { " · \($0)" } ?? ""))
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)

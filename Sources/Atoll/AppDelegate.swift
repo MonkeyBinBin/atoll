@@ -54,6 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.notifier.handle(agent, from: from)
             self?.island.handleTransition(agent, from: from)
         }
+        store.onSharedTree = { [weak self] agent in self?.island.handleSharedTree(agent) }
         store.onNotifyWhenDone = { [weak self] agent in self?.notifier.notifyWhenDone(agent) }
         store.onAutoAdvance = { [weak self] next in self?.model.autoAdvance(to: next) }
         store.onAllClear = { [weak self] in self?.model.showAllClear() }
@@ -92,6 +93,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store.autoAdvance = settings.autoAdvance
         if (store.changeProbe != nil) != settings.changeSummary {
             store.changeProbe = settings.changeSummary ? GitProbe() : nil
+        }
+        if (store.treeProbe != nil) != settings.sharedTreeWarning {
+            store.treeProbe = settings.sharedTreeWarning ? GitProbe() : nil
         }
         store.reminderDelay = settings.reminderMinutes > 0 ? TimeInterval(settings.reminderMinutes * 60) : nil
         HotKeyCenter.shared.register(id: 1, settings.listHotKey) { [weak self] in
