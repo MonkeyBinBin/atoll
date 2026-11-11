@@ -194,7 +194,7 @@ final class DebugHook {
         view.cacheDisplay(in: bounds, to: rep)
         let data = rep.representation(using: .png, properties: [:])
         try? data?.write(to: dir.appendingPathComponent("\(name).png"))
-        let info = "frame=\(panel.frame) agents=\(model.store.agents.map { "\($0.address):\($0.state.label)" }) mode=\(model.mode) key=\(panel.isKeyWindow) selection=\(model.selection) live=\(model.store.isLive) send=\(model.store.sendStates) keys=\(model.store.keyStates) interrupt=\(model.store.interruptStates) feedback=\(model.store.agents.compactMap { a in a.interruptFeedback.map { o in "\(a.address):\(o)" } }) launch=\(model.store.launchState)\n"
+        let info = "frame=\(panel.frame) agents=\(model.store.agents.map { "\($0.address):\($0.state.label)" }) mode=\(model.mode) key=\(panel.isKeyWindow) selection=\(model.selection) live=\(model.store.isLive) send=\(model.store.sendStates) keys=\(model.store.keyStates) interrupt=\(model.store.interruptStates) feedback=\(model.store.agents.compactMap { a in a.interruptFeedback.map { o in "\(a.address):\(o)" } }) launch=\(model.store.launchState) visible=\(panel.isVisible) fullscreen=\(model.fullScreen) hidden=\(model.hiddenByFullScreen) collapsed=\(model.collapsedAgents?.map(\.address) ?? [])\n"
         try? info.write(to: dir.appendingPathComponent("\(name).txt"), atomically: true, encoding: .utf8)
     }
 }

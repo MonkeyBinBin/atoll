@@ -139,6 +139,21 @@ final class IslandModel {
     /// Measured height of the expanded content (below the top row).
     var expandedContentHeight: CGFloat = 0
     @ObservationIgnored var onModeChange: ((Mode) -> Void)?
+    /// The island's screen is showing a full-screen app.
+    var fullScreen = false
+
+    /// What the collapsed island shows given full screen; nil = hidden.
+    var collapsedAgents: [Agent]? {
+        FullScreenPresence.collapsedAgents(store.agents, fullScreen: fullScreen, mode: settings.fullScreenMode)
+    }
+
+    /// Collapsed and nothing to show in full screen: the island steps aside (hotkeys still expand it).
+    var hiddenByFullScreen: Bool { mode == .collapsed && collapsedAgents == nil }
+
+    func showsInCollapsedIsland(_ address: String) -> Bool {
+        collapsedAgents?.contains { $0.address == address } ?? false
+    }
+
     /// The open panel's reply box holds unsent text: auto-advance must not yank it away.
     var panelHasDraft = false
     /// Briefly true after the last waiting agent was answered.
@@ -175,7 +190,8 @@ final class IslandModel {
         let geometry = geometry ?? ScreenGeometry(
             screenFrame: .zero, hasNotch: false, notchMinX: 0, notchWidth: 0, barHeight: 28, leftRoom: 400, rightRoom: 400
         )
-        return IslandLayout.compute(agents: store.agents, geometry: geometry, offlineText: offlineText)
+        let agents = mode == .collapsed ? collapsedAgents ?? [] : store.agents
+        return IslandLayout.compute(agents: agents, geometry: geometry, offlineText: offlineText)
     }
 
     // MARK: Intents

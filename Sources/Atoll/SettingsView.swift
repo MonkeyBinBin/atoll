@@ -39,9 +39,15 @@ struct SettingsView: View {
                 Toggle("Show island", isOn: $settings.islandVisible)
                 Picker("Screen", selection: $settings.displayID) {
                     Text("Automatic (built-in display)").tag(UInt32(0))
+                    Text("Follow mouse").tag(AppSettings.followMouseDisplay)
                     ForEach(screens, id: \.id) { screen in
                         Text(screen.name).tag(screen.id)
                     }
+                }
+                Picker("In full screen", selection: $settings.fullScreenMode) {
+                    Text("Show all").tag(FullScreenMode.showAll)
+                    Text("Attention only").tag(FullScreenMode.attentionOnly)
+                    Text("Hide").tag(FullScreenMode.hide)
                 }
                 Toggle("Animations", isOn: $settings.animationsEnabled)
                 Toggle("Decorations", isOn: $settings.decorations)

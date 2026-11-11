@@ -102,7 +102,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.model.openEarliestWaiting()
         }
         _ = settings.displayID
-        island?.refreshScreen()
+        // Outside this tracking scope: refreshScreen reads island state (mode, agents) that must not
+        // re-run applySettings, or the island would re-target its screen on every expand.
+        DispatchQueue.main.async { [weak self] in self?.island?.refreshScreen() }
     }
 
     private func validateModel() {

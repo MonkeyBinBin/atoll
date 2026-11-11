@@ -43,11 +43,14 @@ final class SpeechBubbleController {
     func handle(_ agent: Agent, from previous: AgentState?) {
         // Always consult the rules so their dedupe memory stays current while bubbles are suppressed.
         guard let bubble = rules.bubble(for: agent, from: previous) else { return }
+        // Full screen, attention only: no character to point at for the others.
+        guard model.showsInCollapsedIsland(agent.address) else { return }
         enqueue(bubble)
     }
 
     /// Re-announce an agent still waiting past the reminder delay; its own key so it shows again.
     func remind(_ agent: Agent) {
+        guard model.showsInCollapsedIsland(agent.address) else { return }
         let since = Int(agent.waitingSince?.timeIntervalSince1970 ?? 0)
         enqueue(AgentBubble(address: agent.address, state: agent.state, key: "reminder#\(agent.turn)#\(since)"))
     }
@@ -62,7 +65,7 @@ final class SpeechBubbleController {
     func reposition() { update() }
 
     private var suppressed: Bool {
-        !settings.speechBubbles || !settings.islandVisible || model.isExpanded
+        !settings.speechBubbles || !settings.islandVisible || model.isExpanded || model.hiddenByFullScreen
     }
 
     private func enqueue(_ bubble: AgentBubble) {

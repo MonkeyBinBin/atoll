@@ -59,7 +59,11 @@ final class AppSettings {
     var reminderMinutes: Int { didSet { defaults.set(reminderMinutes, forKey: "reminderMinutes") } }
     var doneNotifyAgents: Set<String> { didSet { defaults.set(Array(doneNotifyAgents), forKey: "doneNotifyAgents") } }
     var doneNotifyProjects: Set<String> { didSet { defaults.set(Array(doneNotifyProjects), forKey: "doneNotifyProjects") } }
-    /// CGDirectDisplayID of the chosen screen; 0 = automatic (built-in / main).
+    /// The collapsed island while its screen shows a full-screen app.
+    var fullScreenMode: FullScreenMode { didSet { defaults.set(fullScreenMode.rawValue, forKey: "fullScreenMode") } }
+    /// `displayID` value meaning "the screen under the mouse".
+    static let followMouseDisplay = UInt32.max
+    /// CGDirectDisplayID of the chosen screen; 0 = automatic (built-in / main); `followMouseDisplay` = follow the mouse.
     var displayID: UInt32 { didSet { defaults.set(Int(displayID), forKey: "displayID") } }
     var listHotKey: HotKey { didSet { save(listHotKey, "listHotKey") } }
     var waitingHotKey: HotKey { didSet { save(waitingHotKey, "waitingHotKey") } }
@@ -121,7 +125,8 @@ final class AppSettings {
         autoAdvance = defaults.object(forKey: "autoAdvance") as? Bool ?? true
         doneNotifyAgents = Set(defaults.stringArray(forKey: "doneNotifyAgents") ?? [])
         doneNotifyProjects = Set(defaults.stringArray(forKey: "doneNotifyProjects") ?? [])
-        displayID = UInt32(defaults.integer(forKey: "displayID"))
+        displayID = UInt32(truncatingIfNeeded: defaults.integer(forKey: "displayID"))
+        fullScreenMode = defaults.string(forKey: "fullScreenMode").flatMap(FullScreenMode.init(rawValue:)) ?? .attentionOnly
         listHotKey = Self.load("listHotKey", defaults) ?? .defaultList
         waitingHotKey = Self.load("waitingHotKey", defaults) ?? .defaultWaiting
         defaultSpace = defaults.string(forKey: "defaultSpace") ?? ""

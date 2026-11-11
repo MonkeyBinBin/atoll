@@ -36,6 +36,9 @@ final class IslandController {
     private var debugHook: DebugHook?
     private var hoverCard: HoverCardController?
     private var bubbles: SpeechBubbleController?
+    private var fullScreenDetector: FullScreenDetector?
+    private var currentScreen: NSScreen?
+    private var followMouseTimer: Timer?
 
     init(model: IslandModel, settings: AppSettings, client: HerdrClient) {
         self.model = model
@@ -62,6 +65,10 @@ final class IslandController {
             MainActor.assumeIsolated { self?.refreshScreen() }
         }
         model.onModeChange = { [weak self] mode in self?.modeChanged(mode) }
+        fullScreenDetector = FullScreenDetector { [weak self] in self?.checkFullScreen() }
+        followMouseTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.followMouse() }
+        }
         refreshScreen()
         debugHook = DebugHook(panel: panel, model: model)
         hoverCard = HoverCardController(model: model, island: panel, settings: settings)
@@ -72,12 +79,36 @@ final class IslandController {
     }
 
     func refreshScreen() {
-        model.geometry = ScreenGeometry.of(targetScreen())
+        let screen = targetScreen()
+        currentScreen = screen
+        model.geometry = ScreenGeometry.of(screen)
         updateFrame()
+        fullScreenDetector?.scheduleChecks()
+    }
+
+    private func checkFullScreen() {
+        guard let currentScreen else { return }
+        let value = FullScreenDetector.isFullScreen(currentScreen)
+        if model.fullScreen != value { model.fullScreen = value }
+    }
+
+    /// Follow mouse: move to the screen under the pointer, but never while expanded.
+    private func followMouse() {
+        guard settings.displayID == AppSettings.followMouseDisplay, !model.isExpanded,
+              let screen = Self.screenUnderMouse(), screen.displayID != currentScreen?.displayID else { return }
+        refreshScreen()
+    }
+
+    private static func screenUnderMouse() -> NSScreen? {
+        let point = NSEvent.mouseLocation
+        return NSScreen.screens.first { NSMouseInRect(point, $0.frame, false) }
     }
 
     private func targetScreen() -> NSScreen {
         let screens = NSScreen.screens
+        if settings.displayID == AppSettings.followMouseDisplay, let screen = Self.screenUnderMouse() {
+            return screen
+        }
         if settings.displayID != 0,
            let match = screens.first(where: { $0.displayID == settings.displayID }) {
             return match
@@ -88,11 +119,13 @@ final class IslandController {
     }
 
     private func applyVisibility() {
-        if settings.islandVisible {
-            panel.orderFrontRegardless()
-        } else {
+        if !settings.islandVisible {
             model.collapse()
             panel.orderOut(nil)
+        } else if model.hiddenByFullScreen {
+            panel.orderOut(nil)
+        } else {
+            panel.orderFrontRegardless()
         }
     }
 
