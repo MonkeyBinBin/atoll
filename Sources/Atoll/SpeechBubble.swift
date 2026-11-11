@@ -34,7 +34,7 @@ final class SpeechBubbleController {
         panel.level = NSWindow.Level(rawValue: island.level.rawValue + 1)
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
         panel.animationBehavior = .none
-        host = FirstMouseHostingView(rootView: SpeechBubbleView(key: "", state: .unknown, tailX: 0, animate: false, onTap: {}))
+        host = FirstMouseHostingView(rootView: SpeechBubbleView(key: "", state: .unknown, detail: nil, tailX: 0, animate: false, onTap: {}))
         panel.contentView = host
         trackChanges { [weak self] in self?.update() }
     }
@@ -138,7 +138,12 @@ final class SpeechBubbleController {
         }
         let isNew = shownKey != shown.key
         let animate = settings.animationsEnabled
-        var view = SpeechBubbleView(key: shown.key, state: shown.state, tailX: 0, animate: animate) { [weak self] in
+        // A stopped agent's change counts (numbers only, no paths), once git has answered.
+        let detail: String? = switch shown.state {
+        case .done, .idle, .exited: agents.first { $0.address == shown.address }?.changeSummary?.text
+        default: nil
+        }
+        var view = SpeechBubbleView(key: shown.key, state: shown.state, detail: detail, tailX: 0, animate: animate) { [weak self] in
             guard let self else { return }
             self.dismissAll()
             self.hide()
@@ -189,6 +194,7 @@ final class SpeechBubbleController {
 struct SpeechBubbleView: View {
     let key: String
     let state: AgentState
+    var detail: String?
     /// Tail position from the bubble's leading edge, pointing up at the character.
     var tailX: CGFloat
     let animate: Bool
@@ -199,13 +205,14 @@ struct SpeechBubbleView: View {
 
     var body: some View {
         // A new identity per bubble so each one pops in.
-        SpeechBubbleBody(state: state, tailX: tailX, animate: animate, onTap: onTap)
+        SpeechBubbleBody(state: state, detail: detail, tailX: tailX, animate: animate, onTap: onTap)
             .id(key)
     }
 }
 
 private struct SpeechBubbleBody: View {
     let state: AgentState
+    let detail: String?
     let tailX: CGFloat
     let animate: Bool
     let onTap: () -> Void
@@ -217,6 +224,11 @@ private struct SpeechBubbleBody: View {
             Image(systemName: state.symbol)
             Text(state.fullLabel)
                 .lineLimit(1)
+            if let detail {
+                Text("· \(detail)")
+                    .lineLimit(1)
+                    .foregroundStyle(.secondary)
+            }
         }
         .font(.system(size: 11, weight: .semibold))
         .foregroundStyle(state.color)
@@ -235,7 +247,7 @@ private struct SpeechBubbleBody: View {
         .onTapGesture(perform: onTap)
         .environment(\.colorScheme, .dark)
         .accessibilityElement()
-        .accessibilityLabel(state.fullLabel)
+        .accessibilityLabel(detail.map { "\(state.fullLabel), \($0)" } ?? state.fullLabel)
         .accessibilityAddTraits(.isButton)
     }
 }

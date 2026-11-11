@@ -115,6 +115,9 @@ struct AgentCard: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
+                if let summary = agent.changeSummary {
+                    ChangeSummaryLabel(summary: summary)
+                }
                 HStack(spacing: 4) {
                     Text(Format.abbreviatePath(agent.projectPath))
                         .lineLimit(1)
@@ -139,5 +142,19 @@ struct AgentCard: View {
         .opacity(agent.state == .exited ? 0.6 : 1)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// "+120 −30 · 6 files · uncommitted" with the full explanation on hover.
+struct ChangeSummaryLabel: View {
+    let summary: ChangeSummary
+    var lineLimit = 1
+
+    var body: some View {
+        Label(summary.label, systemImage: "plus.forwardslash.minus")
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            .lineLimit(lineLimit)
+            .help(summary.help)
     }
 }

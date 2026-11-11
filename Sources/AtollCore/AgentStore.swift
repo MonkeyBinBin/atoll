@@ -134,6 +134,17 @@ public final class AgentStore {
     /// An armed agent finished its turn (Done, Exited, or stopped to Idle); it is now disarmed.
     public var onNotifyWhenDone: ((_ agent: Agent) -> Void)?
 
+    /// Computes per-turn change summaries; nil turns the feature off (no git runs at all).
+    public var changeProbe: (any ChangeProbing)? {
+        didSet {
+            guard changeProbe == nil, oldValue != nil else { return }
+            openTurns.removeAll()
+            changeSummaries.removeAll()
+            summaryGeneration.removeAll()
+            rebuild()
+        }
+    }
+
     // MARK: Internals
 
     private struct Record {
@@ -181,6 +192,13 @@ public final class AgentStore {
     /// Without a task an agent never goes working; its first status counts as started.
     private var launchHasTask = true
     private var outputRequest = 0
+    /// Turns in progress per agent, with the baseline being captured as they started.
+    private var openTurns: [String: Task<TurnBaseline?, Never>] = [:]
+    private var changeSummaries: [String: ChangeSummary] = [:]
+    /// Working-tree top level last seen per agent (from baselines and summaries).
+    private var toplevels: [String: String] = [:]
+    /// Bumped per turn start / finish so a late git result never lands on a newer turn.
+    private var summaryGeneration: [String: Int] = [:]
 
     public convenience init(client: HerdrClient, scheduler: IslandScheduler, timing: Timing = Timing()) {
         self.init(clients: [(.core, client)], scheduler: scheduler, timing: timing)
@@ -441,6 +459,7 @@ public final class AgentStore {
             onTransition?(after, before)
             advanceAfterTransition(after, from: before)
             notifyIfFinished(after, from: before)
+            trackTurn(after, from: before)
         }
         if refreshOutput, panel?.address == address {
             refreshPanelOutput()
@@ -542,6 +561,7 @@ public final class AgentStore {
                 origin: (info.labels[Self.originLabel] ?? info.labels[Self.legacyOriginLabel]).flatMap { $0.isEmpty ? nil : $0 }
             )
             agent.source = record.source
+            agent.changeSummary = changeSummaries[info.address]
             list.append((agent, record.order))
         }
         list.sort { lhs, rhs in
@@ -557,7 +577,76 @@ public final class AgentStore {
         }
         agents = list.map(\.0)
         notifyWhenDone = notifyWhenDone.filter { records[$0] != nil }
+        for address in Set(openTurns.keys).union(changeSummaries.keys).union(toplevels.keys) where records[address] == nil {
+            openTurns.removeValue(forKey: address)?.cancel()
+            changeSummaries[address] = nil
+            toplevels[address] = nil
+            summaryGeneration[address] = nil
+        }
         reconcileReminders()
+    }
+
+    // MARK: Change summary
+
+    /// A turn starts on Working / Starting (Needs you and Unknown stay inside it); it finishes on Done,
+    /// Exited, or Idle that ends it. Error closes it without a summary (Error is its own announcement).
+    private func trackTurn(_ agent: Agent, from previous: AgentState?) {
+        guard let probe = changeProbe else { return }
+        let address = agent.address
+        let directory = agent.projectPath
+        let isOpen = openTurns[address] != nil
+        switch agent.state {
+        case .working, .starting:
+            guard !isOpen else { return }
+            let generation = bumpGeneration(address)
+            let hadSummary = changeSummaries.removeValue(forKey: address) != nil
+            let baseline = Task { await probe.baseline(in: directory) }
+            openTurns[address] = baseline
+            Task {
+                guard let toplevel = await baseline.value?.toplevel, self.summaryGeneration[address] == generation else { return }
+                self.toplevels[address] = toplevel
+            }
+            if hadSummary { rebuild() }
+        case .done, .exited, .idle:
+            let wasRunning = previous == .working || previous == .starting
+            // Done → Idle / Exited is the same turn settling: keep its summary.
+            guard isOpen || (agent.state == .done && previous != nil) || wasRunning else { return }
+            let baseline = openTurns.removeValue(forKey: address)
+            let generation = bumpGeneration(address)
+            Task {
+                let base = await baseline?.value
+                let summary = await probe.summary(in: directory, since: base)
+                self.finishSummary(address, generation: generation, summary: summary)
+            }
+        case .error:
+            openTurns.removeValue(forKey: address)?.cancel()
+            bumpGeneration(address)
+        case .needsYou, .unknown:
+            break
+        }
+    }
+
+    @discardableResult
+    private func bumpGeneration(_ address: String) -> Int {
+        let next = (summaryGeneration[address] ?? 0) + 1
+        summaryGeneration[address] = next
+        return next
+    }
+
+    private func finishSummary(_ address: String, generation: Int, summary: ChangeSummary?) {
+        guard changeProbe != nil, summaryGeneration[address] == generation, records[address] != nil else { return }
+        guard var summary else {
+            changeSummaries[address] = nil
+            rebuild()
+            return
+        }
+        toplevels[address] = summary.toplevel
+        // Another agent still around in the same tree: the diff can't be pinned on this one.
+        summary.sharedTree = agents.contains {
+            $0.address != address && $0.state != .exited && toplevels[$0.address] == summary.toplevel
+        }
+        changeSummaries[address] = summary
+        rebuild()
     }
 
     // MARK: Notify when done

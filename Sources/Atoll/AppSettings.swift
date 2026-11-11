@@ -55,6 +55,8 @@ final class AppSettings {
     var notificationsEnabled: Bool { didSet { defaults.set(notificationsEnabled, forKey: "notificationsEnabled") } }
     /// Canned replies under the panel's reply box (normalized; empty = none shown).
     var quickReplies: [String] { didSet { defaults.set(quickReplies, forKey: "quickReplies") } }
+    /// After a turn finishes, show what it changed in git (+/− lines, files).
+    var changeSummary: Bool { didSet { defaults.set(changeSummary, forKey: "changeSummary") } }
     /// After answering a waiting agent in its panel, open the next waiting one.
     var autoAdvance: Bool { didSet { defaults.set(autoAdvance, forKey: "autoAdvance") } }
     /// Minutes in Needs you before one reminder (notification + bubble); 0 = off.
@@ -125,6 +127,7 @@ final class AppSettings {
         speechBubbles = defaults.object(forKey: "speechBubbles") as? Bool ?? true
         reminderMinutes = defaults.object(forKey: "reminderMinutes") as? Int ?? 5
         autoAdvance = defaults.object(forKey: "autoAdvance") as? Bool ?? true
+        changeSummary = defaults.object(forKey: "changeSummary") as? Bool ?? true
         quickReplies = QuickReplies.resolve(stored: defaults.stringArray(forKey: "quickReplies"))
         doneNotifyAgents = Set(defaults.stringArray(forKey: "doneNotifyAgents") ?? [])
         doneNotifyProjects = Set(defaults.stringArray(forKey: "doneNotifyProjects") ?? [])

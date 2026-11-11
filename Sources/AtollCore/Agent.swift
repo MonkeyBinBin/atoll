@@ -147,6 +147,8 @@ public struct Agent: Identifiable, Equatable, Sendable {
     public var origin: String?
     /// The backend this agent comes from.
     public var source: AgentSource = .core
+    /// What its last finished turn changed in git; cleared when the next turn starts.
+    public var changeSummary: ChangeSummary?
 
     public init(
         address: String, name: String? = nil, tool: AgentTool = .generic, app: String? = nil,

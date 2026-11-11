@@ -61,6 +61,7 @@ struct SettingsView: View {
                 Toggle("Decorations", isOn: $settings.decorations)
                 Toggle("Speech bubbles", isOn: $settings.speechBubbles)
                 Toggle("Auto-advance to next waiting agent", isOn: $settings.autoAdvance)
+                Toggle("Change summary when a turn finishes (git)", isOn: $settings.changeSummary)
                 Toggle("Show terminals without status", isOn: $settings.showUnreportedTerminals)
             }
 

@@ -84,6 +84,9 @@ struct HoverCardView: View {
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            if let summary = agent.changeSummary {
+                ChangeSummaryLabel(summary: summary, lineLimit: 2)
+            }
             Text(Format.abbreviatePath(agent.projectPath) + (agent.whereLabel.map { " · \($0)" } ?? ""))
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)

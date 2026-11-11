@@ -1,7 +1,8 @@
 import Foundation
 
 /// A speech bubble to pop above (below, on screen) an agent's character in the collapsed island.
-/// Carries only the state word, like notifications: it appears unprompted, possibly while screen sharing.
+/// Carries only the state word (plus, once a turn finishes, its git change counts — never names or paths):
+/// it appears unprompted, possibly while screen sharing.
 public struct AgentBubble: Equatable, Sendable {
     public var address: String
     /// The state the bubble announces; it is dismissed once the agent leaves it.

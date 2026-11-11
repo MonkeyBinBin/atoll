@@ -94,6 +94,9 @@ struct AgentPanelView: View {
                     .font(.system(size: 11))
                     .foregroundStyle(agent.state.color)
                 }
+                if let summary = agent.changeSummary {
+                    ChangeSummaryLabel(summary: summary)
+                }
             }
             Spacer()
             queueBadge

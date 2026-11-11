@@ -90,6 +90,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             store.setShowUnreportedTerminals(settings.showUnreportedTerminals)
         }
         store.autoAdvance = settings.autoAdvance
+        if (store.changeProbe != nil) != settings.changeSummary {
+            store.changeProbe = settings.changeSummary ? GitProbe() : nil
+        }
         store.reminderDelay = settings.reminderMinutes > 0 ? TimeInterval(settings.reminderMinutes * 60) : nil
         HotKeyCenter.shared.register(id: 1, settings.listHotKey) { [weak self] in
             guard let self else { return }
