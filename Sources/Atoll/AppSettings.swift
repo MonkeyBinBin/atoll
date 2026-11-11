@@ -50,6 +50,8 @@ final class AppSettings {
     var animationsEnabled: Bool { didSet { defaults.set(animationsEnabled, forKey: "animationsEnabled") } }
     /// Pixel decorations on the island (gradient, rim, stage dots, stars); off = plain black.
     var decorations: Bool { didSet { defaults.set(decorations, forKey: "decorations") } }
+    /// Speech bubble over a character when its agent stops or needs the user.
+    var speechBubbles: Bool { didSet { defaults.set(speechBubbles, forKey: "speechBubbles") } }
     var notificationsEnabled: Bool { didSet { defaults.set(notificationsEnabled, forKey: "notificationsEnabled") } }
     var doneNotifyAgents: Set<String> { didSet { defaults.set(Array(doneNotifyAgents), forKey: "doneNotifyAgents") } }
     var doneNotifyProjects: Set<String> { didSet { defaults.set(Array(doneNotifyProjects), forKey: "doneNotifyProjects") } }
@@ -87,7 +89,7 @@ final class AppSettings {
     static let keys = [
         "islandVisible", "showUnreportedTerminals", "animationsEnabled", "decorations", "notificationsEnabled",
         "doneNotifyAgents", "doneNotifyProjects", "displayID", "listHotKey", "waitingHotKey", "defaultSpace",
-        "recentFolders", "outputFontFamily", "outputFontSize", "largePanel", "messagesOnly", "wrapOverride",
+        "recentFolders", "outputFontFamily", "outputFontSize", "largePanel", "messagesOnly", "wrapOverride", "speechBubbles",
     ]
 
     /// The app was "Herdr Island" (bundle id local.herdr-island) before the rename to Atoll.
@@ -110,6 +112,7 @@ final class AppSettings {
         animationsEnabled = defaults.object(forKey: "animationsEnabled") as? Bool ?? true
         decorations = defaults.object(forKey: "decorations") as? Bool ?? true
         notificationsEnabled = defaults.object(forKey: "notificationsEnabled") as? Bool ?? true
+        speechBubbles = defaults.object(forKey: "speechBubbles") as? Bool ?? true
         doneNotifyAgents = Set(defaults.stringArray(forKey: "doneNotifyAgents") ?? [])
         doneNotifyProjects = Set(defaults.stringArray(forKey: "doneNotifyProjects") ?? [])
         displayID = UInt32(defaults.integer(forKey: "displayID"))

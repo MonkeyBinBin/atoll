@@ -49,8 +49,9 @@ struct IslandLayout: Equatable {
     var endInset: CGFloat = 0
 
     static let slot: CGFloat = 22
-    /// Always-visible list button at the outer end of the right wing.
-    static let listButtonWidth: CGFloat = 20
+    /// Always-visible buttons (launch, list) at the outer end of the right wing.
+    static let buttonWidth: CGFloat = 20
+    static let buttonsWidth: CGFloat = buttonWidth * 2
     static let padding: CGFloat = 10
     nonisolated(unsafe) static let hintFont = NSFont.systemFont(ofSize: 11, weight: .semibold)
 
@@ -82,7 +83,7 @@ struct IslandLayout: Equatable {
             left = max(left, padding)
             right = max(right, padding)
         }
-        right += listButtonWidth
+        right += buttonsWidth
         let center: CGFloat = geometry.hasNotch ? geometry.notchWidth : (left > 0 && right > 0 ? 6 : 0)
         let height = geometry.hasNotch ? geometry.barHeight : max(geometry.barHeight - 4, 22)
         let endInset = geometry.hasNotch ? 0 : max(height / 2 - padding, 0)
@@ -131,6 +132,8 @@ final class IslandModel {
     }
 
     var hover: Hover?
+    /// Where each character currently sits in the island window (top-left origin); anchors speech bubbles.
+    var characterAnchors: [String: CGRect] = [:]
     var geometry: ScreenGeometry?
     /// Measured height of the expanded content (below the top row).
     var expandedContentHeight: CGFloat = 0

@@ -35,6 +35,7 @@ final class IslandController {
     private var previousApp: NSRunningApplication?
     private var debugHook: DebugHook?
     private var hoverCard: HoverCardController?
+    private var bubbles: SpeechBubbleController?
 
     init(model: IslandModel, settings: AppSettings, client: HerdrClient) {
         self.model = model
@@ -64,6 +65,8 @@ final class IslandController {
         refreshScreen()
         debugHook = DebugHook(panel: panel, model: model)
         hoverCard = HoverCardController(model: model, island: panel, settings: settings)
+        bubbles = SpeechBubbleController(model: model, island: panel, settings: settings)
+        debugHook?.onBubble = { [weak self] address in self?.bubbles?.force(address) }
         trackChanges { [weak self] in self?.updateFrame() }
         trackChanges { [weak self] in self?.applyVisibility() }
     }
@@ -116,6 +119,12 @@ final class IslandController {
         x = min(max(x, geometry.screenFrame.minX), geometry.screenFrame.maxX - width)
         let frame = NSRect(x: x.rounded(), y: y.rounded(), width: width.rounded(.up), height: height.rounded(.up))
         if panel.frame != frame { panel.setFrame(frame, display: true) }
+        bubbles?.reposition()
+    }
+
+    /// Store transitions: speech bubbles over the characters.
+    func handleTransition(_ agent: Agent, from previous: AgentState?) {
+        bubbles?.handle(agent, from: previous)
     }
 
 

@@ -32,6 +32,7 @@ struct IslandView: View {
             IslandBackground(
                 layout: layout, width: width, expanded: expanded, offline: offline,
                 urgency: model.store.agents.first(where: { $0.state.needsAttention })?.state,
+                islets: islets(layout),
                 decorations: settings.decorations, animate: settings.animationsEnabled
             )
         )
@@ -39,6 +40,12 @@ struct IslandView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .environment(\.colorScheme, .dark)
         .animation(.snappy(duration: 0.18), value: expanded)
+    }
+
+    private func islets(_ layout: IslandLayout) -> [Islet] {
+        (layout.pinned + layout.others).compactMap { agent in
+            model.characterAnchors[agent.address].map { Islet(midX: $0.midX, feetY: $0.maxY, state: agent.state) }
+        }
     }
 
     // MARK: Top row (the collapsed island)
@@ -54,8 +61,10 @@ struct IslandView: View {
             HStack(spacing: 0) {
                 rightWing(layout)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                LaunchToggleButton(model: model)
+                    .frame(width: IslandLayout.buttonWidth)
                 ListToggleButton(model: model)
-                    .frame(width: IslandLayout.listButtonWidth)
+                    .frame(width: IslandLayout.buttonWidth)
             }
             .padding(.trailing, expanded ? 8 : layout.endInset)
             .frame(width: side ?? layout.rightWidth, alignment: .leading)
@@ -158,6 +167,28 @@ struct ListToggleButton: View {
     }
 }
 
+/// Opens / closes the launch form straight from the island; highlighted while it is shown.
+struct LaunchToggleButton: View {
+    let model: IslandModel
+    @State private var hovered = false
+
+    var body: some View {
+        let open = model.mode == .launch
+        PixelIconView(tag: open ? "launch_open" : "launch")
+            .opacity(open || hovered ? 1 : 0.7)
+            .frame(width: 18, height: 18)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                model.hover = nil
+                if open { model.collapse() } else { model.openLaunch() }
+            }
+            .onHover { hovered = $0 }
+            .accessibilityElement()
+            .accessibilityLabel(open ? "Close launch form" : "Launch agent")
+            .accessibilityAddTraits(.isButton)
+    }
+}
+
 /// One pixel character in the collapsed row. Click → that agent's panel.
 struct CharacterButton: View {
     let agent: Agent
@@ -169,7 +200,14 @@ struct CharacterButton: View {
         AgentSprite(agent: agent, store: model.store, settleAfter: model.isExpanded ? nil : 4)
         .frame(width: 16, height: 16)
         .contentShape(Rectangle())
-        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame = $0 }
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
+            frame = $0
+            if model.characterAnchors[agent.address] != $0 { model.characterAnchors[agent.address] = $0 }
+        }
+        .onDisappear {
+            // Moving between wings recreates the button; don't wipe the anchor the new one already wrote.
+            if model.characterAnchors[agent.address] == frame { model.characterAnchors[agent.address] = nil }
+        }
         .onTapGesture {
             model.hover = nil
             model.openPanel(agent.address)

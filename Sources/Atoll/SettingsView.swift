@@ -45,6 +45,7 @@ struct SettingsView: View {
                 }
                 Toggle("Animations", isOn: $settings.animationsEnabled)
                 Toggle("Decorations", isOn: $settings.decorations)
+                Toggle("Speech bubbles", isOn: $settings.speechBubbles)
                 Toggle("Show terminals without status", isOn: $settings.showUnreportedTerminals)
             }
 

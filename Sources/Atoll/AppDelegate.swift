@@ -52,6 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         store.onTransition = { [weak self] agent, from in
             self?.notifier.handle(agent, from: from)
+            self?.island.handleTransition(agent, from: from)
         }
 
         watchHerdrApp()

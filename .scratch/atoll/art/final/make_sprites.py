@@ -377,6 +377,29 @@ def ui_list_open():
     return g
 
 
+# Launch button: cream round token with a teal plus; "launch_open" lifts it and lights the plus.
+UI_LAUNCH = [
+    "............",
+    "...oooooo...",
+    "..obllllbo..",
+    ".obllkkllbo.",
+    ".oblbkkbldo.",
+    ".okkkkkkkdo.",
+    ".okkkkkkkdo.",
+    ".obbbkkbbdo.",
+    ".obbbkkbddo.",
+    "..odddddddo.",
+    "...oooooo...",
+    "............",
+]
+
+
+def ui_launch_open():
+    g = [list(r) for r in UI_LAUNCH]
+    g = [g[i + 1] if i + 1 < len(g) else ["."] * 12 for i in range(len(g))]  # lift 1px
+    return [[{"k": "Y"}.get(c, c) for c in row] for row in g]
+
+
 # ---------------------------------------------------------------- island decoration (5×5)
 # Twinkling stars for the island's empty space: dot → plus → big plus → plus.
 def twinkle(color):
@@ -564,8 +587,9 @@ def main():
         sheets.append(write_sheet(a, [(t[0], fr[t[0]]) for t in TAGS], meta, S))
     write_sheet("icons", [(n, [[list(r) for r in g]]) for n, g in ICONS.items()],
                 {n: (1, False, None, "last") for n in ICONS}, 8)
-    write_sheet("ui", [("list", [[list(r) for r in UI_LIST]]), ("list_open", [ui_list_open()])],
-                {"list": (1, False, None, "last"), "list_open": (1, False, None, "last")}, 12)
+    write_sheet("ui", [("list", [[list(r) for r in UI_LIST]]), ("list_open", [ui_list_open()]),
+                       ("launch", [[list(r) for r in UI_LAUNCH]]), ("launch_open", [ui_launch_open()])],
+                {n: (1, False, None, "last") for n in ("list", "list_open", "launch", "launch_open")}, 12)
     write_sheet("deco", [("twinkle", twinkle("l")), ("twinkle_teal", twinkle("k"))],
                 {"twinkle": (2, True, None, None), "twinkle_teal": (2, True, None, None)}, 5)
     effects = write_sheet("effects", [("send", effect_send()), ("celebrate", effect_celebrate())],

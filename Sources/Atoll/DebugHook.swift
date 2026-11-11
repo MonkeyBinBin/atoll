@@ -10,6 +10,8 @@ final class DebugHook {
     private weak var panel: NSWindow?
     private let model: IslandModel
     private var timer: Timer?
+    /// bubble <address>: force a speech bubble for that agent's current state.
+    var onBubble: ((String) -> Void)?
 
     init?(panel: NSWindow, model: IslandModel) {
         guard let path = ProcessInfo.processInfo.environment["ATOLL_DEBUG_DIR"], !path.isEmpty else { return nil }
@@ -40,6 +42,15 @@ final class DebugHook {
             case "key": if parts.count > 2 { model.store.pressKey(parts[2], on: parts[1]) }
             case "interrupt": if parts.count > 1 { model.store.pressInterrupt(parts[1]) }
             case "earliest": model.openEarliestWaiting()
+            case "bubble": if parts.count > 1 { onBubble?(parts[1]) }
+            case "hour":
+                // hour <0-24> | hour off: pin the backdrop's time of day
+                SkyClock.shared.overrideHour = parts.count > 1 ? Double(parts[1]) : nil
+            case "snapbubble":
+                if let bubble = NSApp.windows.first(where: { $0.isVisible && $0.contentView is FirstMouseHostingView<SpeechBubbleView> }) {
+                    snapshot(window: bubble, name: "bubble")
+                    try? "bubble=\(bubble.frame) island=\(panel?.frame ?? .zero) anchors=\(model.characterAnchors)".write(to: dir.appendingPathComponent("bubble.txt"), atomically: true, encoding: .utf8)
+                }
             case "burst":
                 // burst <name> <count>: one snapshot every 100 ms
                 let count = parts.count > 2 ? Int(parts[2]) ?? 10 : 10
