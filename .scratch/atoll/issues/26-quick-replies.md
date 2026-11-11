@@ -21,4 +21,4 @@
 
 - 2026-11-11（agent）：清單規則放在 AtollCore 的 `QuickReplies`（`normalize`：trim、剔除空白與重複、最多 5 個；`resolve`：沒存過時用預設值，存了空清單就維持空白），`AppSettings.quickReplies` 存整理後的結果。面板在輸入框下方顯示按鈕：點擊走 `sendQuickReply`，跟輸入框共用 `AgentStore.send` 與 `lastSent`（失敗時 Resend 可用），不動草稿；⌥-點擊把文字放進輸入框並聚焦。`⌘⇧1–5` 在 `IslandController` 以 keyCode（18、19、20、21、23）比對，經 `IslandModel.requestQuickReply` 交給面板，走同一條送出路徑。按鈕依文字寬度排列，超過 28 字截斷，help 顯示完整文字。設定的「Quick replies」區塊以有穩定 id 的列編輯（新增空白列時不會被立刻剔除，刪除或排序時 binding 也不會失效），每次變更存入整理後的清單。DebugHook 的 `post` 可加 `shift`。`QuickRepliesTests` 3 個測試，全套 160 個通過。
 - 2026-11-11（agent）：dev-run 實測（測試 agent 停在 Needs you · Question）：預設三顆按鈕與快捷鍵標示正確；長文字截斷為「run the tests and fix any f…」，但送出的是完整內容；`⌘⇧2`、`⌘⇧3`、點擊各送出一次，terminal 都收到；送出進行中按鈕停用；有草稿時用 `⌘⇧1` 送出，草稿保留。⌥-點擊（合成事件無法帶出 `NSEvent.modifierFlags` 的 Option 狀態）與設定畫面的編輯操作（區塊在視窗下方，debug hook 截不到）改由使用者對假的 Question agent 手動實測，未回報問題。
-
+- 2026-11-11（agent）：依使用者要求，預設值改為中文：`繼續`、`照你的建議做`、`跑測試，失敗就修到通過`（原為 `continue`、`yes, go ahead`、`run the tests`）。

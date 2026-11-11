@@ -3,7 +3,7 @@ import Foundation
 /// Canned replies shown under the panel's reply box (⌘⇧1–⌘⇧5).
 public enum QuickReplies {
     public static let maxCount = 5
-    public static let defaults = ["continue", "yes, go ahead", "run the tests"]
+    public static let defaults = ["繼續", "照你的建議做", "跑測試，失敗就修到通過"]
 
     /// Trimmed, non-empty, without duplicates (first wins), at most `maxCount`.
     public static func normalize(_ replies: [String]) -> [String] {

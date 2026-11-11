@@ -17,7 +17,7 @@ struct QuickRepliesTests {
 
     @Test("never saved → defaults; saved empty → stays empty")
     func resolve() {
-        #expect(QuickReplies.resolve(stored: nil) == ["continue", "yes, go ahead", "run the tests"])
+        #expect(QuickReplies.resolve(stored: nil) == ["繼續", "照你的建議做", "跑測試，失敗就修到通過"])
         #expect(QuickReplies.resolve(stored: []).isEmpty)
         #expect(QuickReplies.resolve(stored: [" x ", "x"]) == ["x"])
     }
