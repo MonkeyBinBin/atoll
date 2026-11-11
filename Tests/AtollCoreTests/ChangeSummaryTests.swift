@@ -20,7 +20,7 @@ final class FakeGitRunner: GitRunner, @unchecked Sendable {
             "rev-parse --verify --quiet HEAD": head + "\n",
             "status --porcelain --untracked-files=no": status,
             "ls-files --others --exclude-standard -z": untracked.map { $0 + "\0" }.joined(),
-            "diff --shortstat \(head)": shortstat,
+            "diff --no-ext-diff --no-textconv --shortstat \(head)": shortstat,
         ]
         return runner
     }
@@ -48,7 +48,7 @@ struct GitProbeTests {
         let base = try #require(await probe.baseline(in: "/repo/sub"))
         #expect(base == TurnBaseline(toplevel: "/repo", head: "abc123", dirty: false, untracked: ["old.txt"]))
         runner.outputs["ls-files --others --exclude-standard -z"] = "old.txt\0new.swift\0"
-        runner.outputs["diff --shortstat abc123"] = " 6 files changed, 120 insertions(+), 30 deletions(-)\n"
+        runner.outputs["diff --no-ext-diff --no-textconv --shortstat abc123"] = " 6 files changed, 120 insertions(+), 30 deletions(-)\n"
         let summary = try #require(await probe.summary(in: "/repo/sub", since: base))
         #expect(summary.baseline == .turnStart)
         #expect(summary.label == "+120 −30 · 6 files · 1 new")
@@ -61,7 +61,7 @@ struct GitProbeTests {
         let base = try #require(await probe.baseline(in: "/repo"))
         runner.outputs["rev-parse --verify --quiet HEAD"] = "def456\n"
         let summary = try #require(await probe.summary(in: "/repo", since: base))
-        #expect(runner.calls.last(where: { $0.hasPrefix("diff") }) == "diff --shortstat abc123")
+        #expect(runner.calls.last(where: { $0.hasPrefix("diff") }) == "diff --no-ext-diff --no-textconv --shortstat abc123")
         #expect(summary.text == "+8 −0 · 2 files")
     }
 
@@ -105,7 +105,7 @@ struct GitProbeTests {
         #expect(await GitProbe(runner: FakeGitRunner()).summary(in: "/tmp", since: nil) == nil)
         #expect(await GitProbe(runner: FakeGitRunner()).baseline(in: "/tmp") == nil)
         let timedOut = FakeGitRunner.repo()
-        timedOut.outputs["diff --shortstat abc123"] = nil
+        timedOut.outputs["diff --no-ext-diff --no-textconv --shortstat abc123"] = nil
         #expect(await GitProbe(runner: timedOut).summary(in: "/repo", since: nil) == nil)
         let unborn = FakeGitRunner.repo()
         unborn.outputs["rev-parse --verify --quiet HEAD"] = nil
@@ -293,5 +293,35 @@ struct RealGitTests {
         let summary = try #require(await probe.summary(in: path, since: base))
         #expect(summary.label == "+2 −1 · 1 file · 1 new")
         #expect(await probe.summary(in: FileManager.default.temporaryDirectory.path, since: nil) == nil)
+    }
+
+    @Test("repo config can't make the probe run commands", .enabled(if: ProcessGitRunner().gitPath != nil))
+    func hostileConfig() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("atoll-git-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let runner = ProcessGitRunner()
+        let path = dir.path
+        _ = await runner.run(["init", "-q"], in: path)
+        try "a\n".write(to: dir.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+        _ = await runner.run(["add", "."], in: path)
+        _ = await runner.run(["-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qm", "init"], in: path)
+        // Planted by a hostile checkout: each would write a marker file if git ran it.
+        let marker = dir.appendingPathComponent("pwned").path
+        let hook = dir.appendingPathComponent("hook.sh")
+        try "#!/bin/sh\ntouch '\(marker)'\nexit 1\n".write(to: hook, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hook.path)
+        for (key, value) in [("core.fsmonitor", hook.path), ("diff.external", hook.path), ("core.pager", hook.path)] {
+            _ = await runner.run(["config", key, value], in: path)
+        }
+        try "a\nb\n".write(to: dir.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+
+        let probe = GitProbe(runner: runner)
+        let base = try #require(await probe.baseline(in: path))
+        #expect(base.dirty)
+        let summary = try #require(await probe.summary(in: path, since: base))
+        // hook.sh was already untracked at the baseline, so nothing is new.
+        #expect(summary.text == "+1 −0 · 1 file")
+        #expect(!FileManager.default.fileExists(atPath: marker))
     }
 }

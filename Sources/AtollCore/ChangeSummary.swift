@@ -144,7 +144,7 @@ public struct GitProbe: ChangeProbing {
             guard let head = await head(directory) else { return nil }
             from = head
         }
-        guard let stat = await runner.run(["diff", "--shortstat", from], in: directory),
+        guard let stat = await runner.run(["diff", "--no-ext-diff", "--no-textconv", "--shortstat", from], in: directory),
               let untracked = await untracked(directory) else { return nil }
         let counts = ChangeSummary.parseShortstat(stat)
         return ChangeSummary(
@@ -190,6 +190,17 @@ public struct ProcessGitRunner: GitRunner {
     public let gitPath: String?
     public let timeout: TimeInterval
 
+    /// The directory is whatever an agent works in, possibly an untrusted checkout: turn off every
+    /// repo-config hook that runs a command (fsmonitor, external diff, pager, hooks) and embedded bare repos.
+    /// With `--no-optional-locks` (prepended), it also never takes the index lock an agent's own git needs.
+    public static let hardening = [
+        "-c", "core.fsmonitor=false",
+        "-c", "core.hooksPath=/dev/null",
+        "-c", "core.pager=cat",
+        "-c", "diff.external=",
+        "-c", "safe.bareRepository=explicit",
+    ]
+
     public init(timeout: TimeInterval = 2) {
         gitPath = Self.candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
         self.timeout = timeout
@@ -213,8 +224,7 @@ public struct ProcessGitRunner: GitRunner {
         let box = ProcessBox()
         let process = box.process
         process.executableURL = URL(fileURLWithPath: gitPath)
-        // Read-only: never take the index lock an agent's own git commands may need.
-        process.arguments = ["--no-optional-locks", "-C", directory] + arguments
+        process.arguments = ["--no-optional-locks"] + Self.hardening + ["-C", directory] + arguments
         var env = ProcessInfo.processInfo.environment
         env["GIT_TERMINAL_PROMPT"] = "0"
         env["GIT_OPTIONAL_LOCKS"] = "0"
