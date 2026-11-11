@@ -66,6 +66,53 @@ struct StateModelTests {
         #expect(h.store.agents.isEmpty)
     }
 
+    @Test("an exited agent leaves the island after hideEndedAfter")
+    func exitedLeaves() {
+        let h = Harness()
+        h.connect([term("t1", "working")])
+        h.client.emit(.event(seq: 11, .finished(terminal: "t1", exitCode: 0, reason: "exited", finishedMs: nil)))
+        h.scheduler.advance(by: 14)
+        #expect(h.state("t1") == .exited)
+        h.scheduler.advance(by: 1)
+        #expect(h.store.agents.isEmpty)
+    }
+
+    @Test("an agent whose status clears leaves after hideEndedAfter unless it reports again")
+    func statusClearedLeaves() {
+        let h = Harness()
+        h.connect([term("t1", "working"), term("t2", "working")])
+        h.status("t1", nil, seq: 11)
+        h.status("t2", nil, seq: 12)
+        h.scheduler.advance(by: 10)
+        h.status("t2", "working", seq: 13)
+        h.scheduler.advance(by: 10)
+        #expect(h.order == ["t2"])
+        h.status("t2", nil, seq: 14)
+        h.scheduler.advance(by: 14)
+        #expect(h.order == ["t2"], "the countdown restarts after the agent came back")
+    }
+
+    @Test("an ended agent stays while its panel is open, and leaves once it closes")
+    func endedKeptForPanel() {
+        let h = Harness()
+        h.connect([term("t1", "working")])
+        h.store.openPanel("t1")
+        h.client.emit(.event(seq: 11, .finished(terminal: "t1", exitCode: 0, reason: "exited", finishedMs: nil)))
+        h.scheduler.advance(by: 20)
+        #expect(h.state("t1") == .exited)
+        h.store.closePanel()
+        #expect(h.store.agents.isEmpty)
+    }
+
+    @Test("a snapshot terminal that exited long ago is hidden at once")
+    func oldExitHidden() {
+        let h = Harness()
+        var old = term("t1", "done", live: false)
+        old.finishedMs = UInt64((h.scheduler.now.timeIntervalSince1970 - 60) * 1000)
+        h.connect([old, term("t2", "working")])
+        #expect(h.order == ["t2"])
+    }
+
     @Test("created events add agents once they report")
     func created() {
         let h = Harness()

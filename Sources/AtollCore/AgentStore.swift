@@ -51,6 +51,8 @@ public final class AgentStore {
         public var interruptFeedbackDuration: TimeInterval = 4
         public var launchConfirmWindow: TimeInterval = 30
         public var outputLines: Int = 200
+        /// An agent that exited (or whose terminal no longer runs one) leaves the island after this long.
+        public var hideEndedAfter: TimeInterval = 15
         public init() {}
     }
 
@@ -143,6 +145,8 @@ public final class AgentStore {
         var stateSince: Date?
         var waitingSince: Date?
         var lastStatusChange: Date?
+        /// When the agent was first seen ended (Exited, or its status cleared); nil while running.
+        var endedSince: Date?
     }
 
     public let sources: [AgentSource]
@@ -165,6 +169,7 @@ public final class AgentStore {
     private var interruptTimers: [String: ScheduledAction] = [:]
     private var feedbackTimers: [String: ScheduledAction] = [:]
     private var launchTimer: ScheduledAction?
+    private var endedTimers: [String: ScheduledAction] = [:]
     /// Pending reminder per agent, and the episode (its `waitingSince`) it was scheduled for.
     private var reminderTimers: [String: ScheduledAction] = [:]
     private var reminderEpisodes: [String: Date] = [:]
@@ -469,10 +474,50 @@ public final class AgentStore {
     }
 
     private func isVisible(_ record: Record) -> Bool {
-        record.lastKnownApp != nil || launching.contains(record.info.address) || showUnreportedTerminals
+        if showUnreportedTerminals || launching.contains(record.info.address) { return true }
+        guard record.lastKnownApp != nil else { return false }
+        guard let ended = record.endedSince, panel?.address != record.info.address else { return true }
+        return scheduler.now.timeIntervalSince(ended) < timing.hideEndedAfter
+    }
+
+    /// The terminal no longer runs its agent: it exited, or the source cleared its status.
+    /// A lost terminal may come back, so it doesn't count.
+    private func hasEnded(_ record: Record) -> Bool {
+        guard record.lastKnownApp != nil, !launching.contains(record.info.address) else { return false }
+        return record.info.state == "finished" || (record.info.status == nil && !record.lost)
+    }
+
+    /// Stamps `endedSince` and keeps one timer per ended agent to drop it from the list on time.
+    private func reconcileEnded() {
+        let now = scheduler.now
+        for (address, record) in records {
+            if hasEnded(record) {
+                guard record.endedSince == nil else { continue }
+                // An exit reported with its time (e.g. in a snapshot after a restart) counts from then.
+                let since = record.info.state == "finished"
+                    ? record.info.finishedMs.map { Date(timeIntervalSince1970: Double($0) / 1000) } ?? now
+                    : now
+                records[address]?.endedSince = min(since, now)
+                let remaining = timing.hideEndedAfter - now.timeIntervalSince(min(since, now))
+                endedTimers[address]?.cancel()
+                endedTimers[address] = remaining > 0
+                    ? scheduler.schedule(after: remaining) { [weak self] in
+                        self?.endedTimers[address] = nil
+                        self?.rebuild()
+                    }
+                    : nil
+            } else if record.endedSince != nil {
+                records[address]?.endedSince = nil
+                endedTimers.removeValue(forKey: address)?.cancel()
+            }
+        }
+        for address in endedTimers.keys where records[address] == nil {
+            endedTimers.removeValue(forKey: address)?.cancel()
+        }
     }
 
     private func rebuild() {
+        reconcileEnded()
         var list: [(Agent, Int)] = []
         for record in records.values where isVisible(record) {
             let info = record.info
@@ -595,8 +640,11 @@ public final class AgentStore {
 
     public func closePanel() {
         outputRequest += 1
+        let wasOpen = panel != nil
         panel = nil
         disarmAdvance()
+        // An ended agent kept on screen for its open panel may leave now.
+        if wasOpen { rebuild() }
     }
 
     // MARK: Auto-advance

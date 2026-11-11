@@ -260,6 +260,7 @@ Status: ready-for-agent
 - 事件格式 `{"method":"event","params":{"seq","terminal","type","data"}}`；`status` 事件帶完整 `status`（可為 null），`turn` 事件為 `{state, turn}`，`created` 帶完整 terminal；heartbeat 為 `{"method":"heartbeat","params":{"seq"}}`。快速連續的狀態可能被合併，不保證每次轉換都有事件，因此以 snapshot／created 的資料為底。
 - OSC 7501 格式：`ESC ] 7501 ; state=<s>:kind=<k>:app=<a>:msg=<m> BEL`。
 - live 且曾回報、但 `status` 變為 null（例如 agent 退回 shell）→ 狀態未知。
+- 已結束的 agent（Exited，或曾回報、`status` 變為 null 且非 lost）停留 15 秒後從動態島隱藏；期間重新回報則取消。其面板開著時保留到面板關閉。snapshot 帶的 `finished_ms` 已超過 15 秒者直接隱藏。terminal 本身仍在，「Show terminals without status」打開時照常顯示。
 - 啟動前就已 finished、從未在本次 session 看過 `app` 的 terminal 預設不顯示（設定「Show terminals without status」打開時以 Exited 顯示）。
 
 ## Testing Decisions
