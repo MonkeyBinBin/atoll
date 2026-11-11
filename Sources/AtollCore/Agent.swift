@@ -157,6 +157,8 @@ public struct Agent: Identifiable, Equatable, Sendable {
     public var source: AgentSource = .core
     /// What its last finished turn changed in git; cleared when the next turn starts.
     public var changeSummary: ChangeSummary?
+    /// Why it waits, read once from its screen when the source gave no `statusMessage`; Needs you only.
+    public var waitingPreview: WaitingPreview?
     /// Other active agents in the same git working tree (addresses); empty unless this one is active too.
     public var sharedTreeWith: [String] = []
 

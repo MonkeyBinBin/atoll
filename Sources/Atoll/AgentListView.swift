@@ -115,6 +115,9 @@ struct AgentCard: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
+                if let preview = agent.waitingPreview {
+                    WaitingPreviewLabel(preview: preview)
+                }
                 if let summary = agent.changeSummary {
                     ChangeSummaryLabel(summary: summary)
                 }
@@ -175,5 +178,27 @@ struct SharedTreeLabel: View {
                 .lineLimit(lineLimit)
                 .help("Several active agents in \(Format.abbreviatePath(agent.projectPath))'s git working tree can overwrite or commit each other's changes. Separate worktrees avoid that.")
         }
+    }
+}
+
+/// What a Needs-you agent asks, from its screen: "Bash: rm -rf dist" over its description / options.
+struct WaitingPreviewLabel: View {
+    let preview: WaitingPreview
+    var lineLimit = 1
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(preview.title)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.primary.opacity(0.9))
+                .lineLimit(lineLimit)
+            if let detail = preview.detail {
+                Text(detail)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(lineLimit)
+            }
+        }
+        .help(preview.help)
     }
 }

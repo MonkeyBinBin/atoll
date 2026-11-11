@@ -86,6 +86,9 @@ struct HoverCardView: View {
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            if let preview = agent.waitingPreview {
+                WaitingPreviewLabel(preview: preview, lineLimit: 2)
+            }
             if let summary = agent.changeSummary {
                 ChangeSummaryLabel(summary: summary, lineLimit: 2)
             }

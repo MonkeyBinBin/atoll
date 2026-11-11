@@ -53,6 +53,9 @@ public final class AgentStore {
         public var outputLines: Int = 200
         /// An agent that exited (or whose terminal no longer runs one) leaves the island after this long.
         public var hideEndedAfter: TimeInterval = 15
+        /// After entering Needs you, wait this long for the dialog to render before reading the screen.
+        public var previewDelay: TimeInterval = 0.6
+        public var previewLines: Int = 80
         public init() {}
     }
 
@@ -214,6 +217,11 @@ public final class AgentStore {
     private var toplevels: [String: String] = [:]
     /// Bumped per turn start / finish so a late git result never lands on a newer turn.
     private var summaryGeneration: [String: Int] = [:]
+    /// Needs-you episode (its `waitingSince`) whose screen was read, or is being read, per agent.
+    private var previewEpisodes: [String: Date] = [:]
+    /// Waiting previews for the current episode only; dropped the moment the agent leaves Needs you.
+    private var previews: [String: WaitingPreview] = [:]
+    private var previewTimers: [String: ScheduledAction] = [:]
     /// Working-tree top level per project path ("" = not in a repo). Resolved once per path, never polled.
     private var treeCache: [String: String] = [:]
     private var pendingTrees: Set<String> = []
@@ -583,6 +591,9 @@ public final class AgentStore {
             )
             agent.source = record.source
             agent.changeSummary = changeSummaries[info.address]
+            if state.isNeedsYou, let since = agent.waitingSince, previewEpisodes[info.address] == since {
+                agent.waitingPreview = previews[info.address]
+            }
             list.append((agent, record.order))
         }
         list.sort { lhs, rhs in
@@ -607,8 +618,48 @@ public final class AgentStore {
             summaryGeneration[address] = nil
         }
         reconcileReminders()
+        reconcilePreviews()
         for address in newcomers {
             if let agent = agent(address) { onSharedTree?(agent) }
+        }
+    }
+
+    // MARK: Waiting preview
+
+    /// One screen read per Needs-you episode, only when the source didn't say why (`statusMessage`).
+    /// Leaving Needs you (or a new episode) drops the preview: the only screen text kept with the panel closed.
+    private func reconcilePreviews() {
+        var waiting: [String: Agent] = [:]
+        for agent in agents where agent.state.isNeedsYou && agent.waitingSince != nil {
+            waiting[agent.address] = agent
+        }
+        for (address, episode) in previewEpisodes where waiting[address]?.waitingSince != episode {
+            previewEpisodes[address] = nil
+            previews[address] = nil
+            previewTimers.removeValue(forKey: address)?.cancel()
+        }
+        for agent in waiting.values where previewEpisodes[agent.address] == nil && agent.statusMessage == nil {
+            guard let episode = agent.waitingSince else { continue }
+            let address = agent.address
+            previewEpisodes[address] = episode
+            previewTimers[address] = scheduler.schedule(after: timing.previewDelay) { [weak self] in
+                self?.previewTimers[address] = nil
+                self?.readPreview(address, episode: episode)
+            }
+        }
+    }
+
+    private func readPreview(_ address: String, episode: Date) {
+        guard let agent = agent(address), agent.waitingSince == episode, let kind = agent.state.blockedKind else { return }
+        let lines = timing.previewLines
+        let tool = agent.tool
+        Task { [client = client(for: address)] in
+            // A failed read just means no preview; never retried within the episode.
+            guard let output = try? await client.read(terminal: address, lines: lines),
+                  self.previewEpisodes[address] == episode,
+                  let preview = WaitingPreview.extract(from: output.text, tool: tool, kind: kind) else { return }
+            self.previews[address] = preview
+            self.rebuild()
         }
     }
 

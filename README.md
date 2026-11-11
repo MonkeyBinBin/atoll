@@ -14,6 +14,7 @@
 - **環礁場景**：動態島背景是一片環礁，每個 agent 站在自己的沙洲上，海浪流動、偶爾有魚跳出水面；等待你或出錯的 agent 腳下水面會映出黃光／紅光。天空、海水與日月依本機時間從黎明、白天、黃昏變化到深夜。設定裡關掉 Decorations 即回到純黑。
 - **清單**：點動態島空白處或按 `⌥⌘A` 展開，依「等待使用者 > 錯誤 > 狀態未知 > 執行中 > 完成／閒置」排序。`↑↓` 選擇、`Enter` 打開、`⌘1`–`⌘9` 直接跳、`Esc` 逐層返回。
 - **互動面板**：看近期終端機輸出、傳送訊息、回答 `blocked: question`、用按鍵排回應 permission prompt、中斷目前任務（1.5 秒內二次確認），或一鍵切回原終端機接手。送出狀態明確區分 Delivered / Agent started / Sent · unconfirmed / Failed，永不自動重送。回應完一個等待中的 agent、它確實離開等待後，面板自動切到下一個等最久的 agent（輸入框有未送出文字時不切），全部處理完顯示 All clear；標題列顯示還有幾個在等，`⌘]` 手動跳下一個。可在設定關閉自動切換。輸入框下方有快速回覆按鈕（預設「繼續」「照你的建議做」「跑測試，失敗就修到通過」，設定中可編輯，最多 5 個），點擊或 `⌘⇧1`–`⌘⇧5` 直接送出，⌥-點擊先放進輸入框修改。
+- **等待原因預覽**：清單列與 hover card 直接顯示 Needs you 的 agent 在等什麼，例如 `Bash: touch hello.txt`、Codex 的 `Run: …` 加上理由，或問題與選項，多數情況不用打開面板就能決定怎麼回。herdr-core 對 Claude Code 會提供等待原因，直接使用；herdr CLI、cmux，以及 Codex（任何來源都沒有）則在進入 Needs you 後讀一次畫面擷取，只認得 Claude Code 與 Codex 已知的對話框版面，認不得就不顯示。
 - **成果摘要**：agent 跑完一個回合（Done／Exited，或從 Working 直接停成 Idle）時，在它的專案目錄用 git 算出這個回合的變更量，例如 `+120 −30 · 6 files · 1 new`，顯示在泡泡、清單、hover card 與面板標題列。以回合開始時的 commit 為基準，agent 自己 commit 的也算進去；回合開始時已有未 commit 的修改會標「incl. earlier edits」，Atoll 沒看到回合開始時標「uncommitted」，同一個 working tree 還有其他 agent 時標「shared tree」。git 只做唯讀查詢（`--no-optional-locks`，每個指令 2 秒逾時），非 git 目錄不顯示。可在設定關閉。
 - **共用 working tree 警示**：兩個以上活動中（Starting／Working／Needs you／Error）的 agent 在同一個 git working tree 時，清單、hover card 與面板標題列標示「Shares working tree with …」，提醒改用各自的 worktree。不同的 `git worktree` 不會被誤判；每個專案路徑只用 `git rev-parse --show-toplevel` 查一次，不輪詢。新的 agent 加入時冒一次泡泡，同一組 agent 之後輪流開始、結束回合不會重複冒；整組少於兩個 agent 後重新計算。可在設定關閉。
 - **啟動**：點動態島上的「＋」（或清單底部的 Launch agent），透過 Herdr 開新的 Claude Code、Codex 或 herdr-core template agent。
@@ -21,7 +22,7 @@
 - **全螢幕與多螢幕**：動態島所在螢幕有 app 全螢幕時，預設只顯示等待你或出錯的 agent，沒有就整個隱藏（可改為照常顯示或一律隱藏）；快捷鍵仍可展開清單。螢幕可選 Follow mouse，動態島跟著游標換螢幕，展開時不移動。
 - **通知**：agent 等待你或出錯時發 macOS 通知，內容只有「工具 · 專案名」；`⌃⌥⌘A` 直接打開最早開始等待的 agent。等待超過設定時間（預設 5 分鐘，可關閉）仍沒處理會再提醒一次，泡泡也再冒一次。面板上的鈴鐺可設定「這次跑完時通知我」，通知一次後自動關閉。
 - **誠實的狀態**：來源斷線或超過 heartbeat 期限時，動態島轉灰並標示「狀態未知」，不從畫面文字猜測狀態。
-- **隱私**：只和本機的 herdr-core、herdr CLI、cmux 溝通；近期輸出只在面板開著時留在記憶體。
+- **隱私**：只和本機的 herdr-core、herdr CLI、cmux 溝通；近期輸出只在面板開著時留在記憶體。唯一例外是等待原因預覽：只保留擷取出來的最多 2 行，agent 離開 Needs you 就丟棄。
 
 | 清單 | 互動面板 |
 | --- | --- |
