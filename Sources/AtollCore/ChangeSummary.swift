@@ -191,12 +191,14 @@ public struct ProcessGitRunner: GitRunner {
     public let timeout: TimeInterval
 
     /// The directory is whatever an agent works in, possibly an untrusted checkout: turn off every
-    /// repo-config hook that runs a command (fsmonitor, external diff, pager, hooks) and embedded bare repos.
+    /// config hook that runs a command (fsmonitor, external diff, pager, hooks), the user-level attributes
+    /// file, and embedded bare repos. Filter drivers are disabled per run (see `filterOverrides`).
     /// With `--no-optional-locks` (prepended), it also never takes the index lock an agent's own git needs.
     public static let hardening = [
         "-c", "core.fsmonitor=false",
         "-c", "core.hooksPath=/dev/null",
         "-c", "core.pager=cat",
+        "-c", "core.attributesFile=/dev/null",
         "-c", "diff.external=",
         "-c", "safe.bareRepository=explicit",
     ]
@@ -211,20 +213,47 @@ public struct ProcessGitRunner: GitRunner {
         let timeout = timeout
         return await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
-                continuation.resume(returning: Self.runBlocking(gitPath, arguments, in: directory, timeout: timeout))
+                continuation.resume(returning: Self.runHardened(gitPath, arguments, in: directory, timeout: timeout))
             }
         }
+    }
+
+    /// `.gitattributes` in the checkout can route any file through a filter driver whose clean / process
+    /// command `status` and `diff` run while hashing modified files. A driver only runs if some config
+    /// defines it, so every defined one is blanked out. If they can't be listed, nothing runs.
+    static func filterOverrides(_ configKeys: String) -> [String] {
+        var names: [String] = []
+        for key in configKeys.split(whereSeparator: \.isNewline) {
+            // filter.<name>.<variable>; the name itself may contain dots.
+            guard key.hasPrefix("filter."), let lastDot = key.lastIndex(of: "."), lastDot > key.index(key.startIndex, offsetBy: 6) else { continue }
+            let name = String(key[key.index(key.startIndex, offsetBy: 7)..<lastDot])
+            if !names.contains(name) { names.append(name) }
+        }
+        return names.flatMap { name in
+            ["clean=", "smudge=", "process=", "required=false"].flatMap { ["-c", "filter.\(name).\($0)"] }
+        }
+    }
+
+    private static func runHardened(_ gitPath: String, _ arguments: [String], in directory: String, timeout: TimeInterval) -> String? {
+        let base = ["--no-optional-locks"] + hardening + ["-C", directory]
+        // Exit 1 = no filter keys at all.
+        guard let listed = execute(gitPath, base + ["config", "--name-only", "--get-regexp", "^filter\\."], timeout: timeout),
+              listed.status == 0 || listed.status == 1 else { return nil }
+        guard let result = execute(gitPath, base + filterOverrides(listed.output) + arguments, timeout: timeout),
+              result.status == 0 else { return nil }
+        return result.output
     }
 
     private final class ProcessBox: @unchecked Sendable {
         let process = Process()
     }
 
-    private static func runBlocking(_ gitPath: String, _ arguments: [String], in directory: String, timeout: TimeInterval) -> String? {
+    /// nil when it couldn't start or was killed by the timeout.
+    private static func execute(_ gitPath: String, _ arguments: [String], timeout: TimeInterval) -> (status: Int32, output: String)? {
         let box = ProcessBox()
         let process = box.process
         process.executableURL = URL(fileURLWithPath: gitPath)
-        process.arguments = ["--no-optional-locks"] + Self.hardening + ["-C", directory] + arguments
+        process.arguments = arguments
         var env = ProcessInfo.processInfo.environment
         env["GIT_TERMINAL_PROMPT"] = "0"
         env["GIT_OPTIONAL_LOCKS"] = "0"
@@ -240,7 +269,7 @@ public struct ProcessGitRunner: GitRunner {
         }
         let data = out.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
-        guard process.terminationReason == .exit, process.terminationStatus == 0 else { return nil }
-        return String(decoding: data, as: UTF8.self)
+        guard process.terminationReason == .exit else { return nil }
+        return (process.terminationStatus, String(decoding: data, as: UTF8.self))
     }
 }

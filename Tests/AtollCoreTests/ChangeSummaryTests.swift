@@ -267,6 +267,20 @@ struct TurnTrackingTests {
     }
 }
 
+@Suite("Change summary: filter overrides")
+struct FilterOverrideTests {
+    @Test("every defined filter driver is blanked, names with dots included")
+    func overrides() {
+        let keys = "filter.lfs.clean\nfilter.lfs.smudge\nfilter.lfs.required\nfilter.dot.ted.process\n"
+        let args = ProcessGitRunner.filterOverrides(keys)
+        #expect(args.filter { $0 != "-c" } == [
+            "filter.lfs.clean=", "filter.lfs.smudge=", "filter.lfs.process=", "filter.lfs.required=false",
+            "filter.dot.ted.clean=", "filter.dot.ted.smudge=", "filter.dot.ted.process=", "filter.dot.ted.required=false",
+        ])
+        #expect(ProcessGitRunner.filterOverrides("").isEmpty)
+    }
+}
+
 @Suite("Change summary: real git")
 struct RealGitTests {
     @Test("a turn in a temporary repo", .enabled(if: ProcessGitRunner().gitPath != nil))
@@ -311,16 +325,21 @@ struct RealGitTests {
         let hook = dir.appendingPathComponent("hook.sh")
         try "#!/bin/sh\ntouch '\(marker)'\nexit 1\n".write(to: hook, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hook.path)
-        for (key, value) in [("core.fsmonitor", hook.path), ("diff.external", hook.path), ("core.pager", hook.path)] {
+        for (key, value) in [
+            ("core.fsmonitor", hook.path), ("diff.external", hook.path), ("core.pager", hook.path),
+            ("filter.evil.clean", hook.path), ("filter.evil.process", hook.path), ("filter.dot.ted.clean", hook.path),
+        ] {
             _ = await runner.run(["config", key, value], in: path)
         }
+        try "*.txt filter=evil\n*.md filter=dot.ted\n".write(to: dir.appendingPathComponent(".gitattributes"), atomically: true, encoding: .utf8)
+        try "*.txt filter=evil\n".write(to: dir.appendingPathComponent(".git/info/attributes"), atomically: true, encoding: .utf8)
         try "a\nb\n".write(to: dir.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
 
         let probe = GitProbe(runner: runner)
         let base = try #require(await probe.baseline(in: path))
         #expect(base.dirty)
         let summary = try #require(await probe.summary(in: path, since: base))
-        // hook.sh was already untracked at the baseline, so nothing is new.
+        // hook.sh and .gitattributes were already untracked at the baseline, so nothing is new.
         #expect(summary.text == "+1 −0 · 1 file")
         #expect(!FileManager.default.fileExists(atPath: marker))
     }
