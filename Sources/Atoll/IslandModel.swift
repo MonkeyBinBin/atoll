@@ -75,7 +75,7 @@ struct IslandLayout: Equatable {
         let rightMax = min(maxSide, 8 * slot + padding * 2)
         var right = others.isEmpty ? 0 : min(othersWidth, rightMax)
         if agents.isEmpty, offlineText == nil {
-            // Minimal capsule with one idle character.
+            // Minimal capsule with the empty-island icon.
             right = slot + padding * 2
             left = geometry.hasNotch ? padding : 0
         }

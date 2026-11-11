@@ -35,13 +35,22 @@
     "h": 12
    },
    "duration": 1000
+  },
+  {
+   "frame": {
+    "x": 48,
+    "y": 0,
+    "w": 12,
+    "h": 12
+   },
+   "duration": 1000
   }
  ],
  "meta": {
   "app": "atoll art/final/make_sprites.py (B / Toy Chunky)",
   "image": "ui.png",
   "size": {
-   "w": 48,
+   "w": 60,
    "h": 12
   },
   "frameSize": {
@@ -83,6 +92,14 @@
     "name": "launch_open",
     "from": 3,
     "to": 3,
+    "direction": "forward",
+    "loop": false,
+    "hold": "last"
+   },
+   {
+    "name": "empty",
+    "from": 4,
+    "to": 4,
     "direction": "forward",
     "loop": false,
     "hold": "last"

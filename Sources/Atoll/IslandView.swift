@@ -94,8 +94,9 @@ struct IslandView: View {
     @ViewBuilder
     private func rightWing(_ layout: IslandLayout) -> some View {
         if model.store.agents.isEmpty && model.store.isLive {
-            SpriteView(tool: .generic, tag: "idle", colorIndex: 0, animate: settings.animationsEnabled, settleAfter: 0)
-                .padding(.horizontal, IslandLayout.padding + 3)
+            PixelIconView(tag: "empty")
+                .frame(width: 18, height: 18)
+                .padding(.horizontal, IslandLayout.padding + 2)
                 .frame(maxHeight: .infinity)
                 .accessibilityLabel("No agents")
         } else if layout.rightScrolls {

@@ -400,6 +400,23 @@ def ui_launch_open():
     return [[{"k": "Y"}.get(c, c) for c in row] for row in g]
 
 
+# Empty island: a deserted atoll (sand, palm, surf) shown when there are no agents.
+UI_EMPTY = [
+    "............",
+    "....kkk.kk..",
+    "...kkkkkkkk.",
+    "..kk..dk..k.",
+    "......d.....",
+    ".....d......",
+    ".....d......",
+    "...oodooo...",
+    "..oblllbbo..",
+    ".obbbbbbddo.",
+    "zzoooooooozz",
+    "..zz....zz..",
+]
+
+
 # ---------------------------------------------------------------- island decoration (5×5)
 # Twinkling stars for the island's empty space: dot → plus → big plus → plus.
 def twinkle(color):
@@ -588,8 +605,9 @@ def main():
     write_sheet("icons", [(n, [[list(r) for r in g]]) for n, g in ICONS.items()],
                 {n: (1, False, None, "last") for n in ICONS}, 8)
     write_sheet("ui", [("list", [[list(r) for r in UI_LIST]]), ("list_open", [ui_list_open()]),
-                       ("launch", [[list(r) for r in UI_LAUNCH]]), ("launch_open", [ui_launch_open()])],
-                {n: (1, False, None, "last") for n in ("list", "list_open", "launch", "launch_open")}, 12)
+                       ("launch", [[list(r) for r in UI_LAUNCH]]), ("launch_open", [ui_launch_open()]),
+                       ("empty", [[list(r) for r in UI_EMPTY]])],
+                {n: (1, False, None, "last") for n in ("list", "list_open", "launch", "launch_open", "empty")}, 12)
     write_sheet("deco", [("twinkle", twinkle("l")), ("twinkle_teal", twinkle("k"))],
                 {"twinkle": (2, True, None, None), "twinkle_teal": (2, True, None, None)}, 5)
     effects = write_sheet("effects", [("send", effect_send()), ("celebrate", effect_celebrate())],
