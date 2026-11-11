@@ -4,16 +4,18 @@
 
 ![動態島收合態](docs/screenshots/island.png)
 
-同時跑多個 agent 時，不用逐一切視窗查看誰在工作、誰在等你回覆、誰出錯了：每個 agent 是一個小機器人，需要注意的永遠釘在最顯眼的位置。
+同時跑多個 agent 時，不用逐一切視窗查看誰在工作、誰在等你回覆、誰出錯了：每個 agent 是站在自己小沙洲上的小機器人，需要注意的永遠釘在最顯眼的位置。
 
 > 自用工具：ad-hoc 簽章、未 notarize，不對外發佈。
 
 ## 功能
 
 - **監看**：每個 agent 一個角色，外觀代表工具、個體色在 session 內固定；動畫之外一律附圖示與文字（Working / Needs you / Done / Idle / Error / Exited / Unknown）。等待使用者與錯誤的 agent 釘在左翼，其餘依優先級排列。
+- **環礁場景**：動態島背景是一片環礁，每個 agent 站在自己的沙洲上，海浪流動、偶爾有魚跳出水面；等待你或出錯的 agent 腳下水面會映出黃光／紅光。天空、海水與日月依本機時間從黎明、白天、黃昏變化到深夜。設定裡關掉 Decorations 即回到純黑。
 - **清單**：點動態島空白處或按 `⌥⌘A` 展開，依「等待使用者 > 錯誤 > 狀態未知 > 執行中 > 完成／閒置」排序。`↑↓` 選擇、`Enter` 打開、`⌘1`–`⌘9` 直接跳、`Esc` 逐層返回。
 - **互動面板**：看近期終端機輸出、傳送訊息、回答 `blocked: question`、用按鍵排回應 permission prompt、中斷目前任務（1.5 秒內二次確認），或一鍵切回原終端機接手。送出狀態明確區分 Delivered / Agent started / Sent · unconfirmed / Failed，永不自動重送。
-- **啟動**：從動態島透過 Herdr 開新的 Claude Code、Codex 或 herdr-core template agent。
+- **啟動**：點動態島上的「＋」（或清單底部的 Launch agent），透過 Herdr 開新的 Claude Code、Codex 或 herdr-core template agent。
+- **對話泡泡**：agent 停下來（Done／Idle／Exited）、等待你或出錯時，該角色下方冒出約 5 秒的狀態泡泡；一次一個，等待與錯誤優先，點泡泡直接打開面板。可在設定關閉。
 - **通知**：agent 等待你或出錯時發 macOS 通知，內容只有「工具 · 專案名」；`⌃⌥⌘A` 直接打開最早開始等待的 agent。
 - **誠實的狀態**：來源斷線或超過 heartbeat 期限時，動態島轉灰並標示「狀態未知」，不從畫面文字猜測狀態。
 - **隱私**：只和本機的 herdr-core、herdr CLI、cmux 溝通；近期輸出只在面板開著時留在記憶體。
@@ -25,6 +27,10 @@
 | 啟動 agent | 設定 |
 | --- | --- |
 | ![啟動表單](docs/screenshots/launch.png) | ![設定視窗](docs/screenshots/settings.png) |
+
+| 對話泡泡 | 一天的環礁（黎明 → 白天 → 正午 → 黃昏 → 深夜） |
+| --- | --- |
+| ![角色下方的狀態泡泡](docs/screenshots/bubble.png) | ![依時間變化的背景](docs/screenshots/daycycle.png) |
 
 角色是原生 16×16 的像素小機器人（Claude Code／Codex／通用三種頭型），每個狀態有對應動畫：
 
