@@ -8,6 +8,8 @@ and QA previews + palette into this folder (art/final/).
 Accessory pixels are painted with key colors (#FF00FF light, #B000B0 dark); the app swaps
 them for the agent's individual color pair at load time.
 
+Effects come from pixelfx/effects.frames.json (regenerate with pixelfx/fetch.sh + pixelfx/render.mjs).
+
 Run: python3 .scratch/atoll/art/final/make_sprites.py
 """
 import json
@@ -428,39 +430,21 @@ def twinkle(color):
 
 
 # ---------------------------------------------------------------- effects (ticket 17, 16×16 overlays)
-def effect_send():
-    """A little message card flies out from the right hand toward the top-right."""
-    path = [(12, 10), (13, 8), (13, 6), (14, 4), (14, 2), (15, 0)]
-    frames = []
-    for i, (x, y) in enumerate(path):
-        g = [["."] * S for _ in range(S)]
-        put(g, [(x - 1, y), (x, y), (x - 1, y + 1), (x, y + 1)], "l")
-        put(g, [(x - 1, y)], "o") if i % 2 else None
-        if i > 0:
-            px, py = path[i - 1]
-            put(g, [(px - 1, py + 1)], "k")
-        frames.append(g)
-    return frames
+# Generated with pixelfx core (MIT) by pixelfx/render.mjs from pixelfx/fx/{send,celebrate}.js and
+# quantized to PALETTE keys; this script only packs the committed result into the app sheet.
+EFFECTS_SRC = HERE / "pixelfx" / "effects.frames.json"
 
 
-def effect_celebrate():
-    """Four-point sparkle burst expanding from the head, then fading."""
-    frames = []
-    for radius in (2, 4, 6, 7, 8, 8):
-        g = [["."] * S for _ in range(S)]
-        cx, cy = 8, 6
-        pts = [(cx - radius, cy), (cx + radius - 1, cy), (cx, cy - radius), (cx - 1, cy - radius),
-               (cx - radius + 1, cy - radius + 2), (cx + radius - 2, cy - radius + 2)]
-        ch = "r" if radius < 8 else "Y"
-        put(g, pts, ch)
-        if radius == 8 and frames and len(frames) == 5:
-            g = [["."] * S for _ in range(S)]
-            put(g, pts[:2], "Y")
-        frames.append(g)
-    return frames
+def load_effects():
+    data = json.loads(EFFECTS_SRC.read_text())
+    tags, tag_meta = [], {}
+    for name in ("send", "celebrate"):
+        frames = [[list(row) for row in f] for f in data[name]["frames"]]
+        assert all(len(f) == S and all(len(r) == S for r in f) for f in frames), f"{name}: frames must be {S}×{S}"
+        tags.append((name, frames))
+        tag_meta[name] = (data[name]["fps"], False, None, None)
+    return tags, tag_meta
 
-
-EFFECT_TAGS = [("send", 12, False, None, None), ("celebrate", 10, False, None, None)]
 
 # ---------------------------------------------------------------- rendering
 
@@ -610,8 +594,7 @@ def main():
                 {n: (1, False, None, "last") for n in ("list", "list_open", "launch", "launch_open", "empty")}, 12)
     write_sheet("deco", [("twinkle", twinkle("l")), ("twinkle_teal", twinkle("k"))],
                 {"twinkle": (2, True, None, None), "twinkle_teal": (2, True, None, None)}, 5)
-    effects = write_sheet("effects", [("send", effect_send()), ("celebrate", effect_celebrate())],
-                          {n: (fps, loop, nxt, hold) for n, fps, loop, nxt, hold in EFFECT_TAGS}, S)
+    effects = write_sheet("effects", *load_effects(), S)
     preview(sheets, HERE / "qa-all-tags@8x.png")
     scale(on_black(effects), 8).save(HERE / "qa-effects@8x.png")
     island_preview(HERE / "island.png")

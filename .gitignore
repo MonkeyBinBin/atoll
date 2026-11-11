@@ -4,3 +4,6 @@ build/
 *.xcodeproj
 DerivedData/
 .DS_Store
+
+# pixelfx checkout fetched by .scratch/atoll/art/final/pixelfx/fetch.sh
+.scratch/atoll/art/final/pixelfx/vendor/

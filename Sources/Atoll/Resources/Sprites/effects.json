@@ -61,7 +61,7 @@
     "w": 16,
     "h": 16
    },
-   "duration": 100
+   "duration": 83
   },
   {
    "frame": {
@@ -70,7 +70,7 @@
     "w": 16,
     "h": 16
    },
-   "duration": 100
+   "duration": 83
   },
   {
    "frame": {
@@ -79,7 +79,7 @@
     "w": 16,
     "h": 16
    },
-   "duration": 100
+   "duration": 83
   },
   {
    "frame": {
@@ -88,7 +88,7 @@
     "w": 16,
     "h": 16
    },
-   "duration": 100
+   "duration": 83
   },
   {
    "frame": {
@@ -97,7 +97,7 @@
     "w": 16,
     "h": 16
    },
-   "duration": 100
+   "duration": 83
   },
   {
    "frame": {
@@ -106,14 +106,23 @@
     "w": 16,
     "h": 16
    },
-   "duration": 100
+   "duration": 83
+  },
+  {
+   "frame": {
+    "x": 192,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "duration": 83
   }
  ],
  "meta": {
   "app": "atoll art/final/make_sprites.py (B / Toy Chunky)",
   "image": "effects.png",
   "size": {
-   "w": 192,
+   "w": 208,
    "h": 16
   },
   "frameSize": {
@@ -130,14 +139,14 @@
    {
     "name": "send",
     "from": 0,
-    "to": 5,
+    "to": 4,
     "direction": "forward",
     "loop": false
    },
    {
     "name": "celebrate",
-    "from": 6,
-    "to": 11,
+    "from": 5,
+    "to": 12,
     "direction": "forward",
     "loop": false
    }

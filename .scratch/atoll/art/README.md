@@ -145,8 +145,23 @@ python3 .scratch/atoll/art/final/make_sprites.py
 - `icons.png`（8×8）：`question`（對話框＋?）、`permission`（對話框＋勾選框）、`auth`（鎖頭），黃底梅紫線，疊在角色左上。
 - `ui.png`（12×12 UI 圖示）：`list`（清單板：奶油紙、teal 圓點、深色線條）與 `list_open`（往上抬 1px、圓點轉等待黃），用於動態島右端的清單按鈕；`launch`／`launch_open` 為啟動按鈕；`empty`（無人小島：沙丘、椰子樹、浪花）在沒有 agent 時取代角色顯示。不使用系統圖示。
 - `deco.png`（5×5）：`twinkle`（奶油色）與 `twinkle_teal` 閃爍星星（點 → 十字 → 大十字 → 十字），只出現在展開時頂列左右兩端的空白處。動態島其餘裝飾（頂部純黑 → 底部深梅紫 `#1C0E1E` 的漸層、角色腳下的梅紫舞台點線、依最急狀態著色的 1px 底緣）由 app 以同一色盤繪製；設定的 Decorations 可關閉，回到純黑。
-- `effects.png`（16×16 疊加層）：`send`（訊息卡從右手飛出，送出成功時播放，失敗不播）、`celebrate`（頭頂火花擴散，Done 時播放）。兩者都遵守動畫開關與減少動態效果。
-- **與 ticket 17 的偏差**：特效是在 `make_sprites.py` 中手繪，沒有使用 pixelfx。原因是使用 pixelfx 需要抓取外部 repo 並可能安裝依賴，這一步要先經使用者同意；目前的資源格式不變，之後改用 pixelfx 產生 `effects.png` 時 app 不需改動。
+- `effects.png`（16×16 疊加層）：`send`（訊息卡從右手沿頭部右側飛出右上角，送出成功時播放，失敗不播）、`celebrate`（頭頂上方爆開，火花往兩側滑出、下垂、閃滅，Done 時播放）。兩者都遵守動畫開關與減少動態效果。由 pixelfx 產生，見下節。
+
+### pixelfx 特效（`final/pixelfx/`）
+
+用 [pixelfx](https://github.com/patch-gg/pixelfx)（MIT）的 core 寫的 16×16 專用特效。pixelfx 現成特效最小約 72px，縮小會糊掉，所以照它的 make-your-own 流程另寫模組。
+
+```sh
+.scratch/atoll/art/final/pixelfx/fetch.sh            # 抓固定 commit 到 vendor/（gitignored），只需 git
+node .scratch/atoll/art/final/pixelfx/render.mjs     # 渲染 fx/*.js → effects.frames.json
+python3 .scratch/atoll/art/final/make_sprites.py     # 打包成 app 的 effects.png / effects.json
+```
+
+- `fx/send.js`、`fx/celebrate.js`：特效模組（pixelfx 的 `meta` + `draw` / `create` 介面，座標就是 16×16 疊加層的像素）。
+- `render.mjs`：12 fps 渲染，alpha ≥ 128 視為不透明，量化到色盤 `o` / `k` / `l` / `r`，去掉結尾的空幀。
+- `effects.frames.json`：渲染結果，commit 進 repo；`make_sprites.py` 只讀這份檔，所以只改角色時不需要 Node 或 pixelfx。
+- 色彩規則：奶油色疊在奶油色機身上看不見，所以火花在頭部範圍內（x 2–13、y ≥ 1）一律用 teal，飛出頭部後才轉白或奶油色。
+- 只用 `src/core`，不使用 `gallery/fonts` 的 Patch Pixel 字型（不在 MIT 授權內）。
 
 ### QA 檔
 

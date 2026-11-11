@@ -102,5 +102,5 @@ scripts/                 build-app.sh、dev-run.sh、shell 包裝、占位 sprit
 ## 文件
 
 - [`spec.md`](.scratch/atoll/spec.md)：P0 規格、狀態對映、協定細節與已驗證事實
-- [`issues/`](.scratch/atoll/issues/)：實作 tickets（目前 01–26 除 17 pixelfx 特效層外皆已完成）
+- [`issues/`](.scratch/atoll/issues/)：實作 tickets（目前 01–26 皆已完成）
 - [`art/`](.scratch/atoll/art/)：風格探索 board 與 B / Toy Chunky 定稿美術
