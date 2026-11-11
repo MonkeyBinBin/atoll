@@ -67,6 +67,9 @@ final class DebugHook {
                 let text = parts.dropFirst().joined(separator: " ")
                 for ch in text { postChar(String(ch)) }
                 postKey(36, command: false)
+            case "draft":
+                // draft <text>: type into the focused field without pressing Return
+                for ch in parts.dropFirst().joined(separator: " ") { postChar(String(ch)) }
             case "hover":
                 // hover <address> <x>: simulate the mouse resting on a character at window x
                 if parts.count > 2, let x = Double(parts[2]) {
@@ -138,6 +141,7 @@ final class DebugHook {
         case 18: "1"
         case 19: "2"
         case 36: "\r"
+        case 30: "]"
         default: ""
         }
         for type in [NSEvent.EventType.keyDown, .keyUp] {
