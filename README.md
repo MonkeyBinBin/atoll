@@ -58,7 +58,7 @@ source /path/to/atoll/scripts/shell/atoll.zsh
 
 - macOS 15 以上（Apple Silicon 驗證過）
 - Swift 6 toolchain（Xcode 16 以上或 Command Line Tools）
-- 至少一個 agent 來源：herdr-core（驗證版本 `hc` 0.1.19 ＋ Herdr app 0.1.14）、herdr CLI 0.9.x 或 cmux
+- 至少一個 agent 來源：herdr-core（驗證版本 `hc` 0.1.20 ＋ Herdr app 0.1.14）、herdr CLI 0.9.x 或 cmux
 - 啟動 agent 與「Open in Herdr」需要 Herdr app 執行中
 
 ## 建置與執行

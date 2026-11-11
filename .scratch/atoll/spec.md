@@ -139,7 +139,7 @@ Status: ready-for-agent
 
 ### Herdr 整合邊界
 
-- 主要後端是 herdr-core（目前 `hc` 0.1.19），另外直接讀取 herdr CLI／TUI（`herdr` 0.9.x）與 cmux 自己整合的 agent（ticket 19–21）。三者都不需要改 shell 設定。herdr-core 的說明：直接連 core 的 Unix socket，走 JSON-RPC 2.0（一行一則訊息），不 spawn `hc` CLI。協定處於 preview（generation 1，只增不減），因此所有 RPC 包在薄 adapter 後面，啟動時以 `rpc.discover`／版本檢查相容性。
+- 主要後端是 herdr-core（目前 `hc` 0.1.20），另外直接讀取 herdr CLI／TUI（`herdr` 0.9.x）與 cmux 自己整合的 agent（ticket 19–21）。三者都不需要改 shell 設定。herdr-core 的說明：直接連 core 的 Unix socket，走 JSON-RPC 2.0（一行一則訊息），不 spawn `hc` CLI。協定處於 preview（generation 1，只增不減），因此所有 RPC 包在薄 adapter 後面，啟動時以 `rpc.discover`／版本檢查相容性。
 - Herdr GUI（`herdr-app`）擁有 space／tab；啟動與聚焦走 `herdr-app` 的公開指令（`do tab.new`、`do agent.focus`）。GUI 沒開時這兩項停用，其餘功能照常。
 - 一般終端機（Ghostty、cmux、iTerm 等）啟動的 agent：經 `scripts/shell/atoll.zsh` 的包裝函式改以 `hc run` 執行，仍只透過 herdr-core 整合（ticket 18）；來源 app 記在 label `atoll.origin`。
 - herdr CLI／TUI：socket `~/.config/herdr/herdr.sock`，狀態來自 `agent.list`（約 2 秒輪詢＋pane 事件即時刷新），位址 `herdr:<terminal_id>`（ticket 20）。
@@ -247,7 +247,7 @@ Status: ready-for-agent
 
 ### 開工前要先驗證的事實
 
-以下 4 項已於 2026-11-10 對 `hc` 0.1.19 ＋ Herdr app 0.1.14 驗證（ticket 04），可用 `HERDR_CONTRACT=1 swift test --filter Contract` 重跑協定部分：
+以下 4 項已於 2026-11-10 對 `hc` 0.1.19 ＋ Herdr app 0.1.14 驗證（ticket 04），可用 `HERDR_CONTRACT=1 swift test --filter Contract` 重跑協定部分（2026-11-11 對 `hc` 0.1.20 重跑，4 項契約測試全部通過）：
 
 1. **Codex 會回報 OSC 7501**：`codex --no-daemon` 啟動後 `reported = true`、`status = {app: "codex", state: "idle"}`。Codex 與 Claude Code 同樣走一般狀態路徑。（附帶：core 的 PATH 不含 nvm，`terminal.run` 直接以 argv `codex` 啟動會 `spawn_failed`；本 app 的啟動走 `herdr-app do tab.new`，不受影響，見第 3 點。）
 2. **`herdr-app do agent.focus` 不會把 Herdr 視窗帶到前景**：只切到該 tab／pane（`herdr-app status` 的 `agent` 改變，前景 app 不變）。`Open in Herdr` 因此在 focus 後另外 activate Herdr app（bundle id `dev.herdr.app`）。
