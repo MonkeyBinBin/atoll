@@ -53,4 +53,28 @@ public struct NotificationRules: Sendable {
         lastSent[agent.address] = key
         return AgentNotification(address: agent.address, title: agent.displayName, body: agent.state.label, key: key)
     }
+
+    /// The one-shot "notify when done" for a finished turn. Skipped when the always-on Done
+    /// notification already went out for this same transition.
+    public mutating func finished(for agent: Agent, settings: NotificationSettings) -> AgentNotification? {
+        guard settings.enabled else { return nil }
+        let doneKey = "done#\(agent.turn)"
+        if agent.state == .done, lastSent[agent.address] == doneKey { return nil }
+        let key = agent.state == .done ? doneKey : "finished#\(agent.turn)"
+        lastSent[agent.address] = key
+        return AgentNotification(address: agent.address, title: agent.displayName, body: agent.state.label, key: key)
+    }
+
+    /// The one reminder for a Needs-you episode that outlasted the reminder delay.
+    public func reminder(for agent: Agent, waited: TimeInterval, settings: NotificationSettings) -> AgentNotification? {
+        guard settings.enabled, agent.state.isNeedsYou else { return nil }
+        let minutes = max(1, Int(waited / 60))
+        let episode = Int(agent.waitingSince?.timeIntervalSince1970 ?? 0)
+        return AgentNotification(
+            address: agent.address,
+            title: agent.displayName,
+            body: "Still needs you · \(minutes)m",
+            key: "reminder#\(agent.turn)#\(episode)"
+        )
+    }
 }

@@ -13,10 +13,10 @@
 - **監看**：每個 agent 一個角色，外觀代表工具、個體色在 session 內固定；動畫之外一律附圖示與文字（Working / Needs you / Done / Idle / Error / Exited / Unknown）。等待使用者與錯誤的 agent 釘在左翼，其餘依優先級排列。
 - **環礁場景**：動態島背景是一片環礁，每個 agent 站在自己的沙洲上，海浪流動、偶爾有魚跳出水面；等待你或出錯的 agent 腳下水面會映出黃光／紅光。天空、海水與日月依本機時間從黎明、白天、黃昏變化到深夜。設定裡關掉 Decorations 即回到純黑。
 - **清單**：點動態島空白處或按 `⌥⌘A` 展開，依「等待使用者 > 錯誤 > 狀態未知 > 執行中 > 完成／閒置」排序。`↑↓` 選擇、`Enter` 打開、`⌘1`–`⌘9` 直接跳、`Esc` 逐層返回。
-- **互動面板**：看近期終端機輸出、傳送訊息、回答 `blocked: question`、用按鍵排回應 permission prompt、中斷目前任務（1.5 秒內二次確認），或一鍵切回原終端機接手。送出狀態明確區分 Delivered / Agent started / Sent · unconfirmed / Failed，永不自動重送。
+- **互動面板**：看近期終端機輸出、傳送訊息、回答 `blocked: question`、用按鍵排回應 permission prompt、中斷目前任務（1.5 秒內二次確認），或一鍵切回原終端機接手。送出狀態明確區分 Delivered / Agent started / Sent · unconfirmed / Failed，永不自動重送。回應完一個等待中的 agent、它確實離開等待後，面板自動切到下一個等最久的 agent（輸入框有未送出文字時不切），全部處理完顯示 All clear；標題列顯示還有幾個在等，`⌘]` 手動跳下一個。可在設定關閉自動切換。
 - **啟動**：點動態島上的「＋」（或清單底部的 Launch agent），透過 Herdr 開新的 Claude Code、Codex 或 herdr-core template agent。
 - **對話泡泡**：agent 停下來（Done／Idle／Exited）、等待你或出錯時，該角色下方冒出約 5 秒的狀態泡泡；一次一個，等待與錯誤優先，點泡泡直接打開面板。可在設定關閉。
-- **通知**：agent 等待你或出錯時發 macOS 通知，內容只有「工具 · 專案名」；`⌃⌥⌘A` 直接打開最早開始等待的 agent。
+- **通知**：agent 等待你或出錯時發 macOS 通知，內容只有「工具 · 專案名」；`⌃⌥⌘A` 直接打開最早開始等待的 agent。等待超過設定時間（預設 5 分鐘，可關閉）仍沒處理會再提醒一次，泡泡也再冒一次。面板上的鈴鐺可設定「這次跑完時通知我」，通知一次後自動關閉。
 - **誠實的狀態**：來源斷線或超過 heartbeat 期限時，動態島轉灰並標示「狀態未知」，不從畫面文字猜測狀態。
 - **隱私**：只和本機的 herdr-core、herdr CLI、cmux 溝通；近期輸出只在面板開著時留在記憶體。
 
@@ -93,7 +93,7 @@ Sources/
     Resources/Sprites/   sprite sheet（PNG + Aseprite 風格 JSON）
 Tests/AtollCoreTests/    Swift Testing，以 fake HerdrClient 驗證 AgentStore 行為
 scripts/                 build-app.sh、dev-run.sh、shell 包裝、占位 sprite 產生器
-.scratch/atoll/          spec、issues（ticket 01–21）、美術探索與定稿
+.scratch/atoll/          spec、issues（ticket 01–24）、美術探索與定稿
 ```
 
 所有業務邏輯都在 `AtollCore`（不依賴 AppKit／SwiftUI）；UI 只讀 `AgentStore` 的狀態並轉發使用者意圖。
@@ -101,5 +101,5 @@ scripts/                 build-app.sh、dev-run.sh、shell 包裝、占位 sprit
 ## 文件
 
 - [`spec.md`](.scratch/atoll/spec.md)：P0 規格、狀態對映、協定細節與已驗證事實
-- [`issues/`](.scratch/atoll/issues/)：實作 tickets（目前 01–21 除 17 pixelfx 特效層外皆已完成）
+- [`issues/`](.scratch/atoll/issues/)：實作 tickets（目前 01–24 除 17 pixelfx 特效層外皆已完成）
 - [`art/`](.scratch/atoll/art/)：風格探索 board 與 B / Toy Chunky 定稿美術

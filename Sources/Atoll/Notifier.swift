@@ -22,6 +22,22 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     func handle(_ agent: Agent, from previous: AgentState?) {
         guard let note = rules.notification(for: agent, from: previous, settings: settings.notificationSettings) else { return }
+        post(note)
+    }
+
+    /// An agent armed with "notify when done" finished its turn.
+    func notifyWhenDone(_ agent: Agent) {
+        guard let note = rules.finished(for: agent, settings: settings.notificationSettings) else { return }
+        post(note)
+    }
+
+    /// A Needs-you episode outlasted the reminder delay.
+    func remind(_ agent: Agent, waited: TimeInterval) {
+        guard let note = rules.reminder(for: agent, waited: waited, settings: settings.notificationSettings) else { return }
+        post(note)
+    }
+
+    private func post(_ note: AgentNotification) {
         guard let center else {
             NSLog("Atoll notification (no bundle): \(note.title) — \(note.body)")
             return

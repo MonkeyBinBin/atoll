@@ -127,6 +127,11 @@ final class IslandController {
         bubbles?.handle(agent, from: previous)
     }
 
+    /// Store reminder: bubble the still-waiting agent again.
+    func handleReminder(_ agent: Agent) {
+        bubbles?.remind(agent)
+    }
+
 
     // MARK: Keys
 
@@ -215,6 +220,7 @@ final class IslandController {
             case "=", "+": settings.adjustFontSize(1); return true
             case "-": settings.adjustFontSize(-1); return true
             case "0": settings.outputFontSize = 11; return true
+            case "]": model.openNextWaiting(); return true
             default: break
             }
         }

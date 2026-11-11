@@ -46,6 +46,8 @@ public final class AgentStore {
         /// No data at all (heartbeat is every 15 s) for this long → everything Unknown.
         public var staleAfter: TimeInterval = 40
         public var interruptConfirmWindow: TimeInterval = 1.5
+        /// After an answered agent leaves Needs you, wait this long before auto-advancing (chained prompts).
+        public var autoAdvanceGrace: TimeInterval = 1.5
         public var interruptFeedbackDuration: TimeInterval = 4
         public var launchConfirmWindow: TimeInterval = 30
         public var outputLines: Int = 200
@@ -103,6 +105,33 @@ public final class AgentStore {
     /// Called for every state change of a visible agent caused by a live core event.
     public var onTransition: ((_ agent: Agent, _ from: AgentState?) -> Void)?
 
+    /// How long an agent may sit in Needs you before one reminder; nil = never remind.
+    public var reminderDelay: TimeInterval? {
+        didSet {
+            guard reminderDelay != oldValue else { return }
+            reminderTimers.values.forEach { $0.cancel() }
+            reminderTimers.removeAll()
+            reminderEpisodes.removeAll()
+            reconcileReminders()
+        }
+    }
+    /// Called once per waiting episode that outlasts `reminderDelay` while its panel is closed.
+    public var onReminder: ((_ agent: Agent, _ waited: TimeInterval) -> Void)?
+
+    /// After answering a Needs-you agent from its panel, move on to the next waiting one.
+    public var autoAdvance = true {
+        didSet { if !autoAdvance { disarmAdvance() } }
+    }
+    /// The panel's agent was answered and has settled out of Needs you: open this one next.
+    public var onAutoAdvance: ((_ next: String) -> Void)?
+    /// Same moment, but nobody else is waiting.
+    public var onAllClear: (() -> Void)?
+
+    /// Agents whose next finished turn notifies once (armed from the panel). In memory only.
+    public private(set) var notifyWhenDone: Set<String> = []
+    /// An armed agent finished its turn (Done, Exited, or stopped to Idle); it is now disarmed.
+    public var onNotifyWhenDone: ((_ agent: Agent) -> Void)?
+
     // MARK: Internals
 
     private struct Record {
@@ -136,6 +165,14 @@ public final class AgentStore {
     private var interruptTimers: [String: ScheduledAction] = [:]
     private var feedbackTimers: [String: ScheduledAction] = [:]
     private var launchTimer: ScheduledAction?
+    /// Pending reminder per agent, and the episode (its `waitingSince`) it was scheduled for.
+    private var reminderTimers: [String: ScheduledAction] = [:]
+    private var reminderEpisodes: [String: Date] = [:]
+    /// Episodes already reminded (or skipped): never again for the same `waitingSince`.
+    private var remindedEpisodes: [String: Date] = [:]
+    /// The Needs-you agent the user just acted on from its panel, and the grace timer once it left Needs you.
+    private var advanceArmed: String?
+    private var advanceTimer: ScheduledAction?
     /// Without a task an agent never goes working; its first status counts as started.
     private var launchHasTask = true
     private var outputRequest = 0
@@ -199,6 +236,12 @@ public final class AgentStore {
     }
 
     public var waitingCount: Int { agents.filter { $0.state.isNeedsYou }.count }
+
+    /// The earliest-waiting Needs-you agent other than `address`.
+    public func nextWaitingAgent(excluding address: String?) -> Agent? {
+        agents.filter { $0.state.isNeedsYou && $0.address != address }
+            .min { ($0.waitingSince ?? .distantFuture) < ($1.waitingSince ?? .distantFuture) }
+    }
 
     // MARK: Client updates
 
@@ -391,6 +434,8 @@ public final class AgentStore {
 
         if let after = agent(address), after.state != before, isLive(source) {
             onTransition?(after, before)
+            advanceAfterTransition(after, from: before)
+            notifyIfFinished(after, from: before)
         }
         if refreshOutput, panel?.address == address {
             refreshPanelOutput()
@@ -466,6 +511,69 @@ public final class AgentStore {
             return ao < bo
         }
         agents = list.map(\.0)
+        notifyWhenDone = notifyWhenDone.filter { records[$0] != nil }
+        reconcileReminders()
+    }
+
+    // MARK: Notify when done
+
+    public func toggleNotifyWhenDone(_ address: String) {
+        guard records[address] != nil else { return }
+        if notifyWhenDone.contains(address) { notifyWhenDone.remove(address) } else { notifyWhenDone.insert(address) }
+    }
+
+    /// A turn ended: Done or Exited, or Idle straight from Working (stopped without reporting Done).
+    /// Error ends it too but already notifies; Needs you is mid-turn and keeps the bell armed.
+    private func notifyIfFinished(_ agent: Agent, from previous: AgentState?) {
+        guard notifyWhenDone.contains(agent.address) else { return }
+        let finished: Bool
+        switch agent.state {
+        case .done, .exited: finished = true
+        case .idle: finished = previous == .working || previous == .starting
+        case .error:
+            notifyWhenDone.remove(agent.address)
+            return
+        default: finished = false
+        }
+        guard finished else { return }
+        notifyWhenDone.remove(agent.address)
+        onNotifyWhenDone?(agent)
+    }
+
+    // MARK: Waiting reminders
+
+    /// Keeps one timer per live Needs-you episode. The delay counts from when the episode was first
+    /// seen here, so a snapshot carrying an old `waitingSince` doesn't remind the moment it arrives.
+    private func reconcileReminders() {
+        var waiting: [String: Date] = [:]
+        if reminderDelay != nil {
+            for agent in agents where agent.state.isNeedsYou {
+                if let since = agent.waitingSince { waiting[agent.address] = since }
+            }
+        }
+        for (address, episode) in reminderEpisodes where waiting[address] != episode {
+            reminderTimers.removeValue(forKey: address)?.cancel()
+            reminderEpisodes[address] = nil
+        }
+        // Offline agents keep their mark: the same episode isn't re-reminded after a reconnect.
+        remindedEpisodes = remindedEpisodes.filter { records[$0.key]?.waitingSince == $0.value }
+        guard let delay = reminderDelay else { return }
+        for (address, since) in waiting where reminderEpisodes[address] != since && remindedEpisodes[address] != since {
+            reminderEpisodes[address] = since
+            reminderTimers[address] = scheduler.schedule(after: delay) { [weak self] in
+                self?.fireReminder(address, episode: since)
+            }
+        }
+    }
+
+    private func fireReminder(_ address: String, episode: Date) {
+        reminderTimers[address] = nil
+        reminderEpisodes[address] = nil
+        guard let agent = agent(address), agent.state.isNeedsYou, agent.waitingSince == episode else { return }
+        remindedEpisodes[address] = episode
+        // The user is already looking at it.
+        if panel?.address == address { return }
+        onReminder?(agent, scheduler.now.timeIntervalSince(episode))
     }
 
     // MARK: Panel
@@ -475,6 +583,7 @@ public final class AgentStore {
         if panel?.address != address {
             outputRequest += 1
             panel = PanelState(address: address)
+            disarmAdvance()
         }
         if stateOfStored(address) == .done {
             // Local only: never written back to Herdr.
@@ -487,6 +596,49 @@ public final class AgentStore {
     public func closePanel() {
         outputRequest += 1
         panel = nil
+        disarmAdvance()
+    }
+
+    // MARK: Auto-advance
+
+    /// Only an answer from the open panel to an agent that is waiting arms the advance.
+    private func armAdvance(_ address: String) {
+        guard autoAdvance, panel?.address == address, agent(address)?.state.isNeedsYou == true else { return }
+        advanceTimer?.cancel()
+        advanceTimer = nil
+        advanceArmed = address
+    }
+
+    private func disarmAdvance(_ address: String? = nil) {
+        guard address == nil || advanceArmed == address else { return }
+        advanceArmed = nil
+        advanceTimer?.cancel()
+        advanceTimer = nil
+    }
+
+    /// The source reported the answered agent out of Needs you: wait out the grace period, then move on.
+    private func advanceAfterTransition(_ agent: Agent, from previous: AgentState?) {
+        guard advanceArmed == agent.address, previous?.isNeedsYou == true,
+              !agent.state.isNeedsYou, agent.state != .unknown else { return }
+        let address = agent.address
+        advanceTimer?.cancel()
+        advanceTimer = scheduler.schedule(after: timing.autoAdvanceGrace) { [weak self] in
+            self?.finishAdvance(address)
+        }
+    }
+
+    private func finishAdvance(_ address: String) {
+        advanceTimer = nil
+        guard advanceArmed == address else { return }
+        advanceArmed = nil
+        // Back in Needs you (a chained prompt), or the user moved elsewhere: stay put.
+        guard autoAdvance, panel?.address == address, let agent = agent(address),
+              !agent.state.isNeedsYou, agent.state != .unknown else { return }
+        if let next = nextWaitingAgent(excluding: address) {
+            onAutoAdvance?(next.address)
+        } else {
+            onAllClear?()
+        }
     }
 
     public func refreshPanelOutput() {
@@ -538,6 +690,7 @@ public final class AgentStore {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         sendStates[address] = .waiting
+        armAdvance(address)
         Task { [client = client(for: address)] in
             do {
                 let output = try await client.send(terminal: address, text: text, force: force)
@@ -549,8 +702,10 @@ public final class AgentStore {
                 self.sendStates[address] = state
             } catch let error as HerdrError {
                 self.sendStates[address] = .failed(error)
+                self.disarmAdvance(address)
             } catch {
                 self.sendStates[address] = .failed(.unavailable(error.localizedDescription))
+                self.disarmAdvance(address)
             }
         }
     }
@@ -568,14 +723,17 @@ public final class AgentStore {
         guard let agent = agent(address), agent.replyMode == .keys || agent.replyMode == .textAndKeys else { return }
         if case .sending = keyStates[address] { return }
         keyStates[address] = .sending(key)
+        armAdvance(address)
         Task { [client = client(for: address)] in
             do {
                 try await client.keys(terminal: address, keys: [key])
                 self.keyStates[address] = .sent(key)
             } catch let error as HerdrError {
                 self.keyStates[address] = .failed(key, error)
+                self.disarmAdvance(address)
             } catch {
                 self.keyStates[address] = .failed(key, .unavailable(error.localizedDescription))
+                self.disarmAdvance(address)
             }
         }
     }
@@ -600,6 +758,7 @@ public final class AgentStore {
         case .confirming:
             interruptTimers[address]?.cancel()
             interruptStates[address] = .interrupting
+            armAdvance(address)
             Task { [client = client(for: address)] in
                 let outcome: InterruptOutcome
                 var failure: HerdrError?

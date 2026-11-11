@@ -88,6 +88,12 @@ struct AgentCard: View {
                             .foregroundStyle(.black)
                     }
                     Spacer(minLength: 4)
+                    if store.notifyWhenDone.contains(agent.address) {
+                        Image(systemName: "bell.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(PixelPalette.done.color)
+                            .help("Notifies when this turn finishes")
+                    }
                     if index < 9 {
                         Text("⌘\(index + 1)")
                             .font(.caption2.monospaced())

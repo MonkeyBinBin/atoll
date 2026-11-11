@@ -46,6 +46,12 @@ final class SpeechBubbleController {
         enqueue(bubble)
     }
 
+    /// Re-announce an agent still waiting past the reminder delay; its own key so it shows again.
+    func remind(_ agent: Agent) {
+        let since = Int(agent.waitingSince?.timeIntervalSince1970 ?? 0)
+        enqueue(AgentBubble(address: agent.address, state: agent.state, key: "reminder#\(agent.turn)#\(since)"))
+    }
+
     /// Debug: bubble an agent's current state regardless of the rules.
     func force(_ address: String) {
         guard let agent = model.store.agent(address) else { return }

@@ -21,10 +21,56 @@ struct AgentPanelView: View {
             footer
         }
         .padding(14)
-        .onAppear { inputFocused = agent.replyMode.isText || agent.replyMode == .textAndKeys }
+        .onAppear {
+            inputFocused = agent.replyMode.isText || agent.replyMode == .textAndKeys
+            model.panelHasDraft = false
+        }
+        .onChange(of: draft) { _, text in
+            model.panelHasDraft = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
     }
 
     // MARK: Header
+
+    /// One-shot "notify me when this turn finishes"; shown as always-on when Settings already covers Done.
+    @ViewBuilder
+    private var doneBell: some View {
+        let always = settings.doneNotifyAgents.contains(agent.address) || settings.doneNotifyProjects.contains(agent.projectPath)
+        let armed = store.notifyWhenDone.contains(agent.address)
+        Button {
+            store.toggleNotifyWhenDone(agent.address)
+        } label: {
+            Image(systemName: always ? "bell.badge.fill" : armed ? "bell.fill" : "bell")
+                .foregroundStyle(always || armed ? AnyShapeStyle(PixelPalette.done.color) : AnyShapeStyle(.secondary))
+        }
+        .buttonStyle(.borderless)
+        .disabled(always)
+        .help(always
+            ? "Always notifies on Done (set in Settings)"
+            : armed ? "Will notify when this turn finishes · click to cancel" : "Notify me when this turn finishes")
+    }
+
+    /// Other agents still waiting (⌘] jumps to the next), or a short All clear once none are.
+    @ViewBuilder
+    private var queueBadge: some View {
+        let others = store.agents.filter { $0.state.isNeedsYou && $0.address != agent.address }.count
+        if others > 0 {
+            Button {
+                model.openNextWaiting()
+            } label: {
+                Label("\(others) more waiting", systemImage: AgentState.needsYou(.unspecified).symbol)
+            }
+            .buttonStyle(.borderless)
+            .font(.system(size: 11))
+            .foregroundStyle(AgentState.needsYou(.unspecified).color)
+            .help("Next waiting agent (⌘])")
+        } else if model.allClear {
+            Label("All clear", systemImage: "checkmark.circle")
+                .font(.system(size: 11))
+                .foregroundStyle(PixelPalette.done.color)
+                .transition(.opacity)
+        }
+    }
 
     private var header: some View {
         HStack(alignment: .center, spacing: 10) {
@@ -45,12 +91,14 @@ struct AgentPanelView: View {
                 }
             }
             Spacer()
+            queueBadge
             if headerHovered {
                 Label("Click to collapse", systemImage: "chevron.up")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .transition(.opacity)
             }
+            doneBell
             Button {
                 model.escape()
             } label: {

@@ -116,6 +116,7 @@ final class IslandModel {
         didSet {
             guard mode != oldValue else { return }
             hover = nil
+            allClear = false
             // Leaving a panel (by any route) drops its output: it lives only while the panel is open.
             if case .panel = oldValue {
                 if case .panel = mode {} else { store.closePanel() }
@@ -138,6 +139,11 @@ final class IslandModel {
     /// Measured height of the expanded content (below the top row).
     var expandedContentHeight: CGFloat = 0
     @ObservationIgnored var onModeChange: ((Mode) -> Void)?
+    /// The open panel's reply box holds unsent text: auto-advance must not yank it away.
+    var panelHasDraft = false
+    /// Briefly true after the last waiting agent was answered.
+    private(set) var allClear = false
+    @ObservationIgnored private var allClearTask: Task<Void, Never>?
 
     static let expandedWidth: CGFloat = 480
     static let largePanelWidth: CGFloat = 960
@@ -230,6 +236,29 @@ final class IslandModel {
         guard store.agents.indices.contains(index) else { return }
         selection = index
         openPanel(store.agents[index].address)
+    }
+
+    /// Store: the answered agent settled; open the next waiting one unless the user is mid-typing.
+    func autoAdvance(to next: String) {
+        guard case .panel = mode, !panelHasDraft else { return }
+        openPanel(next)
+    }
+
+    /// ⌘]: the earliest waiting agent other than the open one.
+    func openNextWaiting() {
+        guard case .panel(let current) = mode, let next = store.nextWaitingAgent(excluding: current) else { return }
+        openPanel(next.address)
+    }
+
+    func showAllClear() {
+        guard case .panel = mode else { return }
+        allClear = true
+        allClearTask?.cancel()
+        allClearTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2.5))
+            guard !Task.isCancelled else { return }
+            self?.allClear = false
+        }
     }
 
     /// Second global shortcut: the agent that started waiting first. No-op when nobody waits.

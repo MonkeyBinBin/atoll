@@ -53,6 +53,10 @@ final class AppSettings {
     /// Speech bubble over a character when its agent stops or needs the user.
     var speechBubbles: Bool { didSet { defaults.set(speechBubbles, forKey: "speechBubbles") } }
     var notificationsEnabled: Bool { didSet { defaults.set(notificationsEnabled, forKey: "notificationsEnabled") } }
+    /// After answering a waiting agent in its panel, open the next waiting one.
+    var autoAdvance: Bool { didSet { defaults.set(autoAdvance, forKey: "autoAdvance") } }
+    /// Minutes in Needs you before one reminder (notification + bubble); 0 = off.
+    var reminderMinutes: Int { didSet { defaults.set(reminderMinutes, forKey: "reminderMinutes") } }
     var doneNotifyAgents: Set<String> { didSet { defaults.set(Array(doneNotifyAgents), forKey: "doneNotifyAgents") } }
     var doneNotifyProjects: Set<String> { didSet { defaults.set(Array(doneNotifyProjects), forKey: "doneNotifyProjects") } }
     /// CGDirectDisplayID of the chosen screen; 0 = automatic (built-in / main).
@@ -113,6 +117,8 @@ final class AppSettings {
         decorations = defaults.object(forKey: "decorations") as? Bool ?? true
         notificationsEnabled = defaults.object(forKey: "notificationsEnabled") as? Bool ?? true
         speechBubbles = defaults.object(forKey: "speechBubbles") as? Bool ?? true
+        reminderMinutes = defaults.object(forKey: "reminderMinutes") as? Int ?? 5
+        autoAdvance = defaults.object(forKey: "autoAdvance") as? Bool ?? true
         doneNotifyAgents = Set(defaults.stringArray(forKey: "doneNotifyAgents") ?? [])
         doneNotifyProjects = Set(defaults.stringArray(forKey: "doneNotifyProjects") ?? [])
         displayID = UInt32(defaults.integer(forKey: "displayID"))

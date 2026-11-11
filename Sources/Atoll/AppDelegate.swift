@@ -54,6 +54,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.notifier.handle(agent, from: from)
             self?.island.handleTransition(agent, from: from)
         }
+        store.onNotifyWhenDone = { [weak self] agent in self?.notifier.notifyWhenDone(agent) }
+        store.onAutoAdvance = { [weak self] next in self?.model.autoAdvance(to: next) }
+        store.onAllClear = { [weak self] in self?.model.showAllClear() }
+        store.onReminder = { [weak self] agent, waited in
+            self?.notifier.remind(agent, waited: waited)
+            self?.island.handleReminder(agent)
+        }
 
         watchHerdrApp()
         // `kill` (SIGTERM) skips applicationWillTerminate: stop sources first, then quit.
@@ -82,6 +89,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if store.showUnreportedTerminals != settings.showUnreportedTerminals {
             store.setShowUnreportedTerminals(settings.showUnreportedTerminals)
         }
+        store.autoAdvance = settings.autoAdvance
+        store.reminderDelay = settings.reminderMinutes > 0 ? TimeInterval(settings.reminderMinutes * 60) : nil
         HotKeyCenter.shared.register(id: 1, settings.listHotKey) { [weak self] in
             guard let self else { return }
             self.settings.islandVisible = true

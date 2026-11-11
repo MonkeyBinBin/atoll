@@ -46,6 +46,7 @@ struct SettingsView: View {
                 Toggle("Animations", isOn: $settings.animationsEnabled)
                 Toggle("Decorations", isOn: $settings.decorations)
                 Toggle("Speech bubbles", isOn: $settings.speechBubbles)
+                Toggle("Auto-advance to next waiting agent", isOn: $settings.autoAdvance)
                 Toggle("Show terminals without status", isOn: $settings.showUnreportedTerminals)
             }
 
@@ -66,6 +67,13 @@ struct SettingsView: View {
 
             Section("Notifications") {
                 Toggle("Notifications", isOn: $settings.notificationsEnabled)
+                Picker("Remind after", selection: $settings.reminderMinutes) {
+                    Text("Off").tag(0)
+                    ForEach([2, 5, 10], id: \.self) { Text("\($0) min").tag($0) }
+                }
+                Text("An agent still waiting this long notifies and bubbles once more.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Text("Needs you and Error always notify. Turn on Done per agent or project:")
                     .font(.caption)
                     .foregroundStyle(.secondary)
