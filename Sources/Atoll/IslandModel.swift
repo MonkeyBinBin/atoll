@@ -154,6 +154,20 @@ final class IslandModel {
         collapsedAgents?.contains { $0.address == address } ?? false
     }
 
+    /// ⌘⇧1–5 in a panel: which quick reply to send. The panel performs it so it shares the reply
+    /// box's send path (and its Resend memory); the token makes repeats of the same index distinct.
+    struct QuickReplyRequest: Equatable {
+        var index: Int
+        var token: Int
+    }
+
+    private(set) var quickReplyRequest: QuickReplyRequest?
+
+    func requestQuickReply(_ index: Int) {
+        guard case .panel = mode, settings.quickReplies.indices.contains(index) else { return }
+        quickReplyRequest = QuickReplyRequest(index: index, token: (quickReplyRequest?.token ?? 0) + 1)
+    }
+
     /// The open panel's reply box holds unsent text: auto-advance must not yank it away.
     var panelHasDraft = false
     /// Briefly true after the last waiting agent was answered.

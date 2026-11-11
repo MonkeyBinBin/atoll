@@ -235,6 +235,9 @@ final class IslandController {
         keyMonitor = nil
     }
 
+    /// kVK_ANSI_1…5: matched by key code because Shift turns the characters into !@#$%.
+    private static let quickReplyKeyCodes: [UInt16] = [18, 19, 20, 21, 23]
+
     private func handleKey(_ event: NSEvent) -> Bool {
         guard event.window === panel else { return false }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
@@ -247,6 +250,10 @@ final class IslandController {
                 model.jump(to: n)
                 return true
             }
+        }
+        if isPanel, flags == [.command, .shift], let index = Self.quickReplyKeyCodes.firstIndex(of: event.keyCode) {
+            model.requestQuickReply(index)
+            return true
         }
         if isPanel, flags == .command, let chars = event.charactersIgnoringModifiers {
             switch chars {

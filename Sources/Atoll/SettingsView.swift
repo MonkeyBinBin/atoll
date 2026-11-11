@@ -7,6 +7,14 @@ struct SettingsView: View {
     @Bindable var settings: AppSettings
     @State private var screens: [(id: UInt32, name: String)] = []
     @State private var monoFamilies: [String] = []
+    /// Rows as typed (blanks allowed while editing); saved normalized. Stable ids keep
+    /// text-field bindings valid while rows are removed or reordered.
+    struct ReplyRow: Identifiable, Equatable {
+        let id = UUID()
+        var text: String
+    }
+
+    @State private var replyRows: [ReplyRow] = []
 
     var body: some View {
         Form {
@@ -101,6 +109,34 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Quick replies") {
+                ForEach($replyRows) { $row in
+                    let index = replyRows.firstIndex { $0.id == row.id } ?? 0
+                    HStack(spacing: 6) {
+                        Text("⌘⇧\(index + 1)")
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                        TextField("Reply", text: $row.text)
+                            .labelsHidden()
+                        Button { moveReply(row.id, by: -1) } label: { Image(systemName: "chevron.up") }
+                            .disabled(index == 0)
+                        Button { moveReply(row.id, by: 1) } label: { Image(systemName: "chevron.down") }
+                            .disabled(index == replyRows.count - 1)
+                        Button { replyRows.removeAll { $0.id == row.id } } label: { Image(systemName: "minus.circle") }
+                    }
+                    .buttonStyle(.borderless)
+                }
+                Button("Add reply") { replyRows.append(ReplyRow(text: "")) }
+                    .disabled(replyRows.count >= QuickReplies.maxCount)
+                Text("Shown under the reply box. Click sends, ⌥-click puts it in the box to edit first.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .onChange(of: replyRows) { _, rows in
+                let normalized = QuickReplies.normalize(rows.map(\.text))
+                if settings.quickReplies != normalized { settings.quickReplies = normalized }
+            }
+
             Section("Shortcuts") {
                 LabeledContent("Show agent list") { HotKeyRecorder(key: $settings.listHotKey) }
                 LabeledContent("Open earliest waiting agent") { HotKeyRecorder(key: $settings.waitingHotKey) }
@@ -114,9 +150,17 @@ struct SettingsView: View {
         .frame(width: 460)
         .frame(minHeight: 520)
         .onAppear {
+            replyRows = settings.quickReplies.map { ReplyRow(text: $0) }
             loadScreens()
             monoFamilies = TerminalFont.monospacedFamilies
         }
+    }
+
+    private func moveReply(_ id: UUID, by delta: Int) {
+        guard let index = replyRows.firstIndex(where: { $0.id == id }) else { return }
+        let target = index + delta
+        guard replyRows.indices.contains(target) else { return }
+        replyRows.swapAt(index, target)
     }
 
     private var projects: [String] {

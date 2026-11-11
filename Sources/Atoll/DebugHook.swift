@@ -60,8 +60,10 @@ final class DebugHook {
                     }
                 }
             case "post":
-                // post <keyCode> [cmd]: synthetic keyDown through NSApp's event queue
-                if parts.count > 1, let code = UInt16(parts[1]) { postKey(code, command: parts.count > 2) }
+                // post <keyCode> [cmd] [shift]: synthetic keyDown through NSApp's event queue
+                if parts.count > 1, let code = UInt16(parts[1]) {
+                    postKey(code, command: parts.contains("cmd"), shift: parts.contains("shift"))
+                }
             case "type":
                 // type <text>: synthetic key events for each character, then Return
                 let text = parts.dropFirst().joined(separator: " ")
@@ -135,7 +137,7 @@ final class DebugHook {
         }
     }
 
-    private func postKey(_ code: UInt16, command: Bool) {
+    private func postKey(_ code: UInt16, command: Bool, shift: Bool = false) {
         guard let panel else { return }
         let chars: String = switch code {
         case 18: "1"
@@ -146,7 +148,9 @@ final class DebugHook {
         }
         for type in [NSEvent.EventType.keyDown, .keyUp] {
             if let event = NSEvent.keyEvent(
-                with: type, location: .zero, modifierFlags: command ? [.command] : [], timestamp: ProcessInfo.processInfo.systemUptime,
+                with: type, location: .zero,
+                modifierFlags: NSEvent.ModifierFlags(command ? [.command] : []).union(shift ? [.shift] : []),
+                timestamp: ProcessInfo.processInfo.systemUptime,
                 windowNumber: panel.windowNumber, context: nil, characters: chars, charactersIgnoringModifiers: chars,
                 isARepeat: false, keyCode: code
             ) {

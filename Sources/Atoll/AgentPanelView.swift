@@ -25,6 +25,11 @@ struct AgentPanelView: View {
             inputFocused = agent.replyMode.isText || agent.replyMode == .textAndKeys
             model.panelHasDraft = false
         }
+        .onChange(of: model.quickReplyRequest) { _, request in
+            guard let request, agent.replyMode.isText || agent.replyMode == .textAndKeys,
+                  settings.quickReplies.indices.contains(request.index) else { return }
+            sendQuickReply(settings.quickReplies[request.index])
+        }
         .onChange(of: draft) { _, text in
             model.panelHasDraft = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
@@ -254,6 +259,7 @@ struct AgentPanelView: View {
                     .keyboardShortcut(.return, modifiers: .command)
                     .disabled(inFlight || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
+            quickReplyRow(disabled: inFlight)
             sendStatus(state)
         }
     }
@@ -288,6 +294,52 @@ struct AgentPanelView: View {
     }
 
     @State private var lastSent = ""
+
+    /// Canned replies: click sends, ⌥-click puts the text in the reply box to edit.
+    @ViewBuilder
+    private func quickReplyRow(disabled: Bool) -> some View {
+        let replies = settings.quickReplies
+        if !replies.isEmpty {
+            HStack(spacing: 6) {
+                ForEach(Array(replies.enumerated()), id: \.offset) { index, text in
+                    Button {
+                        if NSEvent.modifierFlags.contains(.option) {
+                            draft = text
+                            inputFocused = true
+                        } else {
+                            sendQuickReply(text)
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(Self.chipTitle(text)).lineLimit(1)
+                            Text("⌘⇧\(index + 1)").foregroundStyle(.tertiary)
+                        }
+                        .font(.system(size: 11))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Color.white.opacity(0.08)))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(disabled)
+                    .help("\(text) — click to send, ⌥-click to edit first")
+                }
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
+    /// Chips hug their text; long replies are cut (the help shows the full text).
+    static func chipTitle(_ text: String) -> String {
+        let oneLine = text.replacingOccurrences(of: "\n", with: " ")
+        return oneLine.count > 28 ? String(oneLine.prefix(27)) + "…" : oneLine
+    }
+
+    /// Same path as the reply box, but leaves the draft alone.
+    private func sendQuickReply(_ text: String) {
+        guard store.sendStates[agent.address]?.isInFlight != true else { return }
+        lastSent = text
+        store.send(text, to: agent.address)
+    }
 
     private func submit() {
         let text = draft
