@@ -31,11 +31,16 @@ public struct AgentBubble: Equatable, Sendable {
     /// Needs you / Error pre-empt the rest.
     public var isUrgent: Bool { kind == .state && state.needsAttention }
 
-    /// Still worth showing for this agent as it is now.
+    /// Still worth showing for this agent as it is now. Done → Idle and Done / Idle → Exited are the same
+    /// finished turn settling, so a Done or Idle bubble lasts through them; a new turn or attention ends it.
     public func stillApplies(to agent: Agent?) -> Bool {
         guard let agent else { return false }
         switch kind {
-        case .state: return agent.state.label == state.label
+        case .state:
+            switch (state, agent.state) {
+            case (.done, .idle), (.done, .exited), (.idle, .exited): return true
+            default: return agent.state.label == state.label
+            }
         case .sharedTree: return !agent.sharedTreeWith.isEmpty
         case .queuedSent: return true
         }
