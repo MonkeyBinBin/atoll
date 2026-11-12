@@ -10,6 +10,7 @@ final class FakeHerdrClient: HerdrClient, @unchecked Sendable {
         case interrupt(String)
         case launch(LaunchRequest)
         case focus(String)
+        case renameSpace(String, String)
         case reconnect
     }
 
@@ -127,6 +128,12 @@ final class FakeHerdrClient: HerdrClient, @unchecked Sendable {
     func focus(terminal: String) async throws {
         record(.focus(terminal))
         try focusResult.get()
+    }
+
+    var renameResult: Result<Void, HerdrError> = .success(())
+    func renameSpace(id: String, name: String) async throws {
+        record(.renameSpace(id, name))
+        try renameResult.get()
     }
 }
 

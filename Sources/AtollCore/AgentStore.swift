@@ -109,7 +109,7 @@ public final class AgentStore {
         return !connected.isEmpty && connected.allSatisfy(\.isStale)
     }
     public var showUnreportedTerminals = false
-    /// Whether the Herdr GUI is running (launch / focus need it; spaces come from it).
+    /// Whether the Herdr GUI is running (focus needs it; spaces come from it; launches without it go through core).
     public var herdrAppRunning = false {
         didSet {
             guard herdrAppRunning != oldValue else { return }
@@ -131,6 +131,16 @@ public final class AgentStore {
 
     /// Herdr GUI spaces (ticket 42), in Herdr's order; empty while the Herdr app isn't running.
     public private(set) var spaces: [HerdrSpace] = []
+    /// The last spaces read from the Herdr app, kept across its quits (and app restarts, via `onSpacesCached`)
+    /// so a launch without the app can still pick one.
+    public var cachedSpaces: [HerdrSpace] = []
+    public var onSpacesCached: (([HerdrSpace]) -> Void)?
+    /// Names for spaces made by launches without the app (space id → name), applied once the app shows them.
+    public var pendingSpaceNames: [String: String] = [:] {
+        didSet { if pendingSpaceNames != oldValue { onPendingSpaceNamesChanged?(pendingSpaceNames) } }
+    }
+    public var onPendingSpaceNamesChanged: (([String: String]) -> Void)?
+    private var renamingSpaces: Set<String> = []
     private var spaceTimer: ScheduledAction?
     private var spaceRefreshing = false
     private var spaceRefreshAgain = false
@@ -826,6 +836,11 @@ public final class AgentStore {
                 self.spaces = result
                 self.rebuild()
             }
+            if let result, !result.isEmpty, result != self.cachedSpaces {
+                self.cachedSpaces = result
+                self.onSpacesCached?(result)
+            }
+            if let result { self.applyPendingSpaceNames(result) }
             if self.spaceRefreshAgain {
                 self.spaceRefreshAgain = false
                 self.refreshSpaces()
@@ -836,6 +851,34 @@ public final class AgentStore {
                 }
             }
         }
+    }
+
+    /// Names the spaces launches without the app made, once the app shows them. A failed rename is tried again
+    /// on the next read.
+    private func applyPendingSpaceNames(_ shown: [HerdrSpace]) {
+        for space in shown {
+            guard let name = pendingSpaceNames[space.id], !renamingSpaces.contains(space.id) else { continue }
+            renamingSpaces.insert(space.id)
+            Task { [client] in
+                let renamed = (try? await client.renameSpace(id: space.id, name: name)) != nil
+                self.renamingSpaces.remove(space.id)
+                guard renamed else { return }
+                if self.pendingSpaceNames[space.id] == name { self.pendingSpaceNames[space.id] = nil }
+                self.refreshSpaces()
+            }
+        }
+    }
+
+    /// The spaces a launch can pick: the app's, read now; without the app, the cached ones as herdr-core's
+    /// labels have them now (`HerdrLabels.spaces`).
+    public func launchSpaces() async -> [HerdrSpace] {
+        if herdrAppRunning, let shown = try? await client.spaces() { return shown }
+        return offlineSpaces
+    }
+
+    private var offlineSpaces: [HerdrSpace] {
+        let terminals = records.values.filter { $0.source == primary }.sorted { $0.order < $1.order }.map(\.info)
+        return HerdrLabels.spaces(cached: cachedSpaces, terminals: terminals)
     }
 
     // MARK: Waiting preview
@@ -1672,11 +1715,20 @@ public final class AgentStore {
     }
 
     /// With a plan, first creates the worktree, then launches in it (`request.folder` is replaced).
+    /// Without the Herdr app, the agent starts in herdr-core, labelled for its space (the picked one, else the
+    /// one Herdr showed last; a new space gets a fresh id and its name waits in `pendingSpaceNames`).
     public func launch(_ request: LaunchRequest, worktree: WorktreePlan? = nil) {
         if isLaunchBusy { return }
-        guard herdrAppRunning else {
-            launchState = .failed(HerdrError(kind: "app_not_running", message: "Herdr app isn't running", hint: "Open Herdr, then try again."))
-            return
+        var request = request
+        request.withoutApp = !herdrAppRunning
+        if request.withoutApp {
+            if let name = request.newSpaceName {
+                let id = HerdrLabels.newID("sp")
+                request.space = id
+                if !name.isEmpty { pendingSpaceNames[id] = name }
+            } else {
+                request.space = HerdrLabels.target(picked: request.space, spaces: offlineSpaces)
+            }
         }
         launchWorktree = nil
         guard let worktree else { return startLaunch(request) }
@@ -1706,10 +1758,10 @@ public final class AgentStore {
             do {
                 let output = try await client.launch(request)
                 self.launchReturned(output)
-            } catch let error as HerdrError {
-                self.launchState = .failed(error)
             } catch {
-                self.launchState = .failed(.unavailable(error.localizedDescription))
+                // The new space never came to be: nothing to name.
+                if request.withoutApp, request.newSpaceName != nil, let id = request.space { self.pendingSpaceNames[id] = nil }
+                self.launchState = .failed(error as? HerdrError ?? .unavailable(error.localizedDescription))
             }
         }
     }

@@ -62,6 +62,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store.onSharedTree = { [weak self] agent in self?.island.handleSharedTree(agent) }
         store.onWaitingDetails = { [weak self] agent in self?.notifier.waitingDetails(agent) }
         store.worktreeCreator = GitWorktreeCreator()
+        if !demo {
+            store.cachedSpaces = settings.herdrSpaceCache
+            store.pendingSpaceNames = settings.pendingSpaceNames
+            store.onSpacesCached = { [weak self] spaces in self?.settings.herdrSpaceCache = spaces }
+            store.onPendingSpaceNamesChanged = { [weak self] names in self?.settings.pendingSpaceNames = names }
+        }
         store.onWorktreeCreated = { [weak self] path in self?.settings.rememberFolder(path) }
         store.onLaunchFinished = { [weak self] succeeded in
             guard let self, let recipe = self.model.pendingLaunchRecipe else { return }

@@ -64,6 +64,8 @@ macOS 瀏海上的像素風「動態島」，即時顯示本機所有 AI coding 
 - 從動態島的「＋」透過 Herdr 開新的 Claude Code、Codex 或 herdr-core template agent
 - New worktree：在 `<repo>.worktrees/<slug>` 開新 branch（`atoll/<slug>`）再啟動
 - Space 預設跟著動態島選的 space（從 agent 的「Launch in new worktree」進來則用該 agent 的 space），其次是 Settings 的 Default space
+- 「New space…」開新的 Herdr space 並可自訂名稱（留白則依資料夾命名）
+- Herdr app 沒開也能啟動：agent 直接在 herdr-core 跑起來（`hc run` 加上 Herdr 的 space／tab label），app 打開後出現在指定的 space；space 清單來自上次 app 開著時的快取與 terminal label，新 space 的名稱等 app 打開時才套用
 - Recent 記住最近 10 次組合，`⌘R`「Launch again」帶回最近一筆；常用組合可存成 preset（最多 20 個）
 
 動態島切在 web-app 時打開表單，Space 預設就是 web-app 並標示「from island」：
@@ -156,7 +158,7 @@ source /path/to/atoll/scripts/shell/atoll.zsh
 - macOS 15 以上（Apple Silicon 驗證過）
 - Swift 6 toolchain（Xcode 16 以上或 Command Line Tools）
 - 至少一個 agent 來源：herdr-core（驗證版本 `hc` 0.1.20 ＋ Herdr app 0.1.14）、herdr CLI 0.9.x 或 cmux
-- 啟動 agent、「Open in Herdr」與 Spaces 需要 Herdr app 執行中
+- 「Open in Herdr」與清單的 Spaces 分段需要 Herdr app 執行中；啟動 agent 不需要（app 沒開時改用 `hc`）
 
 ## 建置與執行
 

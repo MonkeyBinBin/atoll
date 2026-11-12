@@ -313,19 +313,17 @@ struct LaunchTests {
         #expect(h.store.launchState.label == "Launch failed")
     }
 
-    @Test("Herdr app not running → disabled, nothing sent")
+    @Test("Herdr app not running → launched without it (through herdr-core)")
     func appNotRunning() async {
         let h = Harness()
         h.connect()
         h.store.herdrAppRunning = false
         h.store.launch(request)
         await settle()
-        #expect(h.client.commands.isEmpty)
-        if case .failed(let error) = h.store.launchState {
-            #expect(error.message == "Herdr app isn't running")
-        } else {
-            Issue.record("expected failure")
-        }
+        var expected = request
+        expected.withoutApp = true
+        #expect(h.client.commands == [.launch(expected)])
+        #expect(h.store.launchState == .starting(terminal: "t9"))
     }
 
     @Test("without a task, the first status counts as launched")

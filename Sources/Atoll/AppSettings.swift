@@ -86,6 +86,10 @@ final class AppSettings {
     /// The collapsed island's space filter (`SpaceFilter.stored`); empty = all agents.
     var islandSpace: String { didSet { defaults.set(islandSpace, forKey: "islandSpace") } }
     var recentFolders: [String] { didSet { defaults.set(recentFolders, forKey: "recentFolders") } }
+    /// The last spaces read from the Herdr app, for launches while it isn't running.
+    var herdrSpaceCache: [HerdrSpace] { didSet { save(herdrSpaceCache, "herdrSpaceCache") } }
+    /// Names waiting for spaces that launches without the Herdr app made (space id → name).
+    var pendingSpaceNames: [String: String] { didSet { defaults.set(pendingSpaceNames, forKey: "pendingSpaceNames") } }
     /// The launch form's last launches and saved presets (tasks included), on this Mac only.
     var recentLaunches: [LaunchRecipe] { didSet { save(recentLaunches, "recentLaunches") } }
     var launchPresets: [LaunchPreset] { didSet { save(launchPresets, "launchPresets") } }
@@ -158,6 +162,8 @@ final class AppSettings {
         defaultSpace = defaults.string(forKey: "defaultSpace") ?? ""
         islandSpace = defaults.string(forKey: "islandSpace") ?? ""
         recentFolders = defaults.stringArray(forKey: "recentFolders") ?? []
+        herdrSpaceCache = Self.load("herdrSpaceCache", defaults) ?? []
+        pendingSpaceNames = defaults.dictionary(forKey: "pendingSpaceNames") as? [String: String] ?? [:]
         recentLaunches = Self.load("recentLaunches", defaults) ?? []
         launchPresets = Self.load("launchPresets", defaults) ?? []
         outputFontFamily = defaults.string(forKey: "outputFontFamily") ?? ""

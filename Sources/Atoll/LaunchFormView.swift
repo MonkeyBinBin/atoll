@@ -34,6 +34,8 @@ struct LaunchFormView: View {
     @State private var name = ""
     @State private var spaces: [HerdrSpace] = []
     @State private var space = ""
+    /// The name for a new space (`space == newSpaceTag`); empty = Herdr names it after the folder.
+    @State private var newSpaceName = ""
     /// Where the starting space came from, while the user hasn't changed it (ticket 43).
     @State private var spaceOrigin: SpaceGrouping.LaunchSpaceSource?
     @State private var startingSpace = ""
@@ -58,6 +60,8 @@ struct LaunchFormView: View {
     @FocusState private var launchFocused: Bool
 
     private var store: AgentStore { model.store }
+    /// The Space picker's "New space…" entry.
+    private static let newSpaceTag = "@new"
     private var option: LaunchOption { options.first { $0.id == optionID } ?? options[0] }
 
     var body: some View {
@@ -149,8 +153,11 @@ struct LaunchFormView: View {
                     label("Space")
                     HStack(spacing: 6) {
                         Picker("", selection: $space) {
-                            Text("Selected space").tag("")
+                            // Without the app: the space it showed last.
+                            Text(store.herdrAppRunning ? "Selected space" : "Last selected space").tag("")
                             ForEach(spaces) { Text($0.name).tag($0.id) }
+                            Divider()
+                            Text("New space…").tag(Self.newSpaceTag)
                         }
                         .labelsHidden()
                         if let note = spaceNote {
@@ -159,6 +166,15 @@ struct LaunchFormView: View {
                                 .foregroundStyle(.tertiary)
                                 .fixedSize()
                         }
+                    }
+                }
+                if space == Self.newSpaceTag {
+                    GridRow {
+                        label("Space name")
+                        TextField("Named after the folder", text: $newSpaceName)
+                            .textFieldStyle(.roundedBorder)
+                            .help(store.herdrAppRunning ? "Name for the new Herdr space"
+                                  : "Name for the new Herdr space; applied when the Herdr app opens")
                     }
                 }
             }
@@ -191,9 +207,10 @@ struct LaunchFormView: View {
                 statusView
                 Spacer()
                 if !store.herdrAppRunning {
-                    Text("Herdr app isn't running")
+                    Text("Herdr app isn't running · shows up there once it opens")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
+                        .help("The agent starts in herdr-core now and appears in its Herdr space when the app opens")
                 }
                 Button("Launch", action: launch)
                     .keyboardShortcut(.return, modifiers: .command)
@@ -248,7 +265,7 @@ struct LaunchFormView: View {
     }
 
     private var canLaunch: Bool {
-        store.herdrAppRunning && !folder.isEmpty && !store.isLaunchBusy
+        !folder.isEmpty && !store.isLaunchBusy
             && (plan == nil || !branch.trimmingCharacters(in: .whitespaces).isEmpty)
     }
 
@@ -336,10 +353,9 @@ struct LaunchFormView: View {
         } else {
             templatesLoaded = false
         }
-        if let list = try? await client?.spaces() {
-            spaces = list
-            if !space.isEmpty, !list.contains(where: { $0.id == space }) { space = "" }
-        }
+        let list = await store.launchSpaces()
+        spaces = list
+        if !space.isEmpty, space != Self.newSpaceTag, !list.contains(where: { $0.id == space }) { space = "" }
         if let recipe = deferredRecipe {
             deferredRecipe = nil
             apply(recipe)
@@ -369,7 +385,9 @@ struct LaunchFormView: View {
             folder: folder,
             task: task.trimmingCharacters(in: .whitespacesAndNewlines),
             name: name.trimmingCharacters(in: .whitespaces).isEmpty ? nil : Self.sanitizeName(name),
-            space: space.isEmpty ? nil : space
+            space: space.isEmpty || space == Self.newSpaceTag ? nil : space,
+            template: option.id.hasPrefix("template:"),
+            newSpaceName: space == Self.newSpaceTag ? newSpaceName.trimmingCharacters(in: .whitespaces) : nil
         ), worktree: plan)
     }
 
@@ -377,7 +395,8 @@ struct LaunchFormView: View {
 
     private var currentRecipe: LaunchRecipe {
         LaunchRecipe(optionID: optionID, folder: folder, task: task.trimmingCharacters(in: .whitespacesAndNewlines),
-                     name: name.trimmingCharacters(in: .whitespaces), space: space, worktree: plan != nil)
+                     name: name.trimmingCharacters(in: .whitespaces),
+                     space: space == Self.newSpaceTag ? "" : space, worktree: plan != nil)
     }
 
     private func toolTitle(_ id: String) -> String {

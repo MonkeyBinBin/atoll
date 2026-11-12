@@ -242,14 +242,27 @@ public struct LaunchRequest: Equatable, Sendable {
     public var folder: String
     public var task: String
     public var name: String?
+    /// The space to start in (nil / empty: Herdr's selected one). Without the app, a new space's id.
     public var space: String?
+    /// `argv[0]` names a herdr-core template (core sends the task itself).
+    public var template: Bool
+    /// Start in a new space with this name (empty: Herdr names it after the folder).
+    public var newSpaceName: String?
+    /// The Herdr app isn't running: start it in herdr-core, labelled for the space it should show in.
+    public var withoutApp: Bool
 
-    public init(argv: [String], folder: String, task: String, name: String? = nil, space: String? = nil) {
+    public init(
+        argv: [String], folder: String, task: String, name: String? = nil, space: String? = nil,
+        template: Bool = false, newSpaceName: String? = nil, withoutApp: Bool = false
+    ) {
         self.argv = argv
         self.folder = folder
         self.task = task
         self.name = name
         self.space = space
+        self.template = template
+        self.newSpaceName = newSpaceName
+        self.withoutApp = withoutApp
     }
 }
 
@@ -262,15 +275,18 @@ public struct LaunchOutput: Equatable, Sendable {
     }
 }
 
-public struct HerdrSpace: Equatable, Sendable, Identifiable {
+public struct HerdrSpace: Equatable, Sendable, Identifiable, Codable {
     public var id: String
     public var name: String
     /// Terminal addresses with a pane (or shown as a sub-agent) in this space.
     public var terminals: [String]
+    /// The space the Herdr window shows.
+    public var active: Bool
 
-    public init(id: String, name: String, terminals: [String] = []) {
+    public init(id: String, name: String, terminals: [String] = [], active: Bool = false) {
         self.id = id
         self.name = name
         self.terminals = terminals
+        self.active = active
     }
 }

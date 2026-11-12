@@ -22,6 +22,13 @@ public protocol HerdrClient: AnyObject, Sendable {
     func spaces() async throws -> [HerdrSpace]
     func launch(_ request: LaunchRequest) async throws -> LaunchOutput
     func focus(terminal: String) async throws
+    func renameSpace(id: String, name: String) async throws
+}
+
+extension HerdrClient {
+    public func renameSpace(id: String, name: String) async throws {
+        throw HerdrError(kind: "unsupported", message: "Renaming spaces goes through the Herdr app")
+    }
 }
 
 /// A cancellable scheduled action.

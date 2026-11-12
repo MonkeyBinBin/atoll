@@ -1,7 +1,8 @@
 import Foundation
 
 /// HerdrClient over herdr-core's Unix socket (JSON-RPC 2.0, one message per line),
-/// plus `herdr-app do …` for the GUI-owned commands (launch, focus).
+/// plus `herdr-app do …` for the GUI-owned commands (launch, focus). Without the app, launches go through
+/// `hc run`, labelled for the Herdr space they should show in (`HerdrLabels`).
 ///
 /// The event subscription has its own connection (a subscribed plain connection only
 /// carries notifications). Every command opens a short-lived connection of its own, so
@@ -9,6 +10,7 @@ import Foundation
 public final class CoreRPCAdapter: HerdrClient, @unchecked Sendable {
     public let socketPath: String
     public let herdrAppPath: String?
+    public let hcPath: String?
     private let appRunning: @Sendable () -> Bool
     private let activateApp: @Sendable () -> Void
 
@@ -21,11 +23,13 @@ public final class CoreRPCAdapter: HerdrClient, @unchecked Sendable {
     public init(
         socketPath: String = CoreRPCAdapter.defaultSocketPath(),
         herdrAppPath: String? = CoreRPCAdapter.findHerdrApp(),
+        hcPath: String? = CoreRPCAdapter.findHC(),
         appRunning: @escaping @Sendable () -> Bool = { false },
         activateApp: @escaping @Sendable () -> Void = {}
     ) {
         self.socketPath = socketPath
         self.herdrAppPath = herdrAppPath
+        self.hcPath = hcPath
         self.appRunning = appRunning
         self.activateApp = activateApp
     }
@@ -49,6 +53,13 @@ public final class CoreRPCAdapter: HerdrClient, @unchecked Sendable {
             "/opt/homebrew/bin/herdr-app",
             "/usr/local/bin/herdr-app",
         ]
+        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
+    /// herdr-core's CLI, for launches while the Herdr app isn't running.
+    public static func findHC() -> String? {
+        let home = NSHomeDirectory()
+        let candidates = ["\(home)/.local/bin/hc", "/opt/homebrew/bin/hc", "/usr/local/bin/hc"]
         return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
@@ -373,7 +384,7 @@ public final class CoreRPCAdapter: HerdrClient, @unchecked Sendable {
             for tab in space["tabs"] as? [[String: Any]] ?? [] {
                 terminals += addresses(in: tab["terminals"] as? [Any] ?? [])
             }
-            return HerdrSpace(id: id, name: name, terminals: terminals)
+            return HerdrSpace(id: id, name: name, terminals: terminals, active: (space["active"] as? Bool) ?? false)
         }
     }
 
@@ -389,13 +400,56 @@ public final class CoreRPCAdapter: HerdrClient, @unchecked Sendable {
     }
 
     public func launch(_ request: LaunchRequest) async throws -> LaunchOutput {
+        if request.withoutApp {
+            guard let hcPath else {
+                throw HerdrError(kind: "not_installed", message: "hc not found", hint: "Install herdr-core (hc) in ~/.local/bin.")
+            }
+            let output = try await Self.run(hcPath, Self.hcRunArguments(request, shell: Self.loginShell()), tool: "hc")
+            return LaunchOutput(terminal: Self.terminalAddress(inHerdrAppOutput: output))
+        }
         var args: [String: Any] = ["folder": request.folder, "argv": request.argv]
         if !request.task.isEmpty { args["task"] = request.task }
         if let name = request.name, !name.isEmpty { args["name"] = name }
-        if let space = request.space, !space.isEmpty { args["space"] = space }
+        let command: String
+        if let spaceName = request.newSpaceName {
+            command = "space.new"
+            // space.new's `name` is the space's; it takes no terminal name.
+            args.removeValue(forKey: "name")
+            if !spaceName.isEmpty { args["name"] = spaceName }
+        } else {
+            command = "tab.new"
+            if let space = request.space, !space.isEmpty { args["space"] = space }
+        }
         let json = String(decoding: try JSONSerialization.data(withJSONObject: args), as: UTF8.self)
-        let output = try await runHerdrApp(["do", "tab.new", json])
+        let output = try await runHerdrApp(["do", command, json])
         return LaunchOutput(terminal: Self.terminalAddress(inHerdrAppOutput: output))
+    }
+
+    /// `hc run` for a launch without the app: kept like Herdr's panes, in a new tab of `request.space` (a new
+    /// space when nil). A plain argv runs the way `herdr-app do tab.new` runs it — through a login shell, the
+    /// task as its last argument, a shell left behind when it ends; a template gets its task from core.
+    static func hcRunArguments(_ request: LaunchRequest, shell: String, newID: (String) -> String = HerdrLabels.newID) -> [String] {
+        let space = request.space.flatMap { $0.isEmpty ? nil : $0 } ?? newID("sp")
+        var args = ["run", "--bg", "--keep", "--no-parent", "--json", "--cwd", request.folder,
+                    "--label", "\(HerdrLabels.space)=\(space)", "--label", "\(HerdrLabels.tab)=\(newID("tb"))"]
+        if let name = request.name, !name.isEmpty { args += ["--name", name] }
+        args.append("--")
+        let task = request.task.isEmpty ? [] : [request.task]
+        if request.template {
+            args += request.argv + task
+        } else {
+            args += [shell, "-lic", #""$@"; exec "$0" -li"#, shell] + request.argv + task
+        }
+        return args
+    }
+
+    private static func loginShell() -> String {
+        ProcessInfo.processInfo.environment["SHELL"].flatMap { $0.isEmpty ? nil : $0 } ?? "/bin/zsh"
+    }
+
+    public func renameSpace(id: String, name: String) async throws {
+        let json = String(decoding: try JSONSerialization.data(withJSONObject: ["id": id, "name": name]), as: UTF8.self)
+        _ = try await runHerdrApp(["do", "space.rename", json])
     }
 
     public func focus(terminal: String) async throws {
@@ -442,7 +496,12 @@ public final class CoreRPCAdapter: HerdrClient, @unchecked Sendable {
         guard let path = herdrAppPath else {
             throw HerdrError(kind: "not_installed", message: "herdr-app not found", hint: "Install Herdr (herdr-app) in ~/.local/bin or /Applications.")
         }
-        return try await withCheckedThrowingContinuation { continuation in
+        return try await Self.run(path, arguments, tool: "herdr-app")
+    }
+
+    /// Runs herdr-app or hc; both report failures as `{"error": {kind, message, hint}}`.
+    private static func run(_ path: String, _ arguments: [String], tool: String) async throws -> Data {
+        try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: path)
@@ -461,7 +520,7 @@ public final class CoreRPCAdapter: HerdrClient, @unchecked Sendable {
                     } else if process.terminationStatus != 0 {
                         let message = String(decoding: errData.isEmpty ? data : errData, as: UTF8.self)
                             .trimmingCharacters(in: .whitespacesAndNewlines)
-                        continuation.resume(throwing: HerdrError(kind: "app_command_failed", message: message.isEmpty ? "herdr-app exited with \(process.terminationStatus)" : message))
+                        continuation.resume(throwing: HerdrError(kind: "app_command_failed", message: message.isEmpty ? "\(tool) exited with \(process.terminationStatus)" : message))
                     } else {
                         continuation.resume(returning: data)
                     }
