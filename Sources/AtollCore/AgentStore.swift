@@ -62,6 +62,11 @@ public final class AgentStore {
         public var outputCheckInterval: TimeInterval = 120
         public var outputCheckLines: Int = 40
         public var outputChecksPerMinute: Int = 10
+        /// Codex reports Idle → Working → Idle as it starts (ticket 41): a first Working beginning this soon
+        /// after the status appears, and back to Idle within `startupSettleWithin` of it, is the agent coming
+        /// up, not a turn.
+        public var startupWorkingWithin: TimeInterval = 3
+        public var startupSettleWithin: TimeInterval = 10
         public init() {}
     }
 
@@ -237,6 +242,12 @@ public final class AgentStore {
         var lastStatusChange: Date?
         /// When the agent was first seen ended (Exited, or its status cleared); nil while running.
         var endedSince: Date?
+        /// When the status last appeared (from none, or for another app): startup settle counts from here.
+        var statusAppearedAt: Date?
+        /// A Working has been seen since the status appeared.
+        var workedSinceAppeared = false
+        /// The current Working began within the startup window: going Idle soon is just starting up.
+        var startupWorking = false
     }
 
     public let sources: [AgentSource]
@@ -496,11 +507,13 @@ public final class AgentStore {
         guard var record = records[address], record.source == source else { return }
         let before = visibleState(of: record)
         var refreshOutput = false
+        var startupSettle = false
 
         switch event {
         case .created:
             break
         case .status(_, let status, let reported):
+            startupSettle = observeStartup(&record, status: status, now: now)
             let wasBlocked = record.info.status?.state == "blocked"
             record.info.status = status
             record.info.reported = record.info.reported || reported || status != nil
@@ -560,17 +573,48 @@ public final class AgentStore {
         rebuild()
 
         if let after = agent(address), after.state != before, isLive(source) {
-            onTransition?(after, before)
-            advanceAfterTransition(after, from: before)
-            notifyIfFinished(after, from: before)
-            sendQueuedIfFinished(after, from: before)
-            trackTurn(after, from: before)
-            trackFinalMessage(after, from: before)
-            trackTimeline(after, from: before)
+            // Settling after start-up: reported as a first sighting, so nothing treats it as a finished turn.
+            let from = startupSettle ? nil : before
+            if startupSettle { discardOpenTurn(address) }
+            onTransition?(after, from)
+            advanceAfterTransition(after, from: from)
+            notifyIfFinished(after, from: from)
+            sendQueuedIfFinished(after, from: from)
+            trackTurn(after, from: from)
+            trackFinalMessage(after, from: from)
+            trackTimeline(after, from: from)
         }
         if refreshOutput, panel?.address == address {
             refreshPanelOutput()
         }
+    }
+
+    /// Follows a status change for start-up settle (ticket 41, Codex only); returns true when it is the
+    /// Working → Idle of an agent just coming up.
+    private func observeStartup(_ record: inout Record, status: CoreStatus?, now: Date) -> Bool {
+        let old = record.info.status
+        guard let status, AgentTool.from(app: status.app) == .codex else {
+            record.statusAppearedAt = nil
+            record.startupWorking = false
+            return false
+        }
+        if old == nil || old?.app != status.app {
+            record.statusAppearedAt = now
+            record.workedSinceAppeared = false
+            record.startupWorking = false
+        }
+        let wasWorking = old?.state == "working"
+        if status.state == "working", !wasWorking {
+            let appeared = record.statusAppearedAt
+            record.startupWorking = !record.workedSinceAppeared
+                && appeared.map { now.timeIntervalSince($0) <= timing.startupWorkingWithin } == true
+            record.workedSinceAppeared = true
+            return false
+        }
+        guard status.state != "working" else { return false }
+        defer { record.startupWorking = false }
+        guard wasWorking, record.startupWorking, status.state == "idle", let appeared = record.statusAppearedAt else { return false }
+        return now.timeIntervalSince(appeared) <= timing.startupSettleWithin
     }
 
     private func stateOfStored(_ address: String) -> AgentState? {
@@ -919,11 +963,16 @@ public final class AgentStore {
                 self.finishSummary(address, generation: generation, summary: summary)
             }
         case .error:
-            openTurns.removeValue(forKey: address)?.cancel()
-            bumpGeneration(address)
+            discardOpenTurn(address)
         case .needsYou, .unknown:
             break
         }
+    }
+
+    /// Drops a turn's git baseline without a summary, and any summary still on its way.
+    private func discardOpenTurn(_ address: String) {
+        openTurns.removeValue(forKey: address)?.cancel()
+        bumpGeneration(address)
     }
 
     @discardableResult
