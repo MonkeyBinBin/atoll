@@ -10,14 +10,24 @@ public struct LaunchRecipe: Codable, Equatable, Sendable {
     public var name: String
     public var space: String
     public var worktree: Bool
+    /// Set when it started in a new space: that space's name (empty = named after the folder). `space` is empty
+    /// then. Missing in recipes saved before new spaces existed.
+    public var newSpaceName: String?
 
-    public init(optionID: String, folder: String, task: String, name: String, space: String, worktree: Bool) {
+    public init(optionID: String, folder: String, task: String, name: String, space: String, worktree: Bool,
+                newSpaceName: String? = nil) {
         self.optionID = optionID
         self.folder = folder
         self.task = task
         self.name = name
         self.space = space
         self.worktree = worktree
+        self.newSpaceName = newSpaceName
+    }
+
+    /// The form's Space picker for this recipe: a new space again, or the space it names.
+    public var spaceChoice: LaunchSpaceChoice {
+        newSpaceName != nil ? .new : LaunchSpaceChoice(stored: space)
     }
 
     /// Tool, folder and task: what makes two launches "the same" in the recent list.

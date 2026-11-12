@@ -131,6 +131,32 @@ struct LaunchHistoryTests {
         let data = try JSONEncoder().encode([preset])
         #expect(try JSONDecoder().decode([LaunchPreset].self, from: data) == [preset])
     }
+
+    @Test("a new space comes back as New space with its name, survives restore, round-trips; old recipes have none")
+    func newSpace() throws {
+        var named = recipe("a")
+        named.newSpaceName = "review"
+        #expect(named.spaceChoice == .new)
+        var unnamed = recipe("a")
+        unnamed.newSpaceName = ""
+        #expect(unnamed.spaceChoice == .new)
+        var existing = recipe("a")
+        existing.space = "sp1"
+        #expect(existing.spaceChoice == .existing("sp1"))
+        #expect(recipe("a").spaceChoice == .selected)
+
+        let restored = LaunchHistory.restore(named, folderExists: { _ in true }, availableOptionIDs: ["builtin:claude"],
+                                             defaultOptionID: "builtin:claude", templatesLoaded: true, spaces: ["sp2"])
+        #expect(restored.recipe == named)
+        #expect(restored.notes.isEmpty)
+
+        let data = try JSONEncoder().encode([named, unnamed])
+        #expect(try JSONDecoder().decode([LaunchRecipe].self, from: data) == [named, unnamed])
+        let old = #"{"optionID":"builtin:claude","folder":"/p","task":"t","name":"","space":"sp1","worktree":false}"#
+        let decoded = try JSONDecoder().decode(LaunchRecipe.self, from: Data(old.utf8))
+        #expect(decoded.newSpaceName == nil)
+        #expect(decoded.spaceChoice == .existing("sp1"))
+    }
 }
 
 @MainActor

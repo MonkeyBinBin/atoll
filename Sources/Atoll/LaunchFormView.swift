@@ -397,7 +397,8 @@ struct LaunchFormView: View {
     private var currentRecipe: LaunchRecipe {
         LaunchRecipe(optionID: optionID, folder: folder, task: task.trimmingCharacters(in: .whitespacesAndNewlines),
                      name: name.trimmingCharacters(in: .whitespaces),
-                     space: space.stored, worktree: plan != nil)
+                     space: space.stored, worktree: plan != nil,
+                     newSpaceName: space == .new ? newSpaceName.trimmingCharacters(in: .whitespaces) : nil)
     }
 
     private func toolTitle(_ id: String) -> String {
@@ -482,7 +483,8 @@ struct LaunchFormView: View {
         optionID = r.optionID
         task = r.task
         name = r.name
-        space = LaunchSpaceChoice(stored: r.space)
+        space = r.spaceChoice
+        newSpaceName = r.newSpaceName ?? ""
         spaceOrigin = nil
         branchText = ""
         branchEdited = false
