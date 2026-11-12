@@ -95,6 +95,9 @@ struct HoverCardView: View {
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
             }
+            if let queued = store.queuedMessages[agent.address] {
+                QueuedBadge(queued: queued)
+            }
             if let summary = agent.changeSummary {
                 ChangeSummaryLabel(summary: summary, lineLimit: 2)
             }

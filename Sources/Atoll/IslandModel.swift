@@ -168,6 +168,15 @@ final class IslandModel {
         quickReplyRequest = QuickReplyRequest(index: index, token: (quickReplyRequest?.token ?? 0) + 1)
     }
 
+    /// ⌥↩ in the panel: queue the reply box's text. Seen by the key monitor, because the multi-line
+    /// field editor would insert a newline instead of letting the button's shortcut fire.
+    private(set) var queueRequest = 0
+
+    func requestQueue() {
+        guard case .panel = mode else { return }
+        queueRequest += 1
+    }
+
     /// Keys the focused text box's command suggestions take while shown. The key monitor sees them
     /// before the field editor (which would eat ↑↓ and Return); the box performs them.
     enum CompletionKey: Equatable {

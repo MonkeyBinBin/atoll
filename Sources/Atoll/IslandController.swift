@@ -165,6 +165,10 @@ final class IslandController {
         bubbles?.sharedTree(agent)
     }
 
+    func handleQueuedSent(_ agent: Agent) {
+        bubbles?.queuedSent(agent)
+    }
+
     /// Store reminder: bubble the still-waiting agent again.
     func handleReminder(_ agent: Agent) {
         bubbles?.remind(agent)
@@ -272,6 +276,10 @@ final class IslandController {
         }
         if model.mode == .list, flags == .command, let chars = event.charactersIgnoringModifiers?.lowercased(), chars == "y" || chars == "n" {
             model.respondToSelected(chars == "y" ? .allow : .deny)
+            return true
+        }
+        if isPanel, flags == .option, event.keyCode == 36 || event.keyCode == 76 {
+            model.requestQueue()
             return true
         }
         if isPanel, flags == [.command, .shift], let index = Self.quickReplyKeyCodes.firstIndex(of: event.keyCode) {

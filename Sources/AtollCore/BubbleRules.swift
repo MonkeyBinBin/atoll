@@ -10,6 +10,8 @@ public struct AgentBubble: Equatable, Sendable {
         case state
         /// Another agent became active in the same git working tree.
         case sharedTree
+        /// A message queued from the panel went out at the end of the turn.
+        case queuedSent
     }
 
     public var address: String
@@ -35,6 +37,7 @@ public struct AgentBubble: Equatable, Sendable {
         switch kind {
         case .state: return agent.state.label == state.label
         case .sharedTree: return !agent.sharedTreeWith.isEmpty
+        case .queuedSent: return true
         }
     }
 }

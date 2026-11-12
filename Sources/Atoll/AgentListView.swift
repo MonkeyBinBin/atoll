@@ -92,6 +92,9 @@ struct AgentCard: View {
                             .foregroundStyle(.black)
                     }
                     Spacer(minLength: 4)
+                    if let queued = store.queuedMessages[agent.address] {
+                        QueuedBadge(queued: queued)
+                    }
                     if store.notifyWhenDone.contains(agent.address) {
                         Image(systemName: "bell.fill")
                             .font(.system(size: 10))
@@ -281,6 +284,31 @@ struct PermissionResponseLabel: View {
         case .failed(_, let error): error.message
         case .noLongerWaiting: "The agent had already left that dialog, so nothing was sent."
         default: ""
+        }
+    }
+}
+
+/// "Queued" (or "Queued · held" once the agent errored), with the text as help.
+struct QueuedBadge: View {
+    let queued: QueuedMessage
+
+    var body: some View {
+        Label(queued.status == .held ? "Queued · held" : "Queued", systemImage: queued.status.symbol)
+            .font(.system(size: 10))
+            .foregroundStyle(queued.status.color)
+            .lineLimit(1)
+            .help("Queued message: \(queued.text)")
+    }
+}
+
+extension QueuedMessage.Status {
+    var symbol: String { self == .held ? "pause.circle.fill" : "clock.arrow.circlepath" }
+    var color: Color { self == .held ? PixelPalette.error.color : PixelPalette.waiting.color }
+    var title: String {
+        switch self {
+        case .waiting: "Queued · sends when this turn ends"
+        case .held: "Queued message held · agent errored"
+        case .sending: "Sending queued message…"
         }
     }
 }

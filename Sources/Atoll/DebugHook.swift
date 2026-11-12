@@ -53,6 +53,9 @@ final class DebugHook {
                     model.store.toggleDiff(file)
                 }
             case "deny": model.respondToSelected(.deny)
+            case "queue":
+                // queue <address> <text...>: queue a message for when that agent's turn ends
+                if parts.count > 2 { model.store.queue(parts[2...].joined(separator: " "), for: parts[1]) }
             case "snap": snapshot(name: parts.count > 1 ? parts[1] : "island")
             case "send": if parts.count > 2 { model.store.send(parts[2...].joined(separator: " "), to: parts[1]) }
             case "key": if parts.count > 2 { model.store.pressKey(parts[2], on: parts[1]) }
@@ -76,9 +79,9 @@ final class DebugHook {
                     }
                 }
             case "post":
-                // post <keyCode> [cmd] [shift]: synthetic keyDown through NSApp's event queue
+                // post <keyCode> [cmd] [shift] [opt]: synthetic keyDown through NSApp's event queue
                 if parts.count > 1, let code = UInt16(parts[1]) {
-                    postKey(code, command: parts.contains("cmd"), shift: parts.contains("shift"))
+                    postKey(code, command: parts.contains("cmd"), shift: parts.contains("shift"), option: parts.contains("opt"))
                 }
             case "type":
                 // type <text>: synthetic key events for each character, then Return
@@ -153,7 +156,7 @@ final class DebugHook {
         }
     }
 
-    private func postKey(_ code: UInt16, command: Bool, shift: Bool = false) {
+    private func postKey(_ code: UInt16, command: Bool, shift: Bool = false, option: Bool = false) {
         guard let panel else { return }
         let chars: String = switch code {
         case 18: "1"
@@ -167,7 +170,7 @@ final class DebugHook {
         for type in [NSEvent.EventType.keyDown, .keyUp] {
             if let event = NSEvent.keyEvent(
                 with: type, location: .zero,
-                modifierFlags: NSEvent.ModifierFlags(command ? [.command] : []).union(shift ? [.shift] : []),
+                modifierFlags: NSEvent.ModifierFlags(command ? [.command] : []).union(shift ? [.shift] : []).union(option ? [.option] : []),
                 timestamp: ProcessInfo.processInfo.systemUptime,
                 windowNumber: panel.windowNumber, context: nil, characters: chars, charactersIgnoringModifiers: chars,
                 isARepeat: false, keyCode: code
@@ -216,7 +219,7 @@ final class DebugHook {
         view.cacheDisplay(in: bounds, to: rep)
         let data = rep.representation(using: .png, properties: [:])
         try? data?.write(to: dir.appendingPathComponent("\(name).png"))
-        let info = "frame=\(panel.frame) agents=\(model.store.agents.map { "\($0.address):\($0.state.label)" }) mode=\(model.mode) key=\(panel.isKeyWindow) selection=\(model.selection) live=\(model.store.isLive) send=\(model.store.sendStates) keys=\(model.store.keyStates) responses=\(model.store.permissionResponses) choices=\(model.store.agents.compactMap { a in a.permissionChoices.map { "\(a.address):\($0.allowKey)/\($0.denyKey)" } }) interrupt=\(model.store.interruptStates) feedback=\(model.store.agents.compactMap { a in a.interruptFeedback.map { o in "\(a.address):\(o)" } }) launch=\(model.store.launchState) visible=\(panel.isVisible) fullscreen=\(model.fullScreen) hidden=\(model.hiddenByFullScreen) collapsed=\(model.collapsedAgents?.map(\.address) ?? [])\n"
+        let info = "frame=\(panel.frame) agents=\(model.store.agents.map { "\($0.address):\($0.state.label)" }) mode=\(model.mode) key=\(panel.isKeyWindow) selection=\(model.selection) live=\(model.store.isLive) send=\(model.store.sendStates) keys=\(model.store.keyStates) responses=\(model.store.permissionResponses) queued=\(model.store.queuedMessages) notices=\(model.store.queueNotices) choices=\(model.store.agents.compactMap { a in a.permissionChoices.map { "\(a.address):\($0.allowKey)/\($0.denyKey)" } }) interrupt=\(model.store.interruptStates) feedback=\(model.store.agents.compactMap { a in a.interruptFeedback.map { o in "\(a.address):\(o)" } }) launch=\(model.store.launchState) visible=\(panel.isVisible) fullscreen=\(model.fullScreen) hidden=\(model.hiddenByFullScreen) collapsed=\(model.collapsedAgents?.map(\.address) ?? [])\n"
         try? info.write(to: dir.appendingPathComponent("\(name).txt"), atomically: true, encoding: .utf8)
     }
 }

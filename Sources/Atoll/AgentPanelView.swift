@@ -27,6 +27,11 @@ struct AgentPanelView: View {
             takePrefill()
         }
         .onChange(of: model.draftPrefill[agent.address]) { _, _ in takePrefill() }
+        .onChange(of: model.queueRequest) { _, _ in queueDraft() }
+        .onChange(of: agent.address) { _, _ in
+            queuedExpanded = false
+            replaceToken = nil
+        }
         .onChange(of: model.quickReplyRequest) { _, request in
             guard let request, agent.replyMode.isText || agent.replyMode == .textAndKeys,
                   settings.quickReplies.indices.contains(request.index) else { return }
@@ -39,7 +44,8 @@ struct AgentPanelView: View {
 
     private func takePrefill() {
         guard let text = model.draftPrefill.removeValue(forKey: agent.address) else { return }
-        draft = text
+        // Never overwrite what the user is typing: the returned text goes above it.
+        draft = draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? text : text + "\n" + draft
     }
 
     // MARK: Header
@@ -285,6 +291,7 @@ struct AgentPanelView: View {
         let state = store.sendStates[agent.address]
         let inFlight = state?.isInFlight == true
         return VStack(alignment: .leading, spacing: 6) {
+            queuedRow
             HStack(alignment: .bottom, spacing: 8) {
                 TextField(force ? "Answer \(agent.displayName)…" : "Message \(agent.displayName)…", text: $draft, axis: .vertical)
                     .textFieldStyle(.plain)
@@ -295,6 +302,14 @@ struct AgentPanelView: View {
                     .focused($inputFocused)
                     .onSubmit(submit)
                     .disabled(inFlight)
+                if canQueue {
+                    // ⌥↩ comes through the key monitor (`queueRequest`), not a keyboard shortcut.
+                    Button(replacePending ? "Replace queued?" : "Queue ⌥↩", action: queueDraft)
+                        .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .help(replacePending
+                            ? "Click again to replace the queued message"
+                            : "Send this when the current turn ends (Done or Idle), not now")
+                }
                 Button(force ? "Answer" : "Send", action: submit)
                     .keyboardShortcut(.return, modifiers: .command)
                     .disabled(inFlight || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -338,6 +353,75 @@ struct AgentPanelView: View {
     }
 
     @State private var lastSent = ""
+    /// Set by a first Queue press while a message is already queued; a second press within 4 s replaces it.
+    @State private var replaceToken: UUID?
+    @State private var queuedExpanded = false
+
+    private var replacePending: Bool { replaceToken != nil }
+    private var canQueue: Bool { store.canQueue(agent.address) }
+
+    private func queueDraft() {
+        guard canQueue, !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        if store.queuedMessages[agent.address] != nil, !replacePending {
+            let token = UUID()
+            replaceToken = token
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+                if replaceToken == token { replaceToken = nil }
+            }
+            return
+        }
+        replaceToken = nil
+        if store.queue(draft, for: agent.address) { draft = "" }
+    }
+
+    /// The queued message (one line, click to expand) with its actions, or a note on what became of it.
+    @ViewBuilder
+    private var queuedRow: some View {
+        if let queued = store.queuedMessages[agent.address] {
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: queued.status.symbol)
+                    .foregroundStyle(queued.status.color)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(queued.status.title)
+                        .foregroundStyle(.secondary)
+                    Text(queued.text)
+                        .lineLimit(queuedExpanded ? 8 : 1)
+                        .truncationMode(.tail)
+                        .onTapGesture { queuedExpanded.toggle() }
+                        .help(queuedExpanded ? "Click to collapse" : "Click to show it all")
+                }
+                Spacer(minLength: 4)
+                if queued.status == .held {
+                    Button("Send now") { store.sendQueuedNow(agent.address) }
+                        .buttonStyle(.borderless)
+                        .disabled(!store.canSendQueuedNow(agent.address))
+                        .help(store.canSendQueuedNow(agent.address)
+                            ? "Send it now" : "It would answer the dialog the agent is waiting on")
+                }
+                if queued.status != .sending {
+                    Button("Edit") {
+                        if let text = store.editQueued(agent.address) {
+                            draft = text
+                            inputFocused = true
+                        }
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Back into the reply box; no longer queued")
+                    Button("Cancel") { store.cancelQueued(agent.address) }
+                        .buttonStyle(.borderless)
+                }
+            }
+            .font(.system(size: 11))
+            .padding(8)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.05)))
+        } else if let notice = store.queueNotices[agent.address] {
+            Label(notice == .dropped ? "Queued message dropped · the agent exited"
+                  : "Queued message not sent · another message was still sending; it's back in the box",
+                  systemImage: "xmark.circle")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        }
+    }
 
     /// Canned replies: click sends, ⌥-click puts the text in the reply box to edit.
     @ViewBuilder

@@ -54,6 +54,12 @@ final class SpeechBubbleController {
         enqueue(AgentBubble(address: agent.address, state: agent.state, key: "shared#\(UUID().uuidString)", kind: .sharedTree))
     }
 
+    /// A queued message went out when the turn ended.
+    func queuedSent(_ agent: Agent) {
+        guard model.showsInCollapsedIsland(agent.address) else { return }
+        enqueue(AgentBubble(address: agent.address, state: agent.state, key: "queued#\(UUID().uuidString)", kind: .queuedSent))
+    }
+
     /// Re-announce an agent still waiting past the reminder delay; its own key so it shows again.
     func remind(_ agent: Agent) {
         guard model.showsInCollapsedIsland(agent.address) else { return }
@@ -147,7 +153,9 @@ final class SpeechBubbleController {
         // A stopped agent's change counts (numbers only, no paths), once git has answered.
         let shownAgent = agents.first { $0.address == shown.address }
         let detail: String?
-        if shown.kind == .sharedTree {
+        if shown.kind == .queuedSent {
+            detail = nil
+        } else if shown.kind == .sharedTree {
             // Names only (tool · project or terminal name), like everywhere else a target is named.
             detail = shownAgent.map { agent in
                 "with " + agent.sharedTreeWith.compactMap { other in agents.first { $0.address == other }?.displayName }.joined(separator: ", ")
@@ -231,9 +239,27 @@ private struct SpeechBubbleBody: View {
     let kind: AgentBubble.Kind
     let detail: String?
 
-    private var symbol: String { kind == .sharedTree ? "arrow.triangle.branch" : state.symbol }
-    private var title: String { kind == .sharedTree ? "Shared working tree" : state.fullLabel }
-    private var color: Color { kind == .sharedTree ? PixelPalette.waiting.color : state.color }
+    private var symbol: String {
+        switch kind {
+        case .sharedTree: "arrow.triangle.branch"
+        case .queuedSent: "paperplane.fill"
+        case .state: state.symbol
+        }
+    }
+    private var title: String {
+        switch kind {
+        case .sharedTree: "Shared working tree"
+        case .queuedSent: "Queued message sent"
+        case .state: state.fullLabel
+        }
+    }
+    private var color: Color {
+        switch kind {
+        case .sharedTree: PixelPalette.waiting.color
+        case .queuedSent: PixelPalette.done.color
+        case .state: state.color
+        }
+    }
     let tailX: CGFloat
     let animate: Bool
     let onTap: () -> Void

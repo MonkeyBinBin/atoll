@@ -182,6 +182,7 @@ Status: ready-for-agent
 
 - 狀態機：`等待中`（Herdr 等待人類停止打字，最長約 60 秒）→ `已送達`（RPC 成功回傳）→ `agent 已開始處理`（`started = true`）或 `已送出，無法確認`（`started = null`）；任何一步出錯 → `失敗`（顯示 `error.kind` 與 `hint`）。
 - 永不自動重送；失敗後只提供手動重送。
+- 排隊訊息（ticket 34）：agent Working／Starting 時可排一則（`⌥↩`），回合結束（Done，或從 Working／Starting 轉 Idle）才送，走同一個狀態機、只送一次；Needs you 不會拿它回答，Error 保留待使用者決定，Exited／移除就丟棄。錯過的結束時機（斷線期間）不補送。失敗不重送，文字放回輸入框。只存在記憶體。
 - `blocked: question` 用文字傳送並帶 force（Herdr 預設拒絕送給 blocked 的程式）；`blocked: permission` 只送按鍵；`blocked: auth` 不提供輸入。
 - 不針對各工具解析選單，permission 只提供通用按鍵排。
 

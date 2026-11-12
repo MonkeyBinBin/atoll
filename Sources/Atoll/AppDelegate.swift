@@ -61,6 +61,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store.onWorktreeCreated = { [weak self] path in self?.settings.rememberFolder(path) }
         island.debugHook?.onOther = { [weak self] parts, dir in self?.notifier.debugCommand(parts, dir: dir) }
         store.onNotifyWhenDone = { [weak self] agent in self?.notifier.notifyWhenDone(agent) }
+        store.onQueuedSent = { [weak self] agent in self?.island.handleQueuedSent(agent) }
+        store.onQueuedFailed = { [weak self] address, text in self?.model.draftPrefill[address] = text }
         store.onAutoAdvance = { [weak self] next in self?.model.autoAdvance(to: next) }
         store.onAllClear = { [weak self] in self?.model.showAllClear() }
         store.onReminder = { [weak self] agent, waited in

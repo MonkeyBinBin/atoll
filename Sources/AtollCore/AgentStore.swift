@@ -139,6 +139,15 @@ public final class AgentStore {
     /// An armed agent finished its turn (Done, Exited, or stopped to Idle); it is now disarmed.
     public var onNotifyWhenDone: ((_ agent: Agent) -> Void)?
 
+    /// Messages waiting for their agent's turn to end (ticket 34). In memory only.
+    public private(set) var queuedMessages: [String: QueuedMessage] = [:]
+    /// Notes about a queued message for the open panel's agent; cleared with the panel.
+    public private(set) var queueNotices: [String: QueueNotice] = [:]
+    /// A queued message went out (Delivered / Agent started / Sent · unconfirmed).
+    public var onQueuedSent: ((_ agent: Agent) -> Void)?
+    /// A queued message couldn't be sent; never retried, the text goes back to the user.
+    public var onQueuedFailed: ((_ address: String, _ text: String) -> Void)?
+
     /// Computes per-turn change summaries; nil turns the feature off (no git runs at all).
     /// Lists a turn's files and diffs for the panel's changes view; nil = the view is unavailable.
     public var changeInspector: (any ChangeInspecting)?
@@ -501,6 +510,7 @@ public final class AgentStore {
             onTransition?(after, before)
             advanceAfterTransition(after, from: before)
             notifyIfFinished(after, from: before)
+            sendQueuedIfFinished(after, from: before)
             trackTurn(after, from: before)
         }
         if refreshOutput, panel?.address == address {
@@ -625,6 +635,7 @@ public final class AgentStore {
         let newcomers = treeProbe == nil ? [] : markSharedTrees(&built)
         agents = built
         notifyWhenDone = notifyWhenDone.filter { records[$0] != nil }
+        reconcileQueued()
         for address in Set(openTurns.keys).union(changeSummaries.keys).union(toplevels.keys) where records[address] == nil {
             openTurns.removeValue(forKey: address)?.cancel()
             changeSummaries[address] = nil
@@ -879,22 +890,115 @@ public final class AgentStore {
         if notifyWhenDone.contains(address) { notifyWhenDone.remove(address) } else { notifyWhenDone.insert(address) }
     }
 
-    /// A turn ended: Done or Exited, or Idle straight from Working (stopped without reporting Done).
-    /// Error ends it too but already notifies; Needs you is mid-turn and keeps the bell armed.
+    /// A turn ended: Done or Exited, or Idle straight from Working / Starting (stopped without reporting Done).
+    /// Error ends it too but is handled on its own; Needs you is mid-turn.
+    private static func turnEnded(_ state: AgentState, from previous: AgentState?) -> Bool {
+        switch state {
+        case .done, .exited: true
+        case .idle: previous == .working || previous == .starting
+        default: false
+        }
+    }
+
+    /// Error already notifies, so it just disarms the bell; Needs you keeps it armed.
     private func notifyIfFinished(_ agent: Agent, from previous: AgentState?) {
         guard notifyWhenDone.contains(agent.address) else { return }
-        let finished: Bool
-        switch agent.state {
-        case .done, .exited: finished = true
-        case .idle: finished = previous == .working || previous == .starting
-        case .error:
+        if agent.state == .error {
             notifyWhenDone.remove(agent.address)
             return
-        default: finished = false
         }
-        guard finished else { return }
+        guard Self.turnEnded(agent.state, from: previous) else { return }
         notifyWhenDone.remove(agent.address)
         onNotifyWhenDone?(agent)
+    }
+
+    // MARK: Queued message
+
+    /// Only a working agent takes a queued message; otherwise the panel sends directly.
+    public func canQueue(_ address: String) -> Bool {
+        guard let state = agent(address)?.state else { return false }
+        return state == .working || state == .starting
+    }
+
+    /// Queues `text` for an agent that is working; replaces an earlier one. False when it isn't working
+    /// or the text is empty.
+    @discardableResult
+    public func queue(_ text: String, for address: String) -> Bool {
+        guard canQueue(address), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        // A trailing newline would submit an extra empty line.
+        var text = text
+        while text.last?.isWhitespace == true { text.removeLast() }
+        queuedMessages[address] = QueuedMessage(text: text)
+        queueNotices[address] = nil
+        return true
+    }
+
+    public func cancelQueued(_ address: String) {
+        guard queuedMessages[address]?.status != .sending else { return }
+        queuedMessages[address] = nil
+    }
+
+    /// Takes the queued text out to edit it in the reply box (it is no longer queued).
+    public func editQueued(_ address: String) -> String? {
+        guard let queued = queuedMessages[address], queued.status != .sending else { return nil }
+        queuedMessages[address] = nil
+        return queued.text
+    }
+
+    /// Exited drops the message instead of sending it.
+    private func sendQueuedIfFinished(_ agent: Agent, from previous: AgentState?) {
+        guard let queued = queuedMessages[agent.address], queued.status == .waiting,
+              agent.state != .exited, Self.turnEnded(agent.state, from: previous) else { return }
+        deliverQueued(agent.address, text: queued.text)
+    }
+
+    /// A held message may go out on the user's say-so, but never into a dialog it would answer.
+    public func canSendQueuedNow(_ address: String) -> Bool {
+        guard queuedMessages[address]?.status == .held, let agent = agent(address) else { return false }
+        return agent.replyMode == .text(force: false)
+    }
+
+    public func sendQueuedNow(_ address: String) {
+        guard canSendQueuedNow(address), let queued = queuedMessages[address] else { return }
+        deliverQueued(address, text: queued.text)
+    }
+
+    /// One attempt through the panel's send path; a failure hands the text back instead of retrying.
+    private func deliverQueued(_ address: String, text: String) {
+        queuedMessages[address]?.status = .sending
+        let started = send(text, to: address) { [weak self] state in
+            guard let self else { return }
+            self.queuedMessages[address] = nil
+            if case .failed = state {
+                self.onQueuedFailed?(address, text)
+            } else if let agent = self.agent(address) {
+                self.onQueuedSent?(agent)
+            }
+        }
+        if !started {
+            queuedMessages[address] = nil
+            queueNotices[address] = .notSent
+            onQueuedFailed?(address, text)
+        }
+    }
+
+    /// State-based upkeep on every rebuild: Error holds a waiting message, Exited or removed drops it
+    /// (one already being sent finishes first). Sending only ever happens on a live transition, so a turn end
+    /// missed while offline isn't caught up.
+    private func reconcileQueued() {
+        for (address, queued) in queuedMessages where queued.status != .sending {
+            guard records[address] != nil else {
+                queuedMessages[address] = nil
+                continue
+            }
+            let state = agent(address)?.state
+            if records[address]?.info.state == "finished" || state == .exited {
+                queuedMessages[address] = nil
+                if panel?.address == address { queueNotices[address] = .dropped }
+            } else if queued.status == .waiting, state == .error {
+                queuedMessages[address]?.status = .held
+            }
+        }
     }
 
     // MARK: Waiting reminders
@@ -940,6 +1044,7 @@ public final class AgentStore {
         if panel?.address != address {
             outputRequest += 1
             panel = PanelState(address: address)
+            queueNotices.removeAll()
             disarmAdvance()
         }
         if stateOfStored(address) == .done {
@@ -1000,6 +1105,7 @@ public final class AgentStore {
         outputRequest += 1
         let wasOpen = panel != nil
         panel = nil
+        queueNotices.removeAll()
         disarmAdvance()
         // An ended agent kept on screen for its open panel may leave now.
         if wasOpen { rebuild() }
