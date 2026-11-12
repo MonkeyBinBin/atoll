@@ -96,6 +96,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store.autoAdvance = settings.autoAdvance
         if (store.changeProbe != nil) != settings.changeSummary {
             store.changeProbe = settings.changeSummary ? GitProbe() : nil
+            store.changeInspector = settings.changeSummary ? GitProbe() : nil
         }
         if (store.treeProbe != nil) != settings.sharedTreeWarning {
             store.treeProbe = settings.sharedTreeWarning ? GitProbe() : nil

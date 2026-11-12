@@ -140,6 +140,9 @@ public final class AgentStore {
     public var onNotifyWhenDone: ((_ agent: Agent) -> Void)?
 
     /// Computes per-turn change summaries; nil turns the feature off (no git runs at all).
+    /// Lists a turn's files and diffs for the panel's changes view; nil = the view is unavailable.
+    public var changeInspector: (any ChangeInspecting)?
+
     public var changeProbe: (any ChangeProbing)? {
         didSet {
             guard changeProbe == nil, oldValue != nil else { return }
@@ -630,6 +633,7 @@ public final class AgentStore {
         }
         reconcileReminders()
         reconcilePreviews()
+        dropStaleChanges()
         for address in newcomers {
             if let agent = agent(address) { onSharedTree?(agent) }
         }
@@ -946,6 +950,52 @@ public final class AgentStore {
         refreshPanelOutput()
     }
 
+    // MARK: Changes view
+
+    /// Shows the open panel's agent's last turn changes in place of its output, listing the files on demand.
+    public func showChanges() {
+        guard let inspector = changeInspector, var current = panel, current.changes == nil,
+              let summary = agent(current.address)?.changeSummary, !summary.isEmpty else { return }
+        current.changes = PanelChanges(summary: summary)
+        panel = current
+        let address = current.address
+        Task {
+            let files = await inspector.files(for: summary)
+            guard self.panel?.address == address, self.panel?.changes?.summary == summary else { return }
+            self.panel?.changes?.files = files.map { .loaded($0) } ?? .failed
+        }
+    }
+
+    public func hideChanges() {
+        panel?.changes = nil
+    }
+
+    /// Expands a file (loading its diff the first time) or collapses it.
+    public func toggleDiff(_ file: ChangedFile) {
+        guard let inspector = changeInspector, let changes = panel?.changes, file.hasDiff else { return }
+        if changes.expanded.contains(file.path) {
+            panel?.changes?.expanded.remove(file.path)
+            return
+        }
+        panel?.changes?.expanded.insert(file.path)
+        if let existing = changes.diffs[file.path], existing != .failed { return }
+        panel?.changes?.diffs[file.path] = .loading
+        let address = panel?.address
+        let summary = changes.summary
+        Task {
+            let diff = await inspector.diff(of: file, for: summary)
+            guard self.panel?.address == address, self.panel?.changes?.summary == summary else { return }
+            self.panel?.changes?.diffs[file.path] = diff.map { .loaded($0) } ?? .failed
+        }
+    }
+
+    /// A new turn (or a recomputed summary) makes the shown changes stale.
+    private func dropStaleChanges() {
+        guard let current = panel, let changes = current.changes,
+              agent(current.address)?.changeSummary != changes.summary else { return }
+        panel?.changes = nil
+    }
+
     public func closePanel() {
         outputRequest += 1
         let wasOpen = panel != nil
@@ -1241,9 +1291,31 @@ public struct PanelState: Equatable, Sendable {
     public var fetchedAt: Date?
     public var isLoading = false
     public var error: HerdrError?
+    /// The turn's changes view, while it's shown in this panel. Code lives only here: gone with the panel.
+    public var changes: PanelChanges?
 
     public init(address: String) {
         self.address = address
+    }
+}
+
+/// The open panel's view of a finished turn's changes.
+public struct PanelChanges: Equatable, Sendable {
+    public enum Load<Value: Equatable & Sendable>: Equatable, Sendable {
+        case loading
+        case loaded(Value)
+        case failed
+    }
+
+    /// The summary being inspected; a new turn replaces it and closes the view.
+    public var summary: ChangeSummary
+    public var files: Load<[ChangedFile]> = .loading
+    /// Diffs of the files expanded so far, by path.
+    public var diffs: [String: Load<FileDiff>] = [:]
+    public var expanded: Set<String> = []
+
+    public init(summary: ChangeSummary) {
+        self.summary = summary
     }
 }
 

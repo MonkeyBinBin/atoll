@@ -23,8 +23,16 @@ public struct ChangeSummary: Equatable, Sendable {
     public var toplevel: String
     /// Another agent was in the same working tree, so the changes can't be attributed to this one.
     public var sharedTree = false
+    /// The commit the numbers were diffed from (the turn's starting HEAD, or HEAD for `.head`); the
+    /// changes view diffs from the same one. Empty when unknown.
+    public var baseCommit: String
+    /// The untracked files counted in `untracked` (paths relative to `toplevel`), sorted.
+    public var newFiles: [String]
 
-    public init(insertions: Int, deletions: Int, files: Int, untracked: Int, baseline: Baseline, toplevel: String, sharedTree: Bool = false) {
+    public init(
+        insertions: Int, deletions: Int, files: Int, untracked: Int, baseline: Baseline, toplevel: String,
+        sharedTree: Bool = false, baseCommit: String = "", newFiles: [String] = []
+    ) {
         self.insertions = insertions
         self.deletions = deletions
         self.files = files
@@ -32,6 +40,8 @@ public struct ChangeSummary: Equatable, Sendable {
         self.baseline = baseline
         self.toplevel = toplevel
         self.sharedTree = sharedTree
+        self.baseCommit = baseCommit
+        self.newFiles = newFiles
     }
 
     public var isEmpty: Bool { files == 0 && untracked == 0 }
@@ -124,7 +134,7 @@ public protocol GitRunner: Sendable {
 }
 
 public struct GitProbe: ChangeProbing, WorkingTreeProbing {
-    private let runner: GitRunner
+    let runner: GitRunner
 
     public init(runner: GitRunner = ProcessGitRunner()) {
         self.runner = runner
@@ -152,13 +162,16 @@ public struct GitProbe: ChangeProbing, WorkingTreeProbing {
         guard let stat = await runner.run(["diff", "--no-ext-diff", "--no-textconv", "--shortstat", from], in: directory),
               let untracked = await untracked(directory) else { return nil }
         let counts = ChangeSummary.parseShortstat(stat)
+        let newFiles = base.map { untracked.subtracting($0.untracked) } ?? untracked
         return ChangeSummary(
             insertions: counts.insertions,
             deletions: counts.deletions,
             files: counts.files,
-            untracked: base.map { untracked.subtracting($0.untracked).count } ?? untracked.count,
+            untracked: newFiles.count,
             baseline: base == nil ? .head : base!.dirty ? .turnStartDirty : .turnStart,
-            toplevel: toplevel
+            toplevel: toplevel,
+            baseCommit: from,
+            newFiles: newFiles.sorted()
         )
     }
 

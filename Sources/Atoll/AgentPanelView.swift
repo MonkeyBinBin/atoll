@@ -102,7 +102,22 @@ struct AgentPanelView: View {
                     .foregroundStyle(agent.state.color)
                 }
                 if let summary = agent.changeSummary {
-                    ChangeSummaryLabel(summary: summary)
+                    if store.changeInspector != nil, !summary.isEmpty {
+                        Button {
+                            if store.panel?.changes == nil { store.showChanges() } else { store.hideChanges() }
+                        } label: {
+                            HStack(spacing: 4) {
+                                ChangeSummaryLabel(summary: summary)
+                                Image(systemName: store.panel?.changes == nil ? "chevron.right" : "chevron.down")
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .help(store.panel?.changes == nil ? "Show the changed files and diffs" : "Back to the terminal output")
+                    } else {
+                        ChangeSummaryLabel(summary: summary)
+                    }
                 }
                 SharedTreeLabel(agent: agent, store: store, lineLimit: 2)
             }
@@ -155,7 +170,21 @@ struct AgentPanelView: View {
 
     // MARK: Output
 
+    @ViewBuilder
     private var outputSection: some View {
+        if let changes = store.panel?.changes {
+            ChangesView(
+                changes: changes,
+                store: store,
+                font: TerminalFont.font(family: settings.outputFontFamily, size: settings.outputFontSize),
+                height: settings.largePanel ? 460 : 220
+            )
+        } else {
+            terminalOutput
+        }
+    }
+
+    private var terminalOutput: some View {
         let panel = store.panel
         return VStack(alignment: .leading, spacing: 4) {
             TerminalOutputView(

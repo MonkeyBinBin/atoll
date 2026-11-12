@@ -40,6 +40,13 @@ final class DebugHook {
             case "esc": model.escape()
             case "down": model.moveSelection(1)
             case "allow": model.respondToSelected(.allow)
+            case "changes": model.store.showChanges()
+            case "difffile":
+                // difffile <path>: expand / collapse that file in the open changes view
+                if parts.count > 1, case .loaded(let files) = model.store.panel?.changes?.files,
+                   let file = files.first(where: { $0.path == parts[1] }) {
+                    model.store.toggleDiff(file)
+                }
             case "deny": model.respondToSelected(.deny)
             case "snap": snapshot(name: parts.count > 1 ? parts[1] : "island")
             case "send": if parts.count > 2 { model.store.send(parts[2...].joined(separator: " "), to: parts[1]) }
