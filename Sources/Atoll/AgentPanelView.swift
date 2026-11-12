@@ -263,6 +263,10 @@ struct AgentPanelView: View {
                     .keyboardShortcut(.return, modifiers: .command)
                     .disabled(inFlight || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
+            .commandCompletion(
+                model: model, draft: $draft, focused: inputFocused,
+                tool: agent.tool, cwd: agent.projectPath, onSubmit: submit
+            )
             quickReplyRow(disabled: inFlight)
             sendStatus(state)
         }

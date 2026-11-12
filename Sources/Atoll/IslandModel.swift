@@ -168,6 +168,25 @@ final class IslandModel {
         quickReplyRequest = QuickReplyRequest(index: index, token: (quickReplyRequest?.token ?? 0) + 1)
     }
 
+    /// Keys the focused text box's command suggestions take while shown. The key monitor sees them
+    /// before the field editor (which would eat ↑↓ and Return); the box performs them.
+    enum CompletionKey: Equatable {
+        case previous, next, complete, accept, dismiss
+    }
+
+    struct CompletionKeyRequest: Equatable {
+        var key: CompletionKey
+        var token: Int
+    }
+
+    /// Set by the focused reply/task box while it shows suggestions.
+    var completionActive = false
+    private(set) var completionKeyRequest: CompletionKeyRequest?
+
+    func requestCompletionKey(_ key: CompletionKey) {
+        completionKeyRequest = CompletionKeyRequest(key: key, token: (completionKeyRequest?.token ?? 0) + 1)
+    }
+
     /// The open panel's reply box holds unsent text: auto-advance must not yank it away.
     var panelHasDraft = false
     /// Briefly true after the last waiting agent was answered.

@@ -246,6 +246,20 @@ final class IslandController {
     private func handleKey(_ event: NSEvent) -> Bool {
         guard event.window === panel else { return false }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if model.completionActive, flags.isDisjoint(with: [.command, .option, .control]) {
+            let key: IslandModel.CompletionKey? = switch event.keyCode {
+            case 126: .previous                                   // ↑
+            case 125: .next                                       // ↓
+            case 48: flags.contains(.shift) ? .previous : .complete // Tab / ⇧Tab
+            case 36, 76: flags.contains(.shift) ? nil : .accept   // Return / Enter
+            case 53: .dismiss                                     // Esc
+            default: nil
+            }
+            if let key {
+                model.requestCompletionKey(key)
+                return true
+            }
+        }
         if event.keyCode == 53 { // Esc
             model.escape()
             return true

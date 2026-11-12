@@ -77,6 +77,10 @@ struct LaunchFormView: View {
                         .lineLimit(2...5)
                         .textFieldStyle(.roundedBorder)
                         .focused($taskFocused)
+                        .commandCompletion(
+                            model: model, draft: $task, focused: taskFocused,
+                            tool: option.tool, cwd: folder.isEmpty ? nil : folder
+                        )
                 }
                 GridRow {
                     label("Name")
