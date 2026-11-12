@@ -118,6 +118,10 @@ struct SettingsView: View {
                 Text("Puts the command or question (e.g. \"Bash: rm -rf dist\") in the notification. Only then can you Allow from it; Deny and Reply work either way.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Toggle("Only notify for the island's space", isOn: $settings.notifyIslandSpaceOnly)
+                Text("When the island shows one Herdr space, agents elsewhere don't notify (they still show on the island). The panel's \"notify when done\" bell always notifies.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Picker("Remind after", selection: $settings.reminderMinutes) {
                     Text("Off").tag(0)
                     ForEach([2, 5, 10], id: \.self) { Text("\($0) min").tag($0) }

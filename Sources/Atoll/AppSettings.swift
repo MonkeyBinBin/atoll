@@ -55,6 +55,8 @@ final class AppSettings {
     var notificationsEnabled: Bool { didSet { defaults.set(notificationsEnabled, forKey: "notificationsEnabled") } }
     /// Needs-you notifications show the waiting reason (and only then offer Allow). Off by default.
     var notifyShowsWaitingReason: Bool { didSet { defaults.set(notifyShowsWaitingReason, forKey: "notifyShowsWaitingReason") } }
+    /// Only agents in the island's space notify (ticket 44); the bell is exempt.
+    var notifyIslandSpaceOnly: Bool { didSet { defaults.set(notifyIslandSpaceOnly, forKey: "notifyIslandSpaceOnly") } }
     /// Canned replies under the panel's reply box (normalized; empty = none shown).
     var quickReplies: [String] { didSet { defaults.set(quickReplies, forKey: "quickReplies") } }
     /// After a turn finishes, show what it changed in git (+/− lines, files).
@@ -138,6 +140,7 @@ final class AppSettings {
         decorations = defaults.object(forKey: "decorations") as? Bool ?? true
         notificationsEnabled = defaults.object(forKey: "notificationsEnabled") as? Bool ?? true
         notifyShowsWaitingReason = defaults.bool(forKey: "notifyShowsWaitingReason")
+        notifyIslandSpaceOnly = defaults.bool(forKey: "notifyIslandSpaceOnly")
         speechBubbles = defaults.object(forKey: "speechBubbles") as? Bool ?? true
         reminderMinutes = defaults.object(forKey: "reminderMinutes") as? Int ?? 5
         noOutputMinutes = defaults.object(forKey: "noOutputMinutes") as? Int ?? 10

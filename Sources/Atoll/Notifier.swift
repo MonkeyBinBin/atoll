@@ -56,20 +56,29 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         })
     }
 
+    /// Settings' rules, narrowed to the island's space when "Only notify for the island's space" is on.
+    private var notificationSettings: NotificationSettings {
+        var result = settings.notificationSettings
+        if settings.notifyIslandSpaceOnly {
+            result.space = SpaceGrouping.effective(SpaceFilter(stored: settings.islandSpace), spaces: store.spaces)
+        }
+        return result
+    }
+
     func handle(_ agent: Agent, from previous: AgentState?) {
-        guard let note = rules.notification(for: agent, from: previous, settings: settings.notificationSettings) else { return }
+        guard let note = rules.notification(for: agent, from: previous, settings: notificationSettings) else { return }
         deliver(note, for: agent)
     }
 
     /// An agent armed with "notify when done" finished its turn.
     func notifyWhenDone(_ agent: Agent) {
-        guard let note = rules.finished(for: agent, settings: settings.notificationSettings) else { return }
+        guard let note = rules.finished(for: agent, settings: notificationSettings) else { return }
         post(note)
     }
 
     /// A Needs-you episode outlasted the reminder delay.
     func remind(_ agent: Agent, waited: TimeInterval) {
-        guard let note = rules.reminder(for: agent, waited: waited, settings: settings.notificationSettings) else { return }
+        guard let note = rules.reminder(for: agent, waited: waited, settings: notificationSettings) else { return }
         deliver(note, for: agent)
     }
 
@@ -100,7 +109,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     }
 
     private func decorated(_ note: AgentNotification, _ agent: Agent) -> AgentNotification {
-        NotificationRules.decorate(note, with: agent, settings: settings.notificationSettings)
+        NotificationRules.decorate(note, with: agent, settings: notificationSettings)
     }
 
     private func post(_ note: AgentNotification, draft: String? = nil) {

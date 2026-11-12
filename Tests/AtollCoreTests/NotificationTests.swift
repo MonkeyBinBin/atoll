@@ -92,4 +92,52 @@ struct NotificationTests {
         h.client.emit(.disconnected(reason: "x"))
         #expect(sink.sent.isEmpty)
     }
+
+    // MARK: Island space only (ticket 44)
+
+    func agent(_ address: String, _ state: AgentState, space: String?, turn: UInt64 = 1) -> Agent {
+        var agent = Agent(address: address, state: state, projectPath: "/p", waitingSince: state.isNeedsYou ? Date(timeIntervalSince1970: 100) : nil, turn: turn)
+        agent.spaceID = space
+        return agent
+    }
+
+    @Test("limited to a space: agents elsewhere don't notify (Needs you, Error, Done, reminder)")
+    func outOfSpace() {
+        var rules = NotificationRules()
+        let settings = NotificationSettings(doneAgents: ["t2"], space: .space("sp1"))
+        #expect(rules.notification(for: agent("t2", .needsYou(.question), space: "sp2"), from: .working, settings: settings) == nil)
+        #expect(rules.notification(for: agent("t2", .error, space: nil), from: .working, settings: settings) == nil)
+        #expect(rules.notification(for: agent("t2", .done, space: "sp2"), from: .working, settings: settings) == nil)
+        #expect(rules.reminder(for: agent("t2", .needsYou(.question), space: "sp2"), waited: 300, settings: settings) == nil)
+        // Inside the space: as before.
+        #expect(rules.notification(for: agent("t1", .needsYou(.question), space: "sp1"), from: .working, settings: settings)?.body == "Needs you")
+        #expect(rules.reminder(for: agent("t1", .needsYou(.question), space: "sp1"), waited: 300, settings: settings) != nil)
+    }
+
+    @Test("Other limits to agents in no space; All notifies everyone")
+    func otherAndAll() {
+        var rules = NotificationRules()
+        let other = NotificationSettings(space: .other)
+        #expect(rules.notification(for: agent("t1", .error, space: "sp1"), from: .working, settings: other) == nil)
+        #expect(rules.notification(for: agent("t2", .error, space: nil), from: .working, settings: other) != nil)
+        #expect(rules.notification(for: agent("t3", .error, space: "sp9"), from: .working, settings: NotificationSettings()) != nil)
+    }
+
+    @Test("the notify-when-done bell ignores the space")
+    func bellIgnoresSpace() {
+        var rules = NotificationRules()
+        #expect(rules.finished(for: agent("t2", .done, space: "sp2"), settings: NotificationSettings(space: .space("sp1"))) != nil)
+    }
+
+    @Test("a skipped transition isn't sent later; the next one is judged afresh")
+    func skippedNotRecorded() {
+        var rules = NotificationRules()
+        let limited = NotificationSettings(space: .space("sp1"))
+        let waiting = agent("t2", .needsYou(.question), space: "sp2")
+        #expect(rules.notification(for: waiting, from: .working, settings: limited) == nil)
+        // Switching the island to that space later: the same transition isn't re-run, so nothing is sent then.
+        // A later transition of the same agent, now in range, notifies.
+        let error = agent("t2", .error, space: "sp2", turn: 2)
+        #expect(rules.notification(for: error, from: .working, settings: NotificationSettings(space: .space("sp2")))?.body == "Error")
+    }
 }

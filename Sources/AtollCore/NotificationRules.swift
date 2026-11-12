@@ -9,12 +9,16 @@ public struct NotificationSettings: Equatable, Sendable {
     /// Put the waiting reason ("Bash: rm -rf dist") in Needs-you notifications. Off by default; without it a
     /// notification never offers Allow, since approving a command you can't see is approving blind.
     public var showWaitingReason: Bool
+    /// Only agents in this range notify on their own (ticket 44); the "notify when done" bell always does.
+    public var space: SpaceFilter
 
-    public init(enabled: Bool = true, doneAgents: Set<String> = [], doneProjects: Set<String> = [], showWaitingReason: Bool = false) {
+    public init(enabled: Bool = true, doneAgents: Set<String> = [], doneProjects: Set<String> = [], showWaitingReason: Bool = false,
+                space: SpaceFilter = .all) {
         self.enabled = enabled
         self.doneAgents = doneAgents
         self.doneProjects = doneProjects
         self.showWaitingReason = showWaitingReason
+        self.space = space
     }
 }
 
@@ -92,7 +96,8 @@ public struct NotificationRules: Sendable {
             lastSent[agent.address] = nil
             return nil
         }
-        guard settings.enabled else { return nil }
+        // Out of range: skipped, not held back. Nothing is recorded, so the next transition is judged afresh.
+        guard settings.enabled, settings.space.contains(agent) else { return nil }
         if let previous, previous.label == agent.state.label { return nil }
         let key = "\(category)#\(agent.turn)"
         if lastSent[agent.address] == key { return nil }
@@ -135,7 +140,7 @@ public struct NotificationRules: Sendable {
 
     /// The one reminder for a Needs-you episode that outlasted the reminder delay.
     public func reminder(for agent: Agent, waited: TimeInterval, settings: NotificationSettings) -> AgentNotification? {
-        guard settings.enabled, agent.state.isNeedsYou else { return nil }
+        guard settings.enabled, settings.space.contains(agent), agent.state.isNeedsYou else { return nil }
         let minutes = max(1, Int(waited / 60))
         let episode = Int(agent.waitingSince?.timeIntervalSince1970 ?? 0)
         return AgentNotification(
