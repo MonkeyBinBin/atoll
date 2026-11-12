@@ -136,6 +136,7 @@ struct AgentPanelView: View {
                     .foregroundStyle(.secondary)
                     .transition(.opacity)
             }
+            PinButton(model: model)
             doneBell
             Button {
                 model.escape()

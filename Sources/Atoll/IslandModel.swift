@@ -115,6 +115,8 @@ final class IslandModel {
     var mode: Mode = .collapsed {
         didSet {
             guard mode != oldValue else { return }
+            // A pin lasts for one expansion: the next one closes on outside clicks again.
+            if mode == .collapsed { pinned = false }
             hover = nil
             allClear = false
             // Leaving a panel (by any route) drops its output: it lives only while the panel is open.
@@ -125,6 +127,9 @@ final class IslandModel {
         }
     }
     var selection = 0
+    /// Expanded and pinned: clicks outside the island (other apps, our other windows) leave it open.
+    /// Esc, the header and the hotkeys still close it.
+    var pinned = false
 
     /// A character under the mouse in the collapsed island; anchor is in window coordinates (top-left origin).
     struct Hover: Equatable {

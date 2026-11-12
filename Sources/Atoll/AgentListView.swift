@@ -57,6 +57,7 @@ struct AgentListView: View {
                      : "↑↓ select · ↩ open · ⌘1–9 jump · esc close")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
+                PinButton(model: model)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -327,5 +328,23 @@ struct NoOutputLabel: View {
                 .lineLimit(1)
                 .help("The screen hasn't changed since \(Format.clockSeconds.string(from: since)).")
         }
+    }
+}
+
+/// Keeps the expanded island open when clicking elsewhere (until it's closed on purpose).
+struct PinButton: View {
+    @Bindable var model: IslandModel
+
+    var body: some View {
+        Button {
+            model.pinned.toggle()
+        } label: {
+            Image(systemName: model.pinned ? "pin.fill" : "pin")
+                .foregroundStyle(model.pinned ? AnyShapeStyle(PixelPalette.waiting.color) : AnyShapeStyle(.secondary))
+        }
+        .buttonStyle(.borderless)
+        .help(model.pinned
+            ? "Pinned: stays open when you click elsewhere · click to unpin"
+            : "Pin: stay open when clicking outside the island")
     }
 }

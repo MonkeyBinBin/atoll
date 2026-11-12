@@ -234,8 +234,8 @@ final class IslandController {
     }
 
     private func collapseFromOutside() {
-        // Not while a modal (e.g. the Finder folder picker of the launch form) is up.
-        guard NSApp.modalWindow == nil, model.isExpanded else { return }
+        // Not while a modal (e.g. the Finder folder picker of the launch form) is up, nor while pinned.
+        guard NSApp.modalWindow == nil, model.isExpanded, !model.pinned else { return }
         model.collapse()
     }
 

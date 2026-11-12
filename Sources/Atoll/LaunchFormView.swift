@@ -68,6 +68,7 @@ struct LaunchFormView: View {
                     .keyboardShortcut("r", modifiers: .command)
                     .disabled(settings.recentLaunches.isEmpty)
                     .help("Fill in the last launch (⌘R); confirm with Launch")
+                PinButton(model: model)
                 Button { model.escape() } label: { Image(systemName: "xmark") }
                     .buttonStyle(.borderless)
             }
