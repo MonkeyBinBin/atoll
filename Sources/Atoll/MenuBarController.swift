@@ -34,9 +34,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         guard let button = item.button else { return }
         let waiting = store.waitingCount
         let offline = !store.isLive
-        let symbol = offline ? "circle.dotted" : (waiting > 0 ? "exclamationmark.circle.fill" : "circle.grid.2x2.fill")
-        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Atoll")
-        image?.isTemplate = true
+        let icon: MenuBarIcon = offline ? .offline : (waiting > 0 ? .waiting : .idle)
+        let image = icon.image
+        image.accessibilityDescription = "Atoll"
         button.image = image
         button.imagePosition = .imageLeading
         button.title = waiting > 0 ? " \(waiting)" : ""
