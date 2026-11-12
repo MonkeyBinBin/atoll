@@ -59,6 +59,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store.onWaitingDetails = { [weak self] agent in self?.notifier.waitingDetails(agent) }
         store.worktreeCreator = GitWorktreeCreator()
         store.onWorktreeCreated = { [weak self] path in self?.settings.rememberFolder(path) }
+        store.onLaunchFinished = { [weak self] succeeded in
+            guard let self, let recipe = self.model.pendingLaunchRecipe else { return }
+            // Either way it no longer belongs to a launch in progress; only one that went out is remembered.
+            self.model.pendingLaunchRecipe = nil
+            if succeeded { self.settings.recordLaunch(recipe) }
+        }
         island.debugHook?.onOther = { [weak self] parts, dir in self?.notifier.debugCommand(parts, dir: dir) }
         store.onNotifyWhenDone = { [weak self] agent in self?.notifier.notifyWhenDone(agent) }
         store.onQueuedSent = { [weak self] agent in self?.island.handleQueuedSent(agent) }

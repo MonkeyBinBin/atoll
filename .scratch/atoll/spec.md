@@ -98,7 +98,7 @@ Status: ready-for-agent
 ### 隱私
 
 64. As a 使用者, I want 程式只與本機的 herdr-core、herdr CLI 與 cmux 溝通, so that prompt 與終端機輸出不會離開本機
-65. As a 使用者, I want 近期輸出（以及回合變更的 diff，ticket 32）只在面板開著時存在記憶體中、關閉即丟棄, so that 沒有殘留的本機快取。唯一例外是等待原因預覽（ticket 27）：來源沒有提供等待原因時，agent 進入 Needs you 會讀一次畫面，只保留擷取出來的最多 2 行（每行截斷），離開 Needs you 就丟棄，不寫入磁碟。permission 對話框即使來源有提供原因也會讀一次畫面，但只保留 Allow／Deny 對應的按鍵（ticket 30），同樣離開 Needs you 就丟棄。另一個例外是回合的最後一句話（ticket 35）：來源沒有提供 `status.msg` 時，回合結束（Done／Exited，或從 Working／Starting 轉 Idle）會讀一次畫面，只保留 agent 最後一段回覆的最後 2 行（每行截斷），下一個回合開始或 agent 被移除就丟棄，不寫入磁碟，也不放進通知。「No output」提示（ticket 36）對 Working 的 agent 每 2 分鐘讀一次畫面，只保留過濾後內容的雜湊，畫面文字算完雜湊即丟棄
+65. As a 使用者, I want 近期輸出（以及回合變更的 diff，ticket 32）只在面板開著時存在記憶體中、關閉即丟棄, so that 沒有殘留的本機快取。唯一例外是等待原因預覽（ticket 27）：來源沒有提供等待原因時，agent 進入 Needs you 會讀一次畫面，只保留擷取出來的最多 2 行（每行截斷），離開 Needs you 就丟棄，不寫入磁碟。permission 對話框即使來源有提供原因也會讀一次畫面，但只保留 Allow／Deny 對應的按鍵（ticket 30），同樣離開 Needs you 就丟棄。另一個例外是回合的最後一句話（ticket 35）：來源沒有提供 `status.msg` 時，回合結束（Done／Exited，或從 Working／Starting 轉 Idle）會讀一次畫面，只保留 agent 最後一段回覆的最後 2 行（每行截斷），下一個回合開始或 agent 被移除就丟棄，不寫入磁碟，也不放進通知。「No output」提示（ticket 36）對 Working 的 agent 每 2 分鐘讀一次畫面，只保留過濾後內容的雜湊，畫面文字算完雜湊即丟棄。啟動表單的最近紀錄與 presets（ticket 37）含任務文字，存在本機 UserDefaults（同最近目錄），只來自表單本身，不讀 agent 的畫面或輸出，Settings 可清除
 
 ### 美術
 

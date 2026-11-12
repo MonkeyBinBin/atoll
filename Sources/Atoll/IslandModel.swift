@@ -281,6 +281,8 @@ final class IslandModel {
     }
 
     var launchPrefill: LaunchPrefill?
+    /// What the form just sent; recorded as a recent launch once the store says it went out.
+    var pendingLaunchRecipe: LaunchRecipe?
 
     func collapse() {
         store.closePanel()

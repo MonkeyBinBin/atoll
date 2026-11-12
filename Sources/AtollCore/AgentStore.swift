@@ -113,7 +113,18 @@ public final class AgentStore {
     /// Allow / Deny pressed from the list, for the current Needs-you episode.
     public private(set) var permissionResponses: [String: PermissionResponseState] = [:]
     public private(set) var interruptStates: [String: InterruptButtonState] = [:]
-    public private(set) var launchState: LaunchState = .idle
+    public private(set) var launchState: LaunchState = .idle {
+        didSet {
+            switch (oldValue, launchState) {
+            case (.starting, .launched), (.starting, .unconfirmed): onLaunchFinished?(true)
+            case (_, .failed): onLaunchFinished?(false)
+            default: break
+            }
+        }
+    }
+    /// A launch ended: true when it went out (the agent started, or Herdr took it without confirmation),
+    /// false when it failed (worktree, Herdr, or the app not running).
+    public var onLaunchFinished: ((_ succeeded: Bool) -> Void)?
 
     /// Called for every state change of a visible agent caused by a live core event.
     public var onTransition: ((_ agent: Agent, _ from: AgentState?) -> Void)?

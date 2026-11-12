@@ -66,6 +66,26 @@ struct SettingsView: View {
                 Toggle("Show terminals without status", isOn: $settings.showUnreportedTerminals)
             }
 
+            Section("Launch presets") {
+                if settings.launchPresets.isEmpty {
+                    Text("Save one from the launch form: Presets → Save as preset…")
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(Array(settings.launchPresets.enumerated()), id: \.element.id) { index, preset in
+                    PresetRow(preset: preset, isFirst: index == 0, isLast: index == settings.launchPresets.count - 1)
+                }
+                HStack {
+                    Button("Clear recent launches") { settings.clearRecentLaunches() }
+                        .disabled(settings.recentLaunches.isEmpty)
+                    Spacer()
+                    Text("\(settings.recentLaunches.count) recent")
+                        .foregroundStyle(.secondary)
+                }
+                Text("Recent launches and presets, tasks included, are stored on this Mac (UserDefaults) only.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("No output") {
                 Picker("Mark no output after", selection: $settings.noOutputMinutes) {
                     Text("Off").tag(0)
@@ -245,5 +265,53 @@ struct HotKeyRecorder: View {
         recording = false
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
+    }
+}
+
+/// One preset in Settings: rename in place, move up / down, delete.
+private struct PresetRow: View {
+    @Environment(AppSettings.self) private var settings
+    let preset: LaunchPreset
+    let isFirst: Bool
+    let isLast: Bool
+    @State private var name = ""
+    @FocusState private var editing: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            TextField("Name", text: $name)
+                .textFieldStyle(.roundedBorder)
+                .focused($editing)
+                .onSubmit(rename)
+                // Clicking away saves too; a blank name snaps back to the old one.
+                .onChange(of: editing) { _, focused in if !focused { rename() } }
+                .onAppear { name = preset.name }
+                .onChange(of: preset.name) { _, new in name = new }
+            Text(preset.recipe.task.isEmpty ? "(no task)" : preset.recipe.task)
+                .lineLimit(1)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: 140, alignment: .leading)
+                .help(preset.recipe.task)
+            Button { move(-1) } label: { Image(systemName: "chevron.up") }
+                .buttonStyle(.borderless)
+                .disabled(isFirst)
+            Button { move(1) } label: { Image(systemName: "chevron.down") }
+                .buttonStyle(.borderless)
+                .disabled(isLast)
+            Button { settings.launchPresets = LaunchHistory.deleting(preset.id, from: settings.launchPresets) } label: {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.borderless)
+            .help("Delete preset")
+        }
+    }
+
+    private func rename() {
+        settings.launchPresets = LaunchHistory.renaming(preset.id, to: name, in: settings.launchPresets)
+        name = settings.launchPresets.first { $0.id == preset.id }?.name ?? name
+    }
+
+    private func move(_ offset: Int) {
+        settings.launchPresets = LaunchHistory.moving(preset.id, by: offset, in: settings.launchPresets)
     }
 }

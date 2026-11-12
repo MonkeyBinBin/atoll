@@ -165,6 +165,7 @@ final class DebugHook {
         case 30: "]"
         case 16: "y"
         case 45: "n"
+        case 15: "r"
         default: ""
         }
         for type in [NSEvent.EventType.keyDown, .keyUp] {

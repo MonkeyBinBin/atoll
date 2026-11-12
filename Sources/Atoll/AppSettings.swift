@@ -80,6 +80,9 @@ final class AppSettings {
     /// Herdr space id for new agents; empty = Herdr's selected space.
     var defaultSpace: String { didSet { defaults.set(defaultSpace, forKey: "defaultSpace") } }
     var recentFolders: [String] { didSet { defaults.set(recentFolders, forKey: "recentFolders") } }
+    /// The launch form's last launches and saved presets (tasks included), on this Mac only.
+    var recentLaunches: [LaunchRecipe] { didSet { save(recentLaunches, "recentLaunches") } }
+    var launchPresets: [LaunchPreset] { didSet { save(launchPresets, "launchPresets") } }
     /// Output font family; empty = automatic (an installed Nerd Font Mono, else SF Mono).
     var outputFontFamily: String { didSet { defaults.set(outputFontFamily, forKey: "outputFontFamily") } }
     var outputFontSize: Double { didSet { defaults.set(outputFontSize, forKey: "outputFontSize") } }
@@ -146,6 +149,8 @@ final class AppSettings {
         waitingHotKey = Self.load("waitingHotKey", defaults) ?? .defaultWaiting
         defaultSpace = defaults.string(forKey: "defaultSpace") ?? ""
         recentFolders = defaults.stringArray(forKey: "recentFolders") ?? []
+        recentLaunches = Self.load("recentLaunches", defaults) ?? []
+        launchPresets = Self.load("launchPresets", defaults) ?? []
         outputFontFamily = defaults.string(forKey: "outputFontFamily") ?? ""
         outputFontSize = defaults.object(forKey: "outputFontSize") as? Double ?? 11
         largePanel = defaults.bool(forKey: "largePanel")
@@ -164,11 +169,20 @@ final class AppSettings {
         recentFolders = Array(list.prefix(10))
     }
 
-    private func save(_ key: HotKey, _ name: String) {
-        defaults.set(try? JSONEncoder().encode(key), forKey: name)
+    func recordLaunch(_ recipe: LaunchRecipe) {
+        recentLaunches = LaunchHistory.recording(recipe, in: recentLaunches)
     }
 
-    private static func load(_ name: String, _ defaults: UserDefaults) -> HotKey? {
-        defaults.data(forKey: name).flatMap { try? JSONDecoder().decode(HotKey.self, from: $0) }
+    func clearRecentLaunches() {
+        recentLaunches = []
+    }
+
+    /// JSON-encoded values (hotkeys, recent launches, presets).
+    private func save<T: Encodable>(_ value: T, _ name: String) {
+        defaults.set(try? JSONEncoder().encode(value), forKey: name)
+    }
+
+    private static func load<T: Decodable>(_ name: String, _ defaults: UserDefaults) -> T? {
+        defaults.data(forKey: name).flatMap { try? JSONDecoder().decode(T.self, from: $0) }
     }
 }

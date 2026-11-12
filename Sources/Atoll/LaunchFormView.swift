@@ -39,7 +39,20 @@ struct LaunchFormView: View {
     @State private var useWorktree = false
     @State private var branchText = ""
     @State private var branchEdited = false
+    /// A restored recipe's "New worktree", applied once the folder's repo check answers.
+    @State private var pendingWorktree: Bool?
+    /// The folder `source` was checked for (nil while a check runs).
+    @State private var sourceFolder: String?
+    /// nil while herdr-core templates load; false when that failed.
+    @State private var templatesLoaded: Bool?
+    /// A recipe picked before the templates arrived, applied once they do.
+    @State private var deferredRecipe: LaunchRecipe?
+    /// What a restored recipe couldn't bring back.
+    @State private var restoreNotes: [String] = []
+    @State private var savingPreset = false
+    @State private var presetName = ""
     @FocusState private var taskFocused: Bool
+    @FocusState private var launchFocused: Bool
 
     private var store: AgentStore { model.store }
     private var option: LaunchOption { options.first { $0.id == optionID } ?? options[0] }
@@ -49,13 +62,21 @@ struct LaunchFormView: View {
             HStack {
                 Text("Launch agent").font(.system(size: 13, weight: .semibold))
                 Spacer()
+                recentMenu
+                presetMenu
+                Button("Launch again", action: launchAgain)
+                    .keyboardShortcut("r", modifiers: .command)
+                    .disabled(settings.recentLaunches.isEmpty)
+                    .help("Fill in the last launch (⌘R); confirm with Launch")
                 Button { model.escape() } label: { Image(systemName: "xmark") }
                     .buttonStyle(.borderless)
             }
+            .font(.system(size: 11))
+            if savingPreset { savePresetRow }
             Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 8) {
                 GridRow {
                     label("Tool")
-                    Picker("", selection: $optionID) {
+                    Picker("", selection: Binding(get: { optionID }, set: { optionID = $0; restoreNotes = [] })) {
                         ForEach(options) { Text($0.title).tag($0.id) }
                     }
                     .labelsHidden()
@@ -65,7 +86,7 @@ struct LaunchFormView: View {
                     HStack(spacing: 6) {
                         Menu {
                             ForEach(settings.recentFolders, id: \.self) { path in
-                                Button(Format.abbreviatePath(path)) { folder = path }
+                                Button(Format.abbreviatePath(path)) { pickFolder(path) }
                             }
                             if settings.recentFolders.isEmpty { Text("No recent folders") }
                         } label: {
@@ -95,7 +116,7 @@ struct LaunchFormView: View {
                 if source != nil {
                     GridRow {
                         label("Worktree")
-                        Toggle("New worktree", isOn: $useWorktree)
+                        Toggle("New worktree", isOn: Binding(get: { useWorktree }, set: { useWorktree = $0; pendingWorktree = nil }))
                             .toggleStyle(.checkbox)
                             .help("Create a separate git worktree on a new branch and start the agent there")
                     }
@@ -137,6 +158,12 @@ struct LaunchFormView: View {
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
+                ForEach(restoreNotes, id: \.self) { note in
+                    Text(note)
+                        .font(.system(size: 11))
+                        .foregroundStyle(PixelPalette.waiting.color)
+                        .lineLimit(2)
+                }
                 if let plan {
                     Text("From HEAD \(plan.source.shortHead)" + (plan.source.dirty ? " · uncommitted changes in the repo won't be carried over" : ""))
                         .font(.system(size: 11))
@@ -159,18 +186,27 @@ struct LaunchFormView: View {
                 Button("Launch", action: launch)
                     .keyboardShortcut(.return, modifiers: .command)
                     .disabled(!canLaunch)
+                    .focused($launchFocused)
             }
         }
         .padding(14)
         .task { await load() }
         .task(id: folder) {
+            source = nil
+            sourceFolder = nil
             guard !folder.isEmpty, let creator = store.worktreeCreator else {
-                source = nil
+                pendingWorktree = nil
                 return
             }
-            let found = await creator.source(for: folder)
+            let checked = folder
+            let found = await creator.source(for: checked)
             guard !Task.isCancelled else { return }
             source = found
+            sourceFolder = checked
+            if let wish = pendingWorktree {
+                pendingWorktree = nil
+                useWorktree = wish && found != nil
+            }
         }
     }
 
@@ -269,10 +305,17 @@ struct LaunchFormView: View {
         taskFocused = true
         if let templates = try? await client?.templates() {
             options = LaunchOption.builtIns + templates.filter { $0.error == nil }.map(LaunchOption.template)
+            templatesLoaded = true
+        } else {
+            templatesLoaded = false
         }
         if let list = try? await client?.spaces() {
             spaces = list
             if !space.isEmpty, !list.contains(where: { $0.id == space }) { space = "" }
+        }
+        if let recipe = deferredRecipe {
+            deferredRecipe = nil
+            apply(recipe)
         }
     }
 
@@ -285,12 +328,14 @@ struct LaunchFormView: View {
         if !folder.isEmpty { panel.directoryURL = URL(fileURLWithPath: folder) }
         NSApp.activate()
         if panel.runModal() == .OK, let url = panel.url {
-            folder = url.path
+            pickFolder(url.path)
         }
     }
 
     private func launch() {
         guard canLaunch else { return }
+        model.pendingLaunchRecipe = currentRecipe
+        restoreNotes = []
         settings.rememberFolder(folder)
         store.launch(LaunchRequest(
             argv: option.argv,
@@ -299,6 +344,118 @@ struct LaunchFormView: View {
             name: name.trimmingCharacters(in: .whitespaces).isEmpty ? nil : Self.sanitizeName(name),
             space: space.isEmpty ? nil : space
         ), worktree: plan)
+    }
+
+    // MARK: Recent launches and presets
+
+    private var currentRecipe: LaunchRecipe {
+        LaunchRecipe(optionID: optionID, folder: folder, task: task.trimmingCharacters(in: .whitespacesAndNewlines),
+                     name: name.trimmingCharacters(in: .whitespaces), space: space, worktree: plan != nil)
+    }
+
+    private func toolTitle(_ id: String) -> String {
+        options.first { $0.id == id }?.title ?? LaunchHistory.templateName(of: id).map { "\($0) (template)" } ?? id
+    }
+
+    /// The user picked a folder: drops anything a restored recipe was still going to apply.
+    private func pickFolder(_ path: String) {
+        folder = path
+        pendingWorktree = nil
+        restoreNotes = []
+    }
+
+    private var recentMenu: some View {
+        Menu("Recent") {
+            ForEach(Array(settings.recentLaunches.enumerated()), id: \.offset) { _, recipe in
+                Button(recipe.menuTitle(toolTitle: toolTitle(recipe.optionID))) { apply(recipe) }
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .disabled(settings.recentLaunches.isEmpty)
+        .help("Fill in an earlier launch (doesn't launch it)")
+    }
+
+    private var presetMenu: some View {
+        Menu("Presets") {
+            ForEach(settings.launchPresets) { preset in
+                Button(preset.name) { apply(preset.recipe) }
+            }
+            if settings.launchPresets.isEmpty { Text("No presets yet") }
+            Divider()
+            Button("Save as preset…") {
+                presetName = name
+                savingPreset = true
+            }
+            .disabled(settings.launchPresets.count >= LaunchHistory.maxPresets)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("Atoll's saved launch settings (herdr-core templates are in the Tool menu)")
+    }
+
+    private var savePresetRow: some View {
+        HStack(spacing: 6) {
+            TextField("Preset name", text: $presetName)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit(savePreset)
+            Button("Save", action: savePreset)
+                .disabled(presetName.trimmingCharacters(in: .whitespaces).isEmpty)
+            Button("Cancel") { savingPreset = false }
+        }
+        .font(.system(size: 12))
+    }
+
+    private func savePreset() {
+        guard let presets = LaunchHistory.adding(name: presetName, recipe: currentRecipe, to: settings.launchPresets) else { return }
+        settings.launchPresets = presets
+        savingPreset = false
+    }
+
+    /// Fills the form (never launches). Checks the folder and tool still exist; a worktree comes back only if the
+    /// folder is still a repo, always on a freshly generated branch.
+    private func apply(_ recipe: LaunchRecipe) {
+        // The tool list isn't complete until the templates arrive: don't call a template gone before that.
+        guard let templatesLoaded else {
+            deferredRecipe = recipe
+            return
+        }
+        let restored = LaunchHistory.restore(
+            recipe,
+            folderExists: { path in
+                var isDirectory: ObjCBool = false
+                return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
+            },
+            availableOptionIDs: Set(options.map(\.id)),
+            defaultOptionID: LaunchOption.builtIns[0].id,
+            templatesLoaded: templatesLoaded,
+            spaces: spaces.isEmpty ? nil : Set(spaces.map(\.id))
+        )
+        let r = restored.recipe
+        optionID = r.optionID
+        task = r.task
+        name = r.name
+        space = r.space
+        branchText = ""
+        branchEdited = false
+        if r.folder == folder, sourceFolder == folder {
+            // Same folder, already checked: the repo check won't run again.
+            pendingWorktree = nil
+            useWorktree = r.worktree && source != nil
+        } else {
+            folder = r.folder
+            useWorktree = false
+            pendingWorktree = r.worktree
+        }
+        restoreNotes = restored.notes
+        store.resetLaunch()
+    }
+
+    private func launchAgain() {
+        guard let last = settings.recentLaunches.first else { return }
+        apply(last)
+        taskFocused = false
+        launchFocused = true
     }
 
     /// Herdr names: 1–32 of a-z 0-9 - _ .
