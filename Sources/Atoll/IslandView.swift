@@ -63,6 +63,8 @@ struct IslandView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 LaunchToggleButton(model: model)
                     .frame(width: IslandLayout.buttonWidth)
+                TodayToggleButton(model: model)
+                    .frame(width: IslandLayout.buttonWidth)
                 ListToggleButton(model: model)
                     .frame(width: IslandLayout.buttonWidth)
             }
@@ -188,6 +190,30 @@ struct LaunchToggleButton: View {
             .onHover { hovered = $0 }
             .accessibilityElement()
             .accessibilityLabel(open ? "Close launch form" : "Launch agent")
+            .accessibilityAddTraits(.isButton)
+    }
+}
+
+/// Opens / closes the Today pane straight from the island; highlighted while it is shown.
+struct TodayToggleButton: View {
+    let model: IslandModel
+    @State private var hovered = false
+
+    var body: some View {
+        let open = model.mode == .today
+        let unseen = model.store.timeline.unseenCount
+        PixelIconView(tag: open ? "today_open" : "today")
+            .opacity(open || hovered ? 1 : 0.7)
+            .frame(width: 18, height: 18)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                model.hover = nil
+                if open { model.collapse() } else { model.openToday() }
+            }
+            .onHover { hovered = $0 }
+            .help(unseen > 0 ? "Today · \(unseen) unseen" : "Today")
+            .accessibilityElement()
+            .accessibilityLabel(open ? "Close Today" : unseen > 0 ? "Today, \(unseen) unseen" : "Today")
             .accessibilityAddTraits(.isButton)
     }
 }

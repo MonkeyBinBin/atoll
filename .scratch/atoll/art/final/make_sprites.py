@@ -402,6 +402,29 @@ def ui_launch_open():
     return [[{"k": "Y"}.get(c, c) for c in row] for row in g]
 
 
+# Today button: cream clock face with teal hands; "today_open" lifts it and lights the hands.
+UI_TODAY = [
+    "............",
+    "...oooooo...",
+    "..obleelbo..",
+    ".obllkllbdo.",
+    ".obllkllbdo.",
+    ".oellkllbeo.",
+    ".obllkkkkdo.",
+    ".obbbbbbbdo.",
+    ".obbbbbbddo.",
+    "..odddeddo..",
+    "...oooooo...",
+    "............",
+]
+
+
+def ui_today_open():
+    g = [list(r) for r in UI_TODAY]
+    g = [g[i + 1] if i + 1 < len(g) else ["."] * 12 for i in range(len(g))]  # lift 1px
+    return [[{"k": "Y"}.get(c, c) for c in row] for row in g]
+
+
 # Empty island: a deserted atoll (sand, palm, surf) shown when there are no agents.
 UI_EMPTY = [
     "............",
@@ -590,8 +613,10 @@ def main():
                 {n: (1, False, None, "last") for n in ICONS}, 8)
     write_sheet("ui", [("list", [[list(r) for r in UI_LIST]]), ("list_open", [ui_list_open()]),
                        ("launch", [[list(r) for r in UI_LAUNCH]]), ("launch_open", [ui_launch_open()]),
-                       ("empty", [[list(r) for r in UI_EMPTY]])],
-                {n: (1, False, None, "last") for n in ("list", "list_open", "launch", "launch_open", "empty")}, 12)
+                       ("empty", [[list(r) for r in UI_EMPTY]]),
+                       ("today", [[list(r) for r in UI_TODAY]]), ("today_open", [ui_today_open()])],
+                {n: (1, False, None, "last")
+                 for n in ("list", "list_open", "launch", "launch_open", "empty", "today", "today_open")}, 12)
     write_sheet("deco", [("twinkle", twinkle("l")), ("twinkle_teal", twinkle("k"))],
                 {"twinkle": (2, True, None, None), "twinkle_teal": (2, True, None, None)}, 5)
     effects = write_sheet("effects", *load_effects(), S)

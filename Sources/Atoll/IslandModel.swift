@@ -49,9 +49,9 @@ struct IslandLayout: Equatable {
     var endInset: CGFloat = 0
 
     static let slot: CGFloat = 22
-    /// Always-visible buttons (launch, list) at the outer end of the right wing.
+    /// Always-visible buttons (launch, today, list) at the outer end of the right wing.
     static let buttonWidth: CGFloat = 20
-    static let buttonsWidth: CGFloat = buttonWidth * 2
+    static let buttonsWidth: CGFloat = buttonWidth * 3
     static let padding: CGFloat = 10
     nonisolated(unsafe) static let hintFont = NSFont.systemFont(ofSize: 11, weight: .semibold)
 
