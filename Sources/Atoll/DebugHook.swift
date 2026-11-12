@@ -147,7 +147,14 @@ final class DebugHook {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                     MainActor.assumeIsolated {
                         if let window = NSApp.windows.first(where: { $0.title.contains("Settings") }) {
-                            self.snapshot(window: window, name: "settings")
+                            // settings [y]: scroll the form down to y points first (sections below the fold).
+                            if parts.count > 1, let y = Double(parts[1]), let scroll = Self.scrollView(in: window.contentView) {
+                                scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
+                                scroll.reflectScrolledClipView(scroll.contentView)
+                            }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                MainActor.assumeIsolated { self.snapshot(window: window, name: parts.count > 1 ? "settings-\(parts[1])" : "settings") }
+                            }
                         }
                     }
                 }
@@ -217,6 +224,13 @@ final class DebugHook {
                 NSApp.postEvent(event, atStart: false)
             }
         }
+    }
+
+    private static func scrollView(in view: NSView?) -> NSScrollView? {
+        guard let view else { return nil }
+        if let scroll = view as? NSScrollView { return scroll }
+        for sub in view.subviews { if let found = scrollView(in: sub) { return found } }
+        return nil
     }
 
     private func snapshot(window: NSWindow, name: String) {

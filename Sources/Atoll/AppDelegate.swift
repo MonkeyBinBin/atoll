@@ -8,7 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     nonisolated static let cmuxBundleID = "com.cmuxterm.app"
 
     private var settings: AppSettings!
-    private var client: CoreRPCAdapter!
+    private var client: HerdrClient!
     private var store: AgentStore!
     private var model: IslandModel!
     private var island: IslandController!
@@ -19,8 +19,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-        settings = AppSettings()
-        client = CoreRPCAdapter(
+        let demo = DemoMode.isOn
+        settings = demo ? AppSettings(defaults: UserDefaults(suiteName: DemoMode.defaultsSuite)!) : AppSettings()
+        let core = CoreRPCAdapter(
             appRunning: {
                 !NSRunningApplication.runningApplications(withBundleIdentifier: AppDelegate.herdrBundleID).isEmpty
             },
@@ -30,7 +31,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         )
-        store = AgentStore(clients: [
+        client = demo ? DemoClient() : core
+        store = demo ? AgentStore(clients: [(.core, client)], scheduler: LiveScheduler()) : AgentStore(clients: [
             (.core, client),
             (.herdrCLI, HerdrCLIAdapter()),
             (.cmux, CmuxAdapter(
@@ -117,11 +119,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store.autoAdvance = settings.autoAdvance
         store.timelineEnabled = settings.todayTimeline
         if (store.changeProbe != nil) != settings.changeSummary {
-            store.changeProbe = settings.changeSummary ? GitProbe() : nil
-            store.changeInspector = settings.changeSummary ? GitProbe() : nil
+            store.changeProbe = settings.changeSummary ? (DemoMode.isOn ? DemoGit() as any ChangeProbing : GitProbe()) : nil
+            store.changeInspector = settings.changeSummary ? (DemoMode.isOn ? DemoGit() as any ChangeInspecting : GitProbe()) : nil
         }
         if (store.treeProbe != nil) != settings.sharedTreeWarning {
-            store.treeProbe = settings.sharedTreeWarning ? GitProbe() : nil
+            store.treeProbe = settings.sharedTreeWarning ? (DemoMode.isOn ? DemoGit() as any WorkingTreeProbing : GitProbe()) : nil
         }
         store.noOutputThreshold = settings.noOutputMinutes > 0 ? TimeInterval(settings.noOutputMinutes * 60) : nil
         store.reminderDelay = settings.reminderMinutes > 0 ? TimeInterval(settings.reminderMinutes * 60) : nil
@@ -157,7 +159,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func refreshHerdrApp() {
-        store.herdrAppRunning = !NSRunningApplication.runningApplications(withBundleIdentifier: Self.herdrBundleID).isEmpty
+        store.herdrAppRunning = DemoMode.isOn || !NSRunningApplication.runningApplications(withBundleIdentifier: Self.herdrBundleID).isEmpty
     }
 
     private func showSettings() {

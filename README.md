@@ -2,9 +2,11 @@
 
 macOS 瀏海上的像素風「動態島」，即時顯示本機所有 AI coding agent（Claude Code、Codex）的狀態，並能直接回覆、核准、中斷或切回原本的終端機。
 
-![動態島收合態](docs/screenshots/island.png)
+![動態島收合態：左翼是等你回覆的 agent，右翼是其他 agent 與啟動、Today、清單按鈕](docs/screenshots/island.png)
 
 同時跑多個 agent 時不用逐一切視窗：每個 agent 是站在自己沙洲上的小機器人，等你回覆或出錯的永遠釘在最顯眼的位置。
+
+> 截圖都是 demo 模式（`ATOLL_DEMO=1`）的虛構資料，見[建置與執行](#建置與執行)。
 
 > 自用工具：ad-hoc 簽章、未 notarize，不對外發佈。
 
@@ -22,6 +24,10 @@ macOS 瀏海上的像素風「動態島」，即時顯示本機所有 AI coding 
 - 共用 working tree 警示：兩個以上活動中的 agent 在同一個 git working tree 時提醒，並提供「Launch in new worktree」
 - 來源斷線或超過 heartbeat 期限時轉灰、標示「狀態未知」，不從畫面文字猜測狀態
 
+滑鼠停在角色上會顯示 hover card：狀態、最後一句話、變更量、路徑與所在的 space。
+
+![Hover card](docs/screenshots/hovercard.png)
+
 ### 清單與 Spaces
 
 - 點動態島空白處或按 `⌥⌘A` 展開，依「Needs you > Error > Unknown > Working > Done／Idle」排序
@@ -29,6 +35,14 @@ macOS 瀏海上的像素風「動態島」，即時顯示本機所有 AI coding 
 - 清單頂端的 Island 列（或 `Tab`／`⇧Tab`）切換收合的動態島只顯示某個 space，右翼標示 space 名稱與藏起來的數量（「atoll +3」）；其他 space 的 Needs you／Error 仍會顯示
 - 可辨識的 permission 對話框直接在清單列 Allow／Deny（只對應單次的「Yes」，不提供「don't ask again」）
 - 釘選（📌）讓展開狀態不因點擊其他地方而收起
+
+清單依 space 分段：web-app 裡有一個 agent 在等 permission，可以直接 Allow／Deny；完成的 agent 附上最後一句話與變更量。頂端的 Island 列決定收合的動態島顯示哪個 space。
+
+![依 space 分段的清單](docs/screenshots/list.png)
+
+切到 web-app 之後，收合列只剩這個 space 的角色，前面標示「web-app +3」（另外 3 個被藏起來）：
+
+![只顯示 web-app space 的動態島](docs/screenshots/island-space.png)
 
 ### 互動面板
 
@@ -41,6 +55,10 @@ macOS 瀏海上的像素風「動態島」，即時顯示本機所有 AI coding 
 - 回應完一個等待中的 agent 後自動切到下一個等最久的（輸入框有未送出文字時不切），`⌘]` 手動跳
 - 面板上的鈴鐺：「這次跑完時通知我」，通知一次後自動關閉
 
+| 輸出搜尋與按鍵回應 | 回合變更的檔案與 diff |
+| --- | --- |
+| ![面板：⌘F 搜尋高亮，下方是回應 permission 的按鍵](docs/screenshots/panel.png) | ![面板：點開變更量看檔案與 diff](docs/screenshots/changes.png) |
+
 ### 啟動 agent
 
 - 從動態島的「＋」透過 Herdr 開新的 Claude Code、Codex 或 herdr-core template agent
@@ -48,18 +66,29 @@ macOS 瀏海上的像素風「動態島」，即時顯示本機所有 AI coding 
 - Space 預設跟著動態島選的 space（從 agent 的「Launch in new worktree」進來則用該 agent 的 space），其次是 Settings 的 Default space
 - Recent 記住最近 10 次組合，`⌘R`「Launch again」帶回最近一筆；常用組合可存成 preset（最多 20 個）
 
+動態島切在 web-app 時打開表單，Space 預設就是 web-app 並標示「from island」：
+
+![啟動表單](docs/screenshots/launch.png)
+
 ### 今日時間軸
 
 - 點動態島的時鐘按鈕展開 Today 窗格，依時間倒序列出今天每個回合的結束時間、agent、狀態、變更量與最後一句話
 - 可依 agent 篩選，未看過的回合有標記，點一列打開該 agent 的面板
 - 只保留今天最多 200 筆，只在記憶體
 
+![今日時間軸](docs/screenshots/today.png)
+
 ### 提醒與通知
 
 - 對話泡泡：agent 停下、等待你或出錯時，角色下方冒出約 5 秒的泡泡，點了直接打開面板
 - macOS 通知：等待你或出錯時發送，內容只有「工具 · 專案名」；`⌃⌥⌘A` 打開最早開始等待的 agent
 - 等待超過設定時間（預設 5 分鐘）再提醒一次
+- 可設定只通知動態島目前的 space（其他 space 的 agent 仍顯示在動態島；面板鈴鐺照常通知）
 - 通知可直接回應：permission 有 Deny、question 有 Reply；打開「Show waiting reason in notifications」後才附上指令並提供 Allow
+
+| 對話泡泡 | Settings › Notifications |
+| --- | --- |
+| ![回合結束時角色下方的泡泡，附變更量與最後一句話](docs/screenshots/bubble.png) | ![通知設定，含只通知動態島目前的 space](docs/screenshots/settings.png) |
 
 ### 外觀與顯示
 
@@ -67,17 +96,11 @@ macOS 瀏海上的像素風「動態島」，即時顯示本機所有 AI coding 
 - 全螢幕時預設只顯示需要注意的 agent，沒有就隱藏（可改為照常顯示或一律隱藏）
 - 多螢幕可指定螢幕或 Follow mouse
 
-| 清單 | 互動面板 |
-| --- | --- |
-| ![Agent 清單](docs/screenshots/list.png) | ![互動面板](docs/screenshots/panel.png) |
+一天的環礁（黎明 → 白天 → 正午 → 黃昏 → 深夜）：
 
-| 啟動 agent | 設定 |
-| --- | --- |
-| ![啟動表單](docs/screenshots/launch.png) | ![設定視窗](docs/screenshots/settings.png) |
+![依時間變化的背景](docs/screenshots/daycycle.png)
 
-| 對話泡泡 | 一天的環礁（黎明 → 白天 → 正午 → 黃昏 → 深夜） |
-| --- | --- |
-| ![角色下方的狀態泡泡](docs/screenshots/bubble.png) | ![依時間變化的背景](docs/screenshots/daycycle.png) |
+角色是原生 16×16 的像素小機器人，每個狀態有對應動畫：
 
 ![角色與狀態動畫](docs/screenshots/characters.png)
 
@@ -148,6 +171,12 @@ Atoll 是 menu bar app（`LSUIElement`），沒有 Dock 圖示；從 menu bar ic
 
 ```sh
 ATOLL_DEBUG_DIR=/tmp/atoll-debug ./scripts/dev-run.sh
+```
+
+README 截圖用 demo 模式拍：`ATOLL_DEMO=1` 改用 `Sources/Atoll/DemoMode.swift` 的虛構 agent、space、畫面與 git 結果，設定存在獨立的 `local.atoll.demo` suite，不影響平常的設定，也不連線任何來源。
+
+```sh
+ATOLL_DEMO=1 ATOLL_DEBUG_DIR=/tmp/atoll-debug ./scripts/dev-run.sh
 ```
 
 ## 測試
