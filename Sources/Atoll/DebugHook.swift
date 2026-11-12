@@ -41,6 +41,11 @@ final class DebugHook {
             case "down": model.moveSelection(1)
             case "allow": model.respondToSelected(.allow)
             case "changes": model.store.showChanges()
+            case "launchwt":
+                // launchwt <folder>: launch form for that folder with "New worktree" on (Claude Code)
+                if parts.count > 1 {
+                    model.openLaunch(prefill: .init(folder: parts[1], optionID: "builtin:claude", worktree: true))
+                }
             case "difffile":
                 // difffile <path>: expand / collapse that file in the open changes view
                 if parts.count > 1, case .loaded(let files) = model.store.panel?.changes?.files,

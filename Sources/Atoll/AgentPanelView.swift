@@ -119,7 +119,7 @@ struct AgentPanelView: View {
                         ChangeSummaryLabel(summary: summary)
                     }
                 }
-                SharedTreeLabel(agent: agent, store: store, lineLimit: 2)
+                SharedTreeLabel(agent: agent, store: store, lineLimit: 2) { model.openLaunchInWorktree(for: agent) }
             }
             Spacer()
             queueBadge

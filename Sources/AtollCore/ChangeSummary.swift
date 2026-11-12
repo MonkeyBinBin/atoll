@@ -131,6 +131,27 @@ public protocol WorkingTreeProbing: Sendable {
 /// Runs one git command in a directory; nil on failure, nonzero exit or timeout.
 public protocol GitRunner: Sendable {
     func run(_ arguments: [String], in directory: String) async -> String?
+    /// Like `run`, but keeps the exit status and stderr (for showing git's own error message).
+    /// nil only when git couldn't run at all or timed out.
+    func runCapturing(_ arguments: [String], in directory: String) async -> GitOutput?
+}
+
+public struct GitOutput: Equatable, Sendable {
+    public var status: Int32
+    public var stdout: String
+    public var stderr: String
+
+    public init(status: Int32, stdout: String = "", stderr: String = "") {
+        self.status = status
+        self.stdout = stdout
+        self.stderr = stderr
+    }
+}
+
+extension GitRunner {
+    public func runCapturing(_ arguments: [String], in directory: String) async -> GitOutput? {
+        await run(arguments, in: directory).map { GitOutput(status: 0, stdout: $0) } ?? GitOutput(status: 1)
+    }
 }
 
 public struct GitProbe: ChangeProbing, WorkingTreeProbing {
@@ -231,6 +252,11 @@ public struct ProcessGitRunner: GitRunner {
     }
 
     public func run(_ arguments: [String], in directory: String) async -> String? {
+        guard let result = await runCapturing(arguments, in: directory), result.status == 0 else { return nil }
+        return result.stdout
+    }
+
+    public func runCapturing(_ arguments: [String], in directory: String) async -> GitOutput? {
         guard let gitPath else { return nil }
         let timeout = timeout
         return await withCheckedContinuation { continuation in
@@ -256,22 +282,24 @@ public struct ProcessGitRunner: GitRunner {
         }
     }
 
-    private static func runHardened(_ gitPath: String, _ arguments: [String], in directory: String, timeout: TimeInterval) -> String? {
+    private static func runHardened(_ gitPath: String, _ arguments: [String], in directory: String, timeout: TimeInterval) -> GitOutput? {
         let base = ["--no-optional-locks"] + hardening + ["-C", directory]
         // Exit 1 = no filter keys at all.
         guard let listed = execute(gitPath, base + ["config", "--name-only", "--get-regexp", "^filter\\."], timeout: timeout),
               listed.status == 0 || listed.status == 1 else { return nil }
-        guard let result = execute(gitPath, base + filterOverrides(listed.output) + arguments, timeout: timeout),
-              result.status == 0 else { return nil }
-        return result.output
+        return execute(gitPath, base + filterOverrides(listed.stdout) + arguments, timeout: timeout)
     }
 
     private final class ProcessBox: @unchecked Sendable {
         let process = Process()
     }
 
+    private final class DataBox: @unchecked Sendable {
+        var data = Data()
+    }
+
     /// nil when it couldn't start or was killed by the timeout.
-    private static func execute(_ gitPath: String, _ arguments: [String], timeout: TimeInterval) -> (status: Int32, output: String)? {
+    private static func execute(_ gitPath: String, _ arguments: [String], timeout: TimeInterval) -> GitOutput? {
         let box = ProcessBox()
         let process = box.process
         process.executableURL = URL(fileURLWithPath: gitPath)
@@ -282,16 +310,27 @@ public struct ProcessGitRunner: GitRunner {
         env["LC_ALL"] = "C"
         process.environment = env
         let out = Pipe()
+        let err = Pipe()
         process.standardOutput = out
-        process.standardError = FileHandle.nullDevice
+        process.standardError = err
         process.standardInput = FileHandle.nullDevice
         do { try process.run() } catch { return nil }
         DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
             if box.process.isRunning { box.process.terminate() }
         }
+        // Drain stderr on another thread so a chatty stderr can't block git while stdout is read.
+        let errBox = DataBox()
+        let group = DispatchGroup()
+        group.enter()
+        DispatchQueue.global().async {
+            errBox.data = err.fileHandleForReading.readDataToEndOfFile()
+            group.leave()
+        }
         let data = out.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
+        group.wait()
         guard process.terminationReason == .exit else { return nil }
-        return (process.terminationStatus, String(decoding: data, as: UTF8.self))
+        return GitOutput(status: process.terminationStatus, stdout: String(decoding: data, as: UTF8.self),
+                         stderr: String(decoding: errBox.data, as: UTF8.self))
     }
 }

@@ -57,6 +57,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         store.onSharedTree = { [weak self] agent in self?.island.handleSharedTree(agent) }
         store.onWaitingDetails = { [weak self] agent in self?.notifier.waitingDetails(agent) }
+        store.worktreeCreator = GitWorktreeCreator()
+        store.onWorktreeCreated = { [weak self] path in self?.settings.rememberFolder(path) }
         island.debugHook?.onOther = { [weak self] parts, dir in self?.notifier.debugCommand(parts, dir: dir) }
         store.onNotifyWhenDone = { [weak self] agent in self?.notifier.notifyWhenDone(agent) }
         store.onAutoAdvance = { [weak self] next in self?.model.autoAdvance(to: next) }

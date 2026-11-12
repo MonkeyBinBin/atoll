@@ -247,11 +247,31 @@ final class IslandModel {
         store.openPanel(address)
     }
 
-    func openLaunch() {
+    func openLaunch(prefill: LaunchPrefill? = nil) {
         store.closePanel()
         store.resetLaunch()
+        launchPrefill = prefill
         mode = .launch
     }
+
+    /// "Launch in new worktree" from a shared-tree warning: same project and tool, worktree on.
+    func openLaunchInWorktree(for agent: Agent) {
+        let toolID: String? = switch agent.tool {
+        case .claudeCode: "builtin:claude"
+        case .codex: "builtin:codex"
+        case .generic: nil
+        }
+        openLaunch(prefill: LaunchPrefill(folder: agent.projectPath, optionID: toolID, worktree: true))
+    }
+
+    /// Values the launch form starts with once (taken when it appears).
+    struct LaunchPrefill: Equatable {
+        var folder: String
+        var optionID: String?
+        var worktree: Bool
+    }
+
+    var launchPrefill: LaunchPrefill?
 
     func collapse() {
         store.closePanel()

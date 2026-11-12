@@ -25,7 +25,8 @@ struct AgentListView: View {
                                         index: index,
                                         selected: index == model.selection,
                                         now: context.date,
-                                        animate: settings.animationsEnabled
+                                        animate: settings.animationsEnabled,
+                                        onLaunchWorktree: { model.openLaunchInWorktree(for: agent) }
                                     )
                                     .id(agent.id)
                                     .onTapGesture { model.openPanel(agent.address) }
@@ -71,6 +72,7 @@ struct AgentCard: View {
     let selected: Bool
     let now: Date
     let animate: Bool
+    var onLaunchWorktree: (() -> Void)?
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -128,7 +130,7 @@ struct AgentCard: View {
                 if let summary = agent.changeSummary {
                     ChangeSummaryLabel(summary: summary)
                 }
-                SharedTreeLabel(agent: agent, store: store)
+                SharedTreeLabel(agent: agent, store: store, onLaunchWorktree: onLaunchWorktree)
                 HStack(spacing: 4) {
                     Text(Format.abbreviatePath(agent.projectPath))
                         .lineLimit(1)
@@ -175,15 +177,25 @@ struct SharedTreeLabel: View {
     let agent: Agent
     let store: AgentStore
     var lineLimit = 1
+    /// Offers "Launch in new worktree" (opens the launch form for the same project); nil = no button.
+    var onLaunchWorktree: (() -> Void)?
 
     var body: some View {
         if !agent.sharedTreeWith.isEmpty {
             let names = agent.sharedTreeWith.compactMap { store.agent($0)?.displayName }
-            Label("Shares working tree with \(names.joined(separator: ", "))", systemImage: "arrow.triangle.branch")
-                .font(.system(size: 11))
-                .foregroundStyle(PixelPalette.waiting.color)
-                .lineLimit(lineLimit)
-                .help("Several active agents in \(Format.abbreviatePath(agent.projectPath))'s git working tree can overwrite or commit each other's changes. Separate worktrees avoid that.")
+            VStack(alignment: .leading, spacing: 2) {
+                Label("Shares working tree with \(names.joined(separator: ", "))", systemImage: "arrow.triangle.branch")
+                    .font(.system(size: 11))
+                    .foregroundStyle(PixelPalette.waiting.color)
+                    .lineLimit(lineLimit)
+                    .help("Several active agents in \(Format.abbreviatePath(agent.projectPath))'s git working tree can overwrite or commit each other's changes. Separate worktrees avoid that.")
+                if let onLaunchWorktree, store.worktreeCreator != nil {
+                    Button("Launch in new worktree", action: onLaunchWorktree)
+                        .buttonStyle(.borderless)
+                        .font(.system(size: 11))
+                        .help("Open the launch form for this project with \"New worktree\" on; this agent keeps running")
+                }
+            }
         }
     }
 }

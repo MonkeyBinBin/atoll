@@ -34,6 +34,11 @@ struct LaunchFormView: View {
     @State private var name = ""
     @State private var spaces: [HerdrSpace] = []
     @State private var space = ""
+    /// The folder's repo, when it is one (offers "New worktree").
+    @State private var source: WorktreeSource?
+    @State private var useWorktree = false
+    @State private var branchText = ""
+    @State private var branchEdited = false
     @FocusState private var taskFocused: Bool
 
     private var store: AgentStore { model.store }
@@ -87,6 +92,34 @@ struct LaunchFormView: View {
                     TextField("Optional display name", text: $name)
                         .textFieldStyle(.roundedBorder)
                 }
+                if source != nil {
+                    GridRow {
+                        label("Worktree")
+                        Toggle("New worktree", isOn: $useWorktree)
+                            .toggleStyle(.checkbox)
+                            .help("Create a separate git worktree on a new branch and start the agent there")
+                    }
+                    if useWorktree, let plan {
+                        GridRow {
+                            label("Branch")
+                            TextField("atoll/…", text: Binding(
+                                get: { branch },
+                                set: { branchText = $0; branchEdited = true }
+                            ))
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 12, design: .monospaced))
+                        }
+                        GridRow {
+                            label("Location")
+                            Text(Format.abbreviatePath(plan.path))
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.head)
+                                .help(plan.path)
+                        }
+                    }
+                }
                 GridRow {
                     label("Space")
                     Picker("", selection: $space) {
@@ -99,13 +132,21 @@ struct LaunchFormView: View {
             .font(.system(size: 12))
 
             // Always-visible confirmation summary.
-            Text(summary)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-                .padding(8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.06)))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(summary)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                if let plan {
+                    Text("From HEAD \(plan.source.shortHead)" + (plan.source.dirty ? " · uncommitted changes in the repo won't be carried over" : ""))
+                        .font(.system(size: 11))
+                        .foregroundStyle(plan.source.dirty ? PixelPalette.waiting.color : .secondary)
+                        .lineLimit(2)
+                }
+            }
+            .padding(8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.06)))
 
             HStack(spacing: 8) {
                 statusView
@@ -122,26 +163,45 @@ struct LaunchFormView: View {
         }
         .padding(14)
         .task { await load() }
+        .task(id: folder) {
+            guard !folder.isEmpty, let creator = store.worktreeCreator else {
+                source = nil
+                return
+            }
+            let found = await creator.source(for: folder)
+            guard !Task.isCancelled else { return }
+            source = found
+        }
     }
 
     private func label(_ text: String) -> some View {
         Text(text).foregroundStyle(.secondary).gridColumnAlignment(.trailing)
     }
 
-    private var summary: String {
-        let dir = folder.isEmpty ? "(no folder)" : (folder as NSString).lastPathComponent
-        let trimmed = task.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\n", with: " ")
-        let head = trimmed.count > 60 ? String(trimmed.prefix(60)) + "…" : trimmed
-        return "\(option.title) · \(dir) · \(head.isEmpty ? "(no task)" : head)"
+    private var branch: String {
+        branchEdited ? branchText : WorktreeNaming.defaultBranch(name: name, task: task)
     }
 
-    private var isStarting: Bool {
-        if case .starting = store.launchState { return true }
-        return false
+    /// The worktree to create, when "New worktree" is on and the folder is a repo.
+    private var plan: WorktreePlan? {
+        guard useWorktree, let source else { return nil }
+        return WorktreePlan.make(source: source, branch: branch.trimmingCharacters(in: .whitespaces), folder: folder)
+    }
+
+    private var summary: String {
+        let trimmed = task.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\n", with: " ")
+        let head = trimmed.count > 60 ? String(trimmed.prefix(60)) + "…" : trimmed
+        let task = head.isEmpty ? "(no task)" : head
+        if let plan {
+            return "\(option.title) · \((plan.path as NSString).lastPathComponent) (\(plan.branch)) · \(task)"
+        }
+        let dir = folder.isEmpty ? "(no folder)" : (folder as NSString).lastPathComponent
+        return "\(option.title) · \(dir) · \(task)"
     }
 
     private var canLaunch: Bool {
-        store.herdrAppRunning && !folder.isEmpty && !isStarting
+        store.herdrAppRunning && !folder.isEmpty && !store.isLaunchBusy
+            && (plan == nil || !branch.trimmingCharacters(in: .whitespaces).isEmpty)
     }
 
     @ViewBuilder
@@ -149,7 +209,7 @@ struct LaunchFormView: View {
         switch store.launchState {
         case .idle:
             EmptyView()
-        case .starting:
+        case .creatingWorktree, .starting:
             HStack(spacing: 6) {
                 ProgressView().controlSize(.mini)
                 Text(store.launchState.label)
@@ -170,19 +230,40 @@ struct LaunchFormView: View {
                     Button("Open in Herdr") { Task { _ = await store.openInHerdr(terminal) } }
                         .buttonStyle(.borderless)
                 }
+                worktreeNote
             }
             .font(.system(size: 11))
         case .failed(let error):
             HStack(spacing: 6) {
                 Image(systemName: "xmark.octagon.fill").foregroundStyle(PixelPalette.error.color)
                 Text("\(store.launchState.label) · \(error.message)\(error.hint.map { " — \($0)" } ?? "")")
-                    .lineLimit(2)
+                    .lineLimit(3)
+                    .help(error.message)
+                worktreeNote
             }
             .font(.system(size: 11))
         }
     }
 
+    /// The worktree stays on disk when the launch after it didn't work out.
+    @ViewBuilder
+    private var worktreeNote: some View {
+        if let path = store.launchWorktree {
+            Text("Worktree kept at \(Format.abbreviatePath(path))")
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.head)
+                .help(path)
+        }
+    }
+
     private func load() async {
+        if let prefill = model.launchPrefill {
+            model.launchPrefill = nil
+            folder = prefill.folder
+            if let id = prefill.optionID { optionID = id }
+            useWorktree = prefill.worktree
+        }
         if folder.isEmpty { folder = settings.recentFolders.first ?? "" }
         space = settings.defaultSpace
         taskFocused = true
@@ -217,7 +298,7 @@ struct LaunchFormView: View {
             task: task.trimmingCharacters(in: .whitespacesAndNewlines),
             name: name.trimmingCharacters(in: .whitespaces).isEmpty ? nil : Self.sanitizeName(name),
             space: space.isEmpty ? nil : space
-        ))
+        ), worktree: plan)
     }
 
     /// Herdr names: 1–32 of a-z 0-9 - _ .

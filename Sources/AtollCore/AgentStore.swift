@@ -1218,12 +1218,49 @@ public final class AgentStore {
 
     // MARK: Launch
 
-    public func launch(_ request: LaunchRequest) {
-        if case .starting = launchState { return }
+    /// Creates worktrees for "New worktree" launches; nil = unavailable.
+    public var worktreeCreator: (any WorktreeCreating)?
+    /// The worktree the last launch created, kept on disk even if the launch then failed.
+    public private(set) var launchWorktree: String?
+    /// A launch created a worktree (its path), e.g. for the recent-folders list.
+    public var onWorktreeCreated: ((_ path: String) -> Void)?
+
+    public var isLaunchBusy: Bool {
+        switch launchState {
+        case .starting, .creatingWorktree: true
+        default: false
+        }
+    }
+
+    /// With a plan, first creates the worktree, then launches in it (`request.folder` is replaced).
+    public func launch(_ request: LaunchRequest, worktree: WorktreePlan? = nil) {
+        if isLaunchBusy { return }
         guard herdrAppRunning else {
             launchState = .failed(HerdrError(kind: "app_not_running", message: "Herdr app isn't running", hint: "Open Herdr, then try again."))
             return
         }
+        launchWorktree = nil
+        guard let worktree else { return startLaunch(request) }
+        guard let creator = worktreeCreator else {
+            launchState = .failed(HerdrError(kind: "worktree_failed", message: "Worktrees aren't available"))
+            return
+        }
+        launchState = .creatingWorktree
+        Task {
+            switch await creator.create(worktree) {
+            case .failure(let error):
+                self.launchState = .failed(HerdrError(kind: "worktree_failed", message: error.message))
+            case .success:
+                self.launchWorktree = worktree.path
+                self.onWorktreeCreated?(worktree.launchFolder)
+                var request = request
+                request.folder = worktree.launchFolder
+                self.startLaunch(request)
+            }
+        }
+    }
+
+    private func startLaunch(_ request: LaunchRequest) {
         launchState = .starting(terminal: nil)
         launchHasTask = !request.task.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         Task { [client] in
@@ -1260,8 +1297,9 @@ public final class AgentStore {
     }
 
     public func resetLaunch() {
-        if case .starting = launchState { return }
+        if isLaunchBusy { return }
         launchState = .idle
+        launchWorktree = nil
     }
 
     // MARK: Focus
@@ -1362,6 +1400,8 @@ public enum InterruptButtonState: Equatable, Sendable {
 
 public enum LaunchState: Equatable, Sendable {
     case idle
+    /// "New worktree": `git worktree add` is running; the launch follows.
+    case creatingWorktree
     /// Command sent (terminal nil) or terminal created and waiting for it to start working.
     case starting(terminal: String?)
     case launched(terminal: String)
@@ -1371,6 +1411,7 @@ public enum LaunchState: Equatable, Sendable {
     public var label: String {
         switch self {
         case .idle: ""
+        case .creatingWorktree: "Creating worktree…"
         case .starting: "Starting…"
         case .launched: "Launched"
         case .unconfirmed: "Created · task start unconfirmed"
