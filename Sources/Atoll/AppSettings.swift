@@ -53,6 +53,8 @@ final class AppSettings {
     /// Speech bubble over a character when its agent stops or needs the user.
     var speechBubbles: Bool { didSet { defaults.set(speechBubbles, forKey: "speechBubbles") } }
     var notificationsEnabled: Bool { didSet { defaults.set(notificationsEnabled, forKey: "notificationsEnabled") } }
+    /// Needs-you notifications show the waiting reason (and only then offer Allow). Off by default.
+    var notifyShowsWaitingReason: Bool { didSet { defaults.set(notifyShowsWaitingReason, forKey: "notifyShowsWaitingReason") } }
     /// Canned replies under the panel's reply box (normalized; empty = none shown).
     var quickReplies: [String] { didSet { defaults.set(quickReplies, forKey: "quickReplies") } }
     /// After a turn finishes, show what it changed in git (+/− lines, files).
@@ -126,6 +128,7 @@ final class AppSettings {
         animationsEnabled = defaults.object(forKey: "animationsEnabled") as? Bool ?? true
         decorations = defaults.object(forKey: "decorations") as? Bool ?? true
         notificationsEnabled = defaults.object(forKey: "notificationsEnabled") as? Bool ?? true
+        notifyShowsWaitingReason = defaults.bool(forKey: "notifyShowsWaitingReason")
         speechBubbles = defaults.object(forKey: "speechBubbles") as? Bool ?? true
         reminderMinutes = defaults.object(forKey: "reminderMinutes") as? Int ?? 5
         autoAdvance = defaults.object(forKey: "autoAdvance") as? Bool ?? true
@@ -148,7 +151,8 @@ final class AppSettings {
     }
 
     var notificationSettings: NotificationSettings {
-        NotificationSettings(enabled: notificationsEnabled, doneAgents: doneNotifyAgents, doneProjects: doneNotifyProjects)
+        NotificationSettings(enabled: notificationsEnabled, doneAgents: doneNotifyAgents, doneProjects: doneNotifyProjects,
+                             showWaitingReason: notifyShowsWaitingReason)
     }
 
     func rememberFolder(_ path: String) {

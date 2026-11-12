@@ -21,9 +21,9 @@
 - **啟動**：點動態島上的「＋」（或清單底部的 Launch agent），透過 Herdr 開新的 Claude Code、Codex 或 herdr-core template agent。
 - **對話泡泡**：agent 停下來（Done／Idle／Exited）、等待你或出錯時，該角色下方冒出約 5 秒的狀態泡泡；一次一個，等待與錯誤優先，點泡泡直接打開面板。可在設定關閉。
 - **全螢幕與多螢幕**：動態島所在螢幕有 app 全螢幕時，預設只顯示等待你或出錯的 agent，沒有就整個隱藏（可改為照常顯示或一律隱藏）；快捷鍵仍可展開清單。螢幕可選 Follow mouse，動態島跟著游標換螢幕，展開時不移動。
-- **通知**：agent 等待你或出錯時發 macOS 通知，內容只有「工具 · 專案名」；`⌃⌥⌘A` 直接打開最早開始等待的 agent。等待超過設定時間（預設 5 分鐘，可關閉）仍沒處理會再提醒一次，泡泡也再冒一次。面板上的鈴鐺可設定「這次跑完時通知我」，通知一次後自動關閉。
+- **通知**：agent 等待你或出錯時發 macOS 通知，內容只有「工具 · 專案名」；`⌃⌥⌘A` 直接打開最早開始等待的 agent。等待超過設定時間（預設 5 分鐘，可關閉）仍沒處理會再提醒一次，泡泡也再冒一次。面板上的鈴鐺可設定「這次跑完時通知我」，通知一次後自動關閉。Needs you 的通知可以直接回應：permission 有 Deny，question 有 Reply；設定裡打開「Show waiting reason in notifications」（預設關閉）後通知會附上指令或問題，才會出現 Allow，避免在看不到指令的地方核准。按下時 agent 已經不在那個對話框就不送，改發「No longer waiting」；Reply 沒送出時點通知會打開面板並帶回你打的字。
 - **誠實的狀態**：來源斷線或超過 heartbeat 期限時，動態島轉灰並標示「狀態未知」，不從畫面文字猜測狀態。
-- **隱私**：只和本機的 herdr-core、herdr CLI、cmux 溝通；指令補完只在本機讀取上述 skill／command 定義檔與 plugin 設定，不寫入也不外傳；近期輸出只在面板開著時留在記憶體。唯一例外是等待原因預覽：只保留擷取出來的最多 2 行，agent 離開 Needs you 就丟棄。
+- **隱私**：只和本機的 herdr-core、herdr CLI、cmux 溝通；指令補完只在本機讀取上述 skill／command 定義檔與 plugin 設定，不寫入也不外傳；近期輸出只在面板開著時留在記憶體。唯一例外是等待原因預覽：只保留擷取出來的最多 2 行，agent 離開 Needs you 就丟棄；只有打開「Show waiting reason in notifications」時，預覽的第一行才會出現在 macOS 通知裡。
 
 | 清單 | 互動面板 |
 | --- | --- |

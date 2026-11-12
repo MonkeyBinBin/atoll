@@ -33,7 +33,7 @@ final class IslandController {
     private var keyMonitor: Any?
     private var outsideClickMonitors: [Any] = []
     private var previousApp: NSRunningApplication?
-    private var debugHook: DebugHook?
+    private(set) var debugHook: DebugHook?
     private var hoverCard: HoverCardController?
     private var bubbles: SpeechBubbleController?
     private var fullScreenDetector: FullScreenDetector?

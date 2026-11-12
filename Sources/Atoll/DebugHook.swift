@@ -12,6 +12,8 @@ final class DebugHook {
     private var timer: Timer?
     /// bubble <address>: force a speech bubble for that agent's current state.
     var onBubble: ((String) -> Void)?
+    /// Commands this hook doesn't know (e.g. the Notifier's `notes` / `notify`), with the debug dir.
+    var onOther: ((_ parts: [String], _ dir: URL) -> Void)?
 
     init?(panel: NSWindow, model: IslandModel) {
         guard let path = ProcessInfo.processInfo.environment["ATOLL_DEBUG_DIR"], !path.isEmpty else { return nil }
@@ -134,7 +136,7 @@ final class DebugHook {
                 if parts.count > 2 {
                     model.store.launch(LaunchRequest(argv: Array(parts[2...]), folder: parts[1], task: "debug launch"))
                 }
-            default: break
+            default: onOther?(parts, dir)
             }
         }
     }

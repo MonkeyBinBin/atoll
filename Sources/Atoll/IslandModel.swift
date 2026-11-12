@@ -189,6 +189,8 @@ final class IslandModel {
 
     /// The open panel's reply box holds unsent text: auto-advance must not yank it away.
     var panelHasDraft = false
+    /// Text to put in an agent's reply box when its panel opens (a reply from a notification that wasn't sent).
+    var draftPrefill: [String: String] = [:]
     /// Briefly true after the last waiting agent was answered.
     private(set) var allClear = false
     @ObservationIgnored private var allClearTask: Task<Void, Never>?

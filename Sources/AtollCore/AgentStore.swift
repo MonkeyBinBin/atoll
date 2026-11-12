@@ -164,6 +164,8 @@ public final class AgentStore {
     /// An agent became active in a working tree another active agent already works in. Once per newcomer
     /// while the tree keeps two or more agents; announced again only after it drops below two.
     public var onSharedTree: ((_ agent: Agent) -> Void)?
+    /// The one screen read of a Needs-you episode finished (whatever it found) while the agent still waits.
+    public var onWaitingDetails: ((_ agent: Agent) -> Void)?
 
     // MARK: Internals
 
@@ -224,6 +226,8 @@ public final class AgentStore {
     /// Waiting previews for the current episode only; dropped the moment the agent leaves Needs you.
     private var previews: [String: WaitingPreview] = [:]
     private var choices: [String: PermissionChoices] = [:]
+    /// Episodes whose screen read is over, found or not.
+    private var previewResolved: [String: Date] = [:]
     /// Episode each list response belongs to; a "No longer waiting" note outlives it on its own timer.
     private var responseEpisodes: [String: Date] = [:]
     private var responseTimers: [String: ScheduledAction] = [:]
@@ -645,6 +649,7 @@ public final class AgentStore {
             previewEpisodes[address] = nil
             previews[address] = nil
             choices[address] = nil
+            previewResolved[address] = nil
             previewTimers.removeValue(forKey: address)?.cancel()
         }
         for (address, episode) in responseEpisodes where waiting[address]?.waitingSince != episode {
@@ -669,30 +674,52 @@ public final class AgentStore {
     }
 
     private func readPreview(_ address: String, episode: Date) {
-        guard let agent = agent(address), agent.waitingSince == episode, let kind = agent.state.blockedKind else { return }
+        guard let agent = agent(address), agent.waitingSince == episode, let kind = agent.state.blockedKind else {
+            resolvePreview(address, episode: episode)
+            return
+        }
         let lines = timing.previewLines
         let tool = agent.tool
         let keepPreview = agent.statusMessage == nil
         Task { [client = client(for: address)] in
             // A failed read just means no preview; never retried within the episode.
-            guard let output = try? await client.read(terminal: address, lines: lines),
-                  self.previewEpisodes[address] == episode,
-                  let preview = WaitingPreview.extract(from: output.text, tool: tool, kind: kind) else { return }
-            if keepPreview { self.previews[address] = preview }
-            self.choices[address] = PermissionChoices.extract(from: output.text, tool: tool, kind: kind)
+            let output = try? await client.read(terminal: address, lines: lines)
+            guard self.previewEpisodes[address] == episode else { return }
+            if let output, let preview = WaitingPreview.extract(from: output.text, tool: tool, kind: kind) {
+                if keepPreview { self.previews[address] = preview }
+                self.choices[address] = PermissionChoices.extract(from: output.text, tool: tool, kind: kind)
+            }
+            // Rebuild first so whoever hears "resolved" sees the preview and keys on the agent.
             self.rebuild()
+            self.resolvePreview(address, episode: episode)
         }
+    }
+
+    private func resolvePreview(_ address: String, episode: Date) {
+        guard previewEpisodes[address] == episode else { return }
+        previewResolved[address] = episode
+        if let agent = agent(address), agent.waitingSince == episode { onWaitingDetails?(agent) }
+    }
+
+    /// The current Needs-you episode's screen read hasn't finished yet (so its preview and keys may still come).
+    public func isReadingWaitingScreen(_ address: String) -> Bool {
+        guard let episode = previewEpisodes[address] else { return false }
+        return previewResolved[address] != episode
     }
 
     // MARK: Permission from the list
 
     /// Allow / Deny a permission dialog without opening the panel. `episode` is the `waitingSince` the user
     /// saw; if the agent has left that dialog since, nothing is sent so the key can't land in the next one.
-    public func respond(_ choice: PermissionChoice, to address: String, episode: Date?) {
+    public func respond(
+        _ choice: PermissionChoice, to address: String, episode: Date?,
+        completion: (@MainActor (PermissionResponseState) -> Void)? = nil
+    ) {
         if case .sending = permissionResponses[address] { return }
         guard let agent = agent(address), agent.state.isNeedsYou, let episode, agent.waitingSince == episode,
               let key = agent.permissionChoices?.key(for: choice) else {
             showNoLongerWaiting(address)
+            completion?(.noLongerWaiting)
             return
         }
         responseTimers.removeValue(forKey: address)?.cancel()
@@ -710,6 +737,7 @@ public final class AgentStore {
                 result = .failed(choice, .unavailable(error.localizedDescription))
             }
             if case .failed = result { self.disarmAdvance(address) }
+            completion?(result)
             // Never retried. Only shown while the agent is still in the episode it was sent for.
             guard self.responseEpisodes[address] == episode else { return }
             self.permissionResponses[address] = result
@@ -1006,35 +1034,52 @@ public final class AgentStore {
 
     // MARK: Send
 
-    public func send(_ text: String, to address: String) {
-        guard let agent = agent(address) else { return }
+    /// Returns false when nothing was sent (wrong mode, already in flight, empty text).
+    @discardableResult
+    public func send(_ text: String, to address: String, completion: (@MainActor (SendState) -> Void)? = nil) -> Bool {
+        guard let agent = agent(address) else { return false }
         let force: Bool
         switch agent.replyMode {
         case .text(let f): force = f
         case .textAndKeys: force = true
-        default: return
+        default: return false
         }
-        if sendStates[address]?.isInFlight == true { return }
+        if sendStates[address]?.isInFlight == true { return false }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty else { return false }
         sendStates[address] = .waiting
         armAdvance(address)
         Task { [client = client(for: address)] in
+            let state: SendState
             do {
                 let output = try await client.send(terminal: address, text: text, force: force)
-                let state: SendState = switch output.started {
+                state = switch output.started {
                 case .some(true): .started
                 case .some(false): .delivered
                 case .none: .unconfirmed
                 }
-                self.sendStates[address] = state
             } catch let error as HerdrError {
-                self.sendStates[address] = .failed(error)
+                state = .failed(error)
                 self.disarmAdvance(address)
             } catch {
-                self.sendStates[address] = .failed(.unavailable(error.localizedDescription))
+                state = .failed(.unavailable(error.localizedDescription))
                 self.disarmAdvance(address)
             }
+            self.sendStates[address] = state
+            completion?(state)
+        }
+        return true
+    }
+
+    /// Reply to a Needs-you agent only if it still waits in the episode the user saw (e.g. from a notification).
+    /// `completion` gets nil when nothing was sent because it moved on.
+    public func reply(_ text: String, to address: String, episode: Date?, completion: @escaping @MainActor (SendState?) -> Void) {
+        guard let agent = agent(address), agent.state.isNeedsYou, let episode, agent.waitingSince == episode else {
+            completion(nil)
+            return
+        }
+        if !send(text, to: address, completion: { completion($0) }) {
+            completion(.failed(HerdrError(kind: "not_sent", message: "Another message is still being sent, or the reply was empty.")))
         }
     }
 

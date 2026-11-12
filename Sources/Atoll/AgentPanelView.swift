@@ -24,7 +24,9 @@ struct AgentPanelView: View {
         .onAppear {
             inputFocused = agent.replyMode.isText || agent.replyMode == .textAndKeys
             model.panelHasDraft = false
+            takePrefill()
         }
+        .onChange(of: model.draftPrefill[agent.address]) { _, _ in takePrefill() }
         .onChange(of: model.quickReplyRequest) { _, request in
             guard let request, agent.replyMode.isText || agent.replyMode == .textAndKeys,
                   settings.quickReplies.indices.contains(request.index) else { return }
@@ -33,6 +35,11 @@ struct AgentPanelView: View {
         .onChange(of: draft) { _, text in
             model.panelHasDraft = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
+    }
+
+    private func takePrefill() {
+        guard let text = model.draftPrefill.removeValue(forKey: agent.address) else { return }
+        draft = text
     }
 
     // MARK: Header

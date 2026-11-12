@@ -46,8 +46,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model = IslandModel(store: store, settings: settings)
         island = IslandController(model: model, settings: settings, client: client)
         menuBar = MenuBarController(store: store, settings: settings) { [weak self] in self?.showSettings() }
-        notifier = Notifier(settings: settings) { [weak self] address in
+        notifier = Notifier(settings: settings, store: store) { [weak self] address, draft in
             self?.settings.islandVisible = true
+            if let draft { self?.model.draftPrefill[address] = draft }
             self?.model.openPanel(address)
         }
         store.onTransition = { [weak self] agent, from in
@@ -55,6 +56,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.island.handleTransition(agent, from: from)
         }
         store.onSharedTree = { [weak self] agent in self?.island.handleSharedTree(agent) }
+        store.onWaitingDetails = { [weak self] agent in self?.notifier.waitingDetails(agent) }
+        island.debugHook?.onOther = { [weak self] parts, dir in self?.notifier.debugCommand(parts, dir: dir) }
         store.onNotifyWhenDone = { [weak self] agent in self?.notifier.notifyWhenDone(agent) }
         store.onAutoAdvance = { [weak self] next in self?.model.autoAdvance(to: next) }
         store.onAllClear = { [weak self] in self?.model.showAllClear() }

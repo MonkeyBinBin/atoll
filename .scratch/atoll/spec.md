@@ -81,7 +81,7 @@ Status: ready-for-agent
 51. As a 使用者, I want 在清單用 `↑↓` 選擇、`Enter` 打開、`⌘1`–`⌘9` 直接跳到第 N 個, so that 鍵盤就能完成所有操作
 52. As a 使用者, I want agent 等待使用者或出錯時收到 macOS 通知, so that 我在別的 app 裡也不會錯過
 53. As a 使用者, I want 完成通知預設關閉，可依 agent 或專案打開, so that 通知不會太吵
-54. As a 使用者, I want 通知內容只顯示「工具 · 專案名」, so that 畫面輸出不會出現在通知中心
+54. As a 使用者, I want 通知內容只顯示「工具 · 專案名」, so that 畫面輸出不會出現在通知中心。例外（ticket 31）：設定「Show waiting reason in notifications」打開時（預設關閉），Needs you 通知附上等待原因的一行（擷取的預覽 title 或來源的 status msg）
 55. As a 使用者, I want 點通知直接打開該 agent 的互動面板, so that 不用再找一次
 
 ### 設定與常駐
@@ -218,7 +218,8 @@ Status: ready-for-agent
 ### 通知
 
 - 預設：等待使用者、錯誤會通知；完成預設關閉，可依 agent／專案打開；執行中永不通知。
-- 內容只含「工具 · 專案名」，不含輸出。點擊打開該 agent 的互動面板。
+- 內容只含「工具 · 專案名」，不含輸出；唯一例外是上面第 54 條的等待原因設定。點擊打開該 agent 的互動面板。
+- Needs you 通知可以直接回應（ticket 31）：permission 認得按鍵時給 Deny，只有通知顯示了等待原因才給 Allow；question 與 unspecified 給 Reply。按下時 agent 已離開該 episode 就不送，改發「No longer waiting」；送出失敗發一則失敗通知，Reply 的文字點擊後預填回面板。
 
 ### 美術系統
 
