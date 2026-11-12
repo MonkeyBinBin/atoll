@@ -15,7 +15,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuBar: MenuBarController!
     private var notifier: Notifier!
     private var settingsWindow: NSWindow?
-    private var todayWindow: NSWindow?
     private var sigterm: DispatchSourceSignal?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -91,9 +90,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sigterm = term
         NotificationCenter.default.addObserver(forName: .atollShowSettings, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.showSettings() }
-        }
-        NotificationCenter.default.addObserver(forName: .atollShowToday, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.showToday() }
         }
         // The timeline's midnight timer doesn't count while asleep, and the day depends on the time zone.
         for name in [Notification.Name.NSCalendarDayChanged, .NSSystemTimeZoneDidChange] {
@@ -181,28 +177,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsWindow?.makeKeyAndOrderFront(nil)
     }
 
-    /// Today's finished turns. A window rather than an island mode: each row carries time, name, state,
-    /// change counts and last words, plus a filter — more than the island's panel width holds.
+    /// Today's finished turns: an island pane, like the list and the launch form.
     private func showToday() {
-        if todayWindow == nil {
-            let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 620, height: 520),
-                styleMask: [.titled, .closable, .resizable, .miniaturizable],
-                backing: .buffered, defer: false
-            )
-            window.isReleasedWhenClosed = false
-            window.contentViewController = NSHostingController(rootView: TodayView(model: model, settings: settings))
-            window.setContentSize(NSSize(width: 620, height: 520))
-            window.center()
-            todayWindow = window
-            // The title carries the unseen count.
-            trackChanges { [weak self, weak window] in
-                guard let self, let window else { return }
-                let unseen = self.store.timeline.unseenCount
-                window.title = unseen > 0 ? "Today · \(unseen) unseen" : "Today"
-            }
-        }
-        NSApp.activate()
-        todayWindow?.makeKeyAndOrderFront(nil)
+        settings.islandVisible = true
+        model.openToday()
     }
 }

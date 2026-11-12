@@ -142,6 +142,8 @@ struct IslandView: View {
             }
         case .launch:
             LaunchFormView(model: model)
+        case .today:
+            TodayView(model: model)
         }
     }
 }

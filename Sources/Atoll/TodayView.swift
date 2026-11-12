@@ -1,11 +1,12 @@
 import AtollCore
 import SwiftUI
 
-/// Today's finished turns, newest first: "14:32 · Claude Code · atoll · Done · +120 −30 · last words".
-/// A dot marks turns whose agent's panel hasn't been opened since; clicking a row opens that panel.
+/// Today's finished turns as an island pane, newest first: "14:32 · Claude Code · atoll · Done · +120 −30",
+/// with the last words below. A dot marks turns whose agent's panel hasn't been opened since; clicking a
+/// row opens that panel.
 struct TodayView: View {
-    let model: IslandModel
-    let settings: AppSettings
+    @Bindable var model: IslandModel
+    @Environment(AppSettings.self) private var settings
     /// nil = all agents.
     @State private var filter: String?
 
@@ -25,49 +26,65 @@ struct TodayView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                Picker("Agent", selection: $filter) {
-                    Text("All agents").tag(String?.none)
-                    ForEach(agentChoices, id: \.address) { choice in
-                        Text(choice.name).tag(Optional(choice.address))
-                    }
-                }
-                .labelsHidden()
-                .frame(maxWidth: 260)
-                Spacer()
-                let unseen = store.timeline.unseenCount
-                if unseen > 0 {
-                    Text("\(unseen) unseen")
-                        .foregroundStyle(.secondary)
-                }
-                Button("Clear") {
-                    filter = nil
-                    store.clearTimeline()
-                }
-                .disabled(store.timeline.entries.isEmpty)
-                .help("Forget today's entries (they are only in memory)")
-            }
-            .padding(12)
-            Divider()
+            header
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+            Divider().overlay(Color.white.opacity(0.08))
             if entries.isEmpty {
-                Spacer()
                 Text(emptyText)
+                    .font(.callout)
                     .foregroundStyle(.secondary)
-                Spacer()
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 24)
             } else {
-                List(entries) { entry in
-                    TimelineRow(entry: entry, present: !entry.gone) {
-                        settings.islandVisible = true
-                        model.openPanel(entry.address)
+                ScrollView {
+                    VStack(spacing: 4) {
+                        ForEach(entries) { entry in
+                            TimelineRow(entry: entry) { model.openPanel(entry.address) }
+                        }
                     }
+                    .padding(8)
                 }
-                .listStyle(.inset)
+                .frame(maxHeight: 420)
+                .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .frame(minWidth: 460, minHeight: 280)
         .onChange(of: agentChoices.map(\.address)) { _, addresses in
             if let filter, !addresses.contains(filter) { self.filter = nil }
         }
+    }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Text("Today").font(.system(size: 13, weight: .semibold))
+            let unseen = store.timeline.unseenCount
+            if unseen > 0 {
+                Text("\(unseen) unseen")
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Picker("Agent", selection: $filter) {
+                Text("All agents").tag(String?.none)
+                ForEach(agentChoices, id: \.address) { choice in
+                    Text(choice.name).tag(Optional(choice.address))
+                }
+            }
+            .labelsHidden()
+            .fixedSize()
+            .disabled(agentChoices.isEmpty)
+            Button("Clear") {
+                filter = nil
+                store.clearTimeline()
+            }
+            .buttonStyle(.borderless)
+            .disabled(store.timeline.entries.isEmpty)
+            .help("Forget today's entries (they are only in memory)")
+            PinButton(model: model)
+            Button { model.escape() } label: { Image(systemName: "list.bullet") }
+                .buttonStyle(.borderless)
+                .help("Back to agent list (esc)")
+        }
+        .font(.system(size: 11))
     }
 
     private var emptyText: String {
@@ -78,9 +95,8 @@ struct TodayView: View {
 
 private struct TimelineRow: View {
     let entry: TimelineEntry
-    /// The agent hasn't exited or left the list; a gone one's row opens nothing.
-    let present: Bool
     let open: () -> Void
+    @State private var hovered = false
 
     /// "Claude Code · atoll"; a terminal with its own name also gets the project.
     private var name: String {
@@ -88,49 +104,61 @@ private struct TimelineRow: View {
     }
 
     var body: some View {
-        Button(action: open) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Circle()
-                    .fill(entry.unseen ? Color.accentColor : .clear)
-                    .frame(width: 7, height: 7)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 4) {
-                        Text(Format.clock.string(from: entry.at))
-                            .monospacedDigit()
-                        Text("· \(name) ·")
-                        // State colors are tuned for the dark island: only the icon carries them here.
-                        Image(systemName: entry.state.symbol)
-                            .foregroundStyle(entry.state.color)
-                        Text(entry.state.label)
-                        if let changes = entry.changes {
-                            Text("· \(changes)")
-                                .foregroundStyle(.secondary)
-                        }
-                        if !present {
-                            Text("· Gone")
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-                    .lineLimit(1)
-                    if let words = entry.lastWords {
-                        Text(words)
-                            .font(.system(size: 12))
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Circle()
+                .fill(entry.unseen ? Color.accentColor : .clear)
+                .frame(width: 6, height: 6)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 4) {
+                    Text(Format.clock.string(from: entry.at))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                    Text(name)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Image(systemName: entry.state.symbol)
+                        .foregroundStyle(entry.state.color)
+                    Text(entry.state.label)
+                        .foregroundStyle(entry.state.color)
+                    if let changes = entry.changes {
+                        Text("· \(changes)")
                             .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                            .help(words)
+                    }
+                    if entry.gone {
+                        Text("· Gone")
+                            .foregroundStyle(.tertiary)
                     }
                 }
-                Spacer(minLength: 0)
+                .font(.system(size: 12))
+                .lineLimit(1)
+                if let words = entry.lastWords {
+                    Text(words)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .help(words)
+                }
             }
-            .contentShape(Rectangle())
+            Spacer(minLength: 0)
         }
-        .buttonStyle(.plain)
-        .disabled(!present)
-        .help(present ? "Open \(entry.displayName)" : "This agent is no longer around")
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.white.opacity(hovered && !entry.gone ? 0.08 : 0.04))
+        )
+        .opacity(entry.gone ? 0.55 : 1)
+        .contentShape(Rectangle())
+        // Gone: the agent exited or left the list, so there is no panel to open.
+        .onTapGesture { if !entry.gone { open() } }
+        .onHover { hovered = $0 }
+        .help(entry.gone ? "This agent is no longer around" : "Open \(entry.displayName)")
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel([
             Format.clock.string(from: entry.at), name, entry.state.label, entry.changes, entry.lastWords,
-            entry.unseen ? "unseen" : nil, present ? nil : "gone",
+            entry.unseen ? "unseen" : nil, entry.gone ? "gone" : nil,
         ].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityAddTraits(entry.gone ? [] : .isButton)
     }
 }

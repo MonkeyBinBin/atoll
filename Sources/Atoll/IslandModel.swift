@@ -108,6 +108,8 @@ final class IslandModel {
         case list
         case panel(String)
         case launch
+        /// Today's finished turns (ticket 38).
+        case today
     }
 
     let store: AgentStore
@@ -308,6 +310,11 @@ final class IslandModel {
         store.openPanel(address)
     }
 
+    func openToday() {
+        store.closePanel()
+        mode = .today
+    }
+
     func openLaunch(prefill: LaunchPrefill? = nil) {
         store.closePanel()
         store.resetLaunch()
@@ -341,7 +348,7 @@ final class IslandModel {
         mode = .collapsed
     }
 
-    /// Esc: panel → list → collapsed (launch form → collapsed).
+    /// Esc: panel / Today → list → collapsed (launch form → collapsed).
     func escape() {
         switch mode {
         case .panel:
@@ -352,6 +359,9 @@ final class IslandModel {
             }
             store.closePanel()
             mode = .list
+        case .today:
+            mode = .list
+            clampSelection()
         case .list, .launch:
             collapse()
         case .collapsed:

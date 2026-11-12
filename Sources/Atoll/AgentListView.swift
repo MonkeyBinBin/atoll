@@ -52,7 +52,7 @@ struct AgentListView: View {
                 }
                 .buttonStyle(.borderless)
                 Button {
-                    NotificationCenter.default.post(name: .atollShowToday, object: nil)
+                    model.openToday()
                 } label: {
                     let unseen = model.store.timeline.unseenCount
                     Label(unseen > 0 ? "Today · \(unseen)" : "Today", systemImage: "clock")
