@@ -4,8 +4,8 @@ import SwiftUI
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    static let herdrBundleID = "dev.herdr.app"
-    static let cmuxBundleID = "com.cmuxterm.app"
+    nonisolated static let herdrBundleID = "dev.herdr.app"
+    nonisolated static let cmuxBundleID = "com.cmuxterm.app"
 
     private var settings: AppSettings!
     private var client: CoreRPCAdapter!
