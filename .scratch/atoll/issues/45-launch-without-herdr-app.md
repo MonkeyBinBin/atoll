@@ -17,3 +17,4 @@
 
 - 2026-11-12（agent）：實測（Herdr 0.1.15）：app 關閉時用 label 起的 terminal，重開後出現在既有 space 的新 tab，以及新 space（名稱依資料夾）；id 不需要 `sp`／`tb` + hex 格式；`space.rename` 後 `where` 立即更新；app 關閉時 `herdr-app` 不會自動啟動 app（socket refused）。`hc run` 的 login shell 包裝實跑確認 task 以最後一個參數送達、結束後留下 shell。
 - 2026-11-12（agent）：測試：`OfflineLaunchTests`、`HerdrLabelsTests`；原「app 沒開 → 拒絕」改為走 core；全套 420 個通過。表單 UI 未在 app 關閉狀態下實測。
+- 2026-11-12（agent）：review 後修正：app 關閉時新建、尚未被 app 命名的 space 在選單顯示 pending 名稱（否則資料夾名），不再顯示 id；pending 名稱改在 launch 成功後才記，worktree 失敗不留；app 打開讀 spaces 時，丟掉既沒顯示、也沒有 live terminal 帶該 label 的名稱（等 core snapshot 到了才判斷）。表單的 Space 改用 `LaunchSpaceChoice`（selected／existing／new），request 由 `LaunchRequest(…optionID:space:newSpaceName:)` 在 AtollCore 組出；app 開著選 New space 時 Name 欄位停用並標示不適用；Settings 的 Default space 補上 app 關閉時的說明。全套 424 個通過。未處理：Recent／⌘R 不記住「New space…」。

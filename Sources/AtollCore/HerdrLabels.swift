@@ -10,8 +10,9 @@ public enum HerdrLabels {
     public static let location = "where"
 
     /// The spaces offered while the Herdr app isn't running: the last ones read from it, renamed and extended
-    /// by what live terminals' labels say now. Cached order first, then spaces only the labels know.
-    public static func spaces(cached: [HerdrSpace], terminals: [TerminalInfo]) -> [HerdrSpace] {
+    /// by what live terminals' labels say now. Cached order first, then spaces only the labels know. A space the
+    /// app hasn't named yet (no `where`) takes its pending name, else its first terminal's folder, as Herdr would.
+    public static func spaces(cached: [HerdrSpace], terminals: [TerminalInfo], pendingNames: [String: String] = [:]) -> [HerdrSpace] {
         var result = cached
         var index = Dictionary(result.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
         for terminal in terminals where terminal.state == "live" {
@@ -22,7 +23,9 @@ public enum HerdrLabels {
                 if !result[at].terminals.contains(terminal.address) { result[at].terminals.append(terminal.address) }
             } else {
                 index[id] = result.count
-                result.append(HerdrSpace(id: id, name: name ?? id, terminals: [terminal.address]))
+                let folder = (terminal.cwd as NSString).lastPathComponent
+                result.append(HerdrSpace(id: id, name: name ?? pendingNames[id] ?? (folder.isEmpty || folder == "/" ? id : folder),
+                                         terminals: [terminal.address]))
             }
         }
         return result
@@ -42,7 +45,7 @@ public enum HerdrLabels {
         return (spaces.first(where: \.active) ?? spaces.first)?.id
     }
 
-    /// A fresh space or tab id in Herdr's shape (`sp` / `tb` + 32 hex digits).
+    /// A fresh space or tab id. Herdr takes any id; this follows its own shape (`sp` / `tb` + 32 hex digits).
     public static func newID(_ prefix: String) -> String {
         prefix + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
     }

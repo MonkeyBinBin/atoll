@@ -266,6 +266,40 @@ public struct LaunchRequest: Equatable, Sendable {
     }
 }
 
+/// What the launch form's Space picker holds.
+public enum LaunchSpaceChoice: Hashable, Sendable {
+    /// Herdr's selected space (without the app: the one it showed last).
+    case selected
+    case existing(String)
+    /// A new space (its name travels separately: `LaunchRequest.newSpaceName`).
+    case new
+
+    /// Stored form (Settings' default, recipes): "" = selected, else a space id.
+    public init(stored: String) {
+        self = stored.isEmpty ? .selected : .existing(stored)
+    }
+
+    /// A new space isn't stored: recipes and defaults name existing spaces only.
+    public var stored: String {
+        if case .existing(let id) = self { id } else { "" }
+    }
+}
+
+extension LaunchRequest {
+    /// A request from the launch form's choices: the space picker and the tool's option id (`template:` ones are
+    /// herdr-core templates). `newSpaceName` only counts for `.new`.
+    public init(argv: [String], folder: String, task: String, name: String?, optionID: String,
+                space choice: LaunchSpaceChoice, newSpaceName: String) {
+        self.init(argv: argv, folder: folder, task: task, name: name,
+                  template: LaunchHistory.templateName(of: optionID) != nil)
+        switch choice {
+        case .selected: break
+        case .existing(let id): space = id
+        case .new: self.newSpaceName = newSpaceName.trimmingCharacters(in: .whitespaces)
+        }
+    }
+}
+
 public struct LaunchOutput: Equatable, Sendable {
     /// The terminal Herdr created, when it says.
     public var terminal: String?

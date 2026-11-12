@@ -2,66 +2,10 @@ import Foundation
 import Testing
 @testable import AtollCore
 
-private func labelled(_ address: String, space: String, location: String? = nil, live: Bool = true) -> TerminalInfo {
+func labelled(_ address: String, space: String, location: String? = nil, live: Bool = true, cwd: String = "/") -> TerminalInfo {
     var labels = [HerdrLabels.space: space, HerdrLabels.tab: "tb1"]
     if let location { labels[HerdrLabels.location] = location }
-    return TerminalInfo(address: address, state: live ? "live" : "finished", labels: labels)
-}
-
-@Suite("Herdr labels")
-struct HerdrLabelsTests {
-    let atoll = HerdrSpace(id: "sp1", name: "atoll", terminals: ["t1"], active: true)
-    let dots = HerdrSpace(id: "sp2", name: "dotfiles")
-
-    @Test("cached spaces first, renamed by `where`, then spaces only the labels know; finished terminals don't count")
-    func merge() {
-        let spaces = HerdrLabels.spaces(cached: [atoll, dots], terminals: [
-            labelled("t1", space: "sp1", location: "atoll-renamed / 1"),
-            labelled("t5", space: "sp9", location: "a / b / 2"),
-            labelled("t6", space: "sp8"),
-            labelled("t7", space: "sp7", location: "gone / 1", live: false),
-            TerminalInfo(address: "t8"),
-        ])
-        #expect(spaces.map(\.id) == ["sp1", "sp2", "sp9", "sp8"])
-        #expect(spaces.map(\.name) == ["atoll-renamed", "dotfiles", "a / b", "sp8"])
-        #expect(spaces[0].active)
-        #expect(spaces[2].terminals == ["t5"])
-    }
-
-    @Test("target: the picked space, else the active one, else the first, else none")
-    func target() {
-        #expect(HerdrLabels.target(picked: "sp2", spaces: [atoll, dots]) == "sp2")
-        #expect(HerdrLabels.target(picked: "", spaces: [dots, atoll]) == "sp1")
-        #expect(HerdrLabels.target(picked: nil, spaces: [dots]) == "sp2")
-        #expect(HerdrLabels.target(picked: nil, spaces: []) == nil)
-    }
-
-    @Test("new ids look like Herdr's")
-    func newID() {
-        let id = HerdrLabels.newID("sp")
-        #expect(id.range(of: #"^sp[0-9a-f]{32}$"#, options: .regularExpression) != nil)
-    }
-
-    @Test("hc run: kept, labelled, plain argv through a login shell with the task last")
-    func hcArguments() {
-        let request = LaunchRequest(argv: ["codex", "--no-daemon"], folder: "/p", task: "fix it", name: "fixer", space: "sp1")
-        let args = CoreRPCAdapter.hcRunArguments(request, shell: "/bin/zsh", newID: { "\($0)NEW" })
-        #expect(args == [
-            "run", "--bg", "--keep", "--no-parent", "--json", "--cwd", "/p",
-            "--label", "herdr.space=sp1", "--label", "herdr.tab=tbNEW", "--name", "fixer", "--",
-            "/bin/zsh", "-lic", #""$@"; exec "$0" -li"#, "/bin/zsh", "codex", "--no-daemon", "fix it",
-        ])
-    }
-
-    @Test("hc run: a template gets its task from core; no space → a new one; no task → no argument")
-    func hcTemplate() {
-        let template = LaunchRequest(argv: ["reviewer"], folder: "/p", task: "review x", template: true)
-        let args = CoreRPCAdapter.hcRunArguments(template, shell: "/bin/zsh", newID: { "\($0)NEW" })
-        #expect(args.contains("herdr.space=spNEW"))
-        #expect(Array(args.suffix(3)) == ["--", "reviewer", "review x"])
-        let plain = LaunchRequest(argv: ["claude"], folder: "/p", task: "", space: "")
-        #expect(CoreRPCAdapter.hcRunArguments(plain, shell: "/bin/sh", newID: { "\($0)NEW" }).last == "claude")
-    }
+    return TerminalInfo(address: address, cwd: cwd, state: live ? "live" : "finished", labels: labels)
 }
 
 @MainActor
@@ -173,5 +117,58 @@ struct OfflineLaunchTests {
         h.store.herdrAppRunning = false
         #expect(h.store.cachedSpaces == [atoll])
         #expect(cached == [atoll])
+    }
+
+    @Test("a space made without the app shows by its pending name (else its folder), not its id")
+    func pendingNameShown() async {
+        let h = Harness()
+        h.store.pendingSpaceNames = ["spN": "my space"]
+        h.connect([labelled("t1", space: "spN", cwd: "/p/web"), labelled("t2", space: "spM", cwd: "/p/api")])
+        let spaces = await h.store.launchSpaces()
+        #expect(spaces.map(\.name) == ["my space", "api"])
+    }
+
+    @Test("a new space's name waits only once its launch went out: a failed worktree leaves none")
+    func worktreeFailureLeavesNoName() async {
+        let h = Harness()
+        let creator = FakeWorktreeCreator()
+        creator.result = .failure(WorktreeError("no"))
+        h.store.worktreeCreator = creator
+        h.connect()
+        var r = request
+        r.newSpaceName = "named"
+        h.store.launch(r, worktree: WorktreePlan(
+            source: WorktreeSource(toplevel: "/p", head: "abc", dirty: false),
+            branch: "atoll/x", path: "/p.worktrees/x", launchFolder: "/p.worktrees/x"))
+        await settle()
+        #expect(h.store.pendingSpaceNames.isEmpty)
+    }
+
+    @Test("with the app open, a pending name whose space isn't shown and has no live terminal is dropped")
+    func orphanedNameDropped() async {
+        let h = Harness()
+        h.store.pendingSpaceNames = ["spGone": "a", "spWaiting": "b"]
+        h.client.spacesResult = .success([HerdrSpace(id: "sp1", name: "x")])
+        h.connect([labelled("t1", space: "spWaiting")])
+        h.store.herdrAppRunning = true
+        await settle()
+        #expect(h.store.pendingSpaceNames == ["spWaiting": "b"])
+    }
+
+    @Test("the form's choices become the request: selected, existing, new (trimmed name), template option ids")
+    func requestFromChoices() {
+        func make(_ choice: LaunchSpaceChoice, _ optionID: String = "builtin:claude") -> LaunchRequest {
+            LaunchRequest(argv: ["x"], folder: "/p", task: "t", name: nil, optionID: optionID, space: choice, newSpaceName: " n ")
+        }
+        #expect(make(.selected).space == nil)
+        #expect(make(.selected).newSpaceName == nil)
+        #expect(make(.existing("sp1")).space == "sp1")
+        #expect(make(.new).newSpaceName == "n")
+        #expect(make(.new).space == nil)
+        #expect(make(.selected, "template:reviewer").template)
+        #expect(!make(.selected).template)
+        #expect(LaunchSpaceChoice(stored: "") == .selected)
+        #expect(LaunchSpaceChoice(stored: "sp1").stored == "sp1")
+        #expect(LaunchSpaceChoice.new.stored == "")
     }
 }

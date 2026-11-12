@@ -854,8 +854,16 @@ public final class AgentStore {
     }
 
     /// Names the spaces launches without the app made, once the app shows them. A failed rename is tried again
-    /// on the next read.
+    /// on the next read. A name whose space the app doesn't show and no live terminal is labelled for (its agent
+    /// ended before the app opened) is dropped: that space will never appear.
     private func applyPendingSpaceNames(_ shown: [HerdrSpace]) {
+        let labelled = Set(records.values.filter { $0.source == primary && $0.info.state == "live" }
+            .compactMap { $0.info.labels[HerdrLabels.space] })
+        let shownIDs = Set(shown.map(\.id))
+        // Only once core's terminals are known (its snapshot arrived), or every name would look orphaned.
+        for id in pendingSpaceNames.keys where snapshotSeq[primary] != nil && !shownIDs.contains(id) && !labelled.contains(id) {
+            pendingSpaceNames[id] = nil
+        }
         for space in shown {
             guard let name = pendingSpaceNames[space.id], !renamingSpaces.contains(space.id) else { continue }
             renamingSpaces.insert(space.id)
@@ -878,7 +886,7 @@ public final class AgentStore {
 
     private var offlineSpaces: [HerdrSpace] {
         let terminals = records.values.filter { $0.source == primary }.sorted { $0.order < $1.order }.map(\.info)
-        return HerdrLabels.spaces(cached: cachedSpaces, terminals: terminals)
+        return HerdrLabels.spaces(cached: cachedSpaces, terminals: terminals, pendingNames: pendingSpaceNames)
     }
 
     // MARK: Waiting preview
@@ -1722,10 +1730,8 @@ public final class AgentStore {
         var request = request
         request.withoutApp = !herdrAppRunning
         if request.withoutApp {
-            if let name = request.newSpaceName {
-                let id = HerdrLabels.newID("sp")
-                request.space = id
-                if !name.isEmpty { pendingSpaceNames[id] = name }
+            if request.newSpaceName != nil {
+                request.space = HerdrLabels.newID("sp")
             } else {
                 request.space = HerdrLabels.target(picked: request.space, spaces: offlineSpaces)
             }
@@ -1757,10 +1763,12 @@ public final class AgentStore {
         Task { [client] in
             do {
                 let output = try await client.launch(request)
+                // Only a space that came to be (a terminal labelled for it) waits for its name.
+                if request.withoutApp, let name = request.newSpaceName, !name.isEmpty, let id = request.space {
+                    self.pendingSpaceNames[id] = name
+                }
                 self.launchReturned(output)
             } catch {
-                // The new space never came to be: nothing to name.
-                if request.withoutApp, request.newSpaceName != nil, let id = request.space { self.pendingSpaceNames[id] = nil }
                 self.launchState = .failed(error as? HerdrError ?? .unavailable(error.localizedDescription))
             }
         }

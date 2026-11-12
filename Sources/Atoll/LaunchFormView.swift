@@ -33,12 +33,12 @@ struct LaunchFormView: View {
     @State private var task = ""
     @State private var name = ""
     @State private var spaces: [HerdrSpace] = []
-    @State private var space = ""
-    /// The name for a new space (`space == newSpaceTag`); empty = Herdr names it after the folder.
+    @State private var space: LaunchSpaceChoice = .selected
+    /// The name for a new space (`space == .new`); empty = Herdr names it after the folder.
     @State private var newSpaceName = ""
     /// Where the starting space came from, while the user hasn't changed it (ticket 43).
     @State private var spaceOrigin: SpaceGrouping.LaunchSpaceSource?
-    @State private var startingSpace = ""
+    @State private var startingSpace: LaunchSpaceChoice = .selected
     /// The folder's repo, when it is one (offers "New worktree").
     @State private var source: WorktreeSource?
     @State private var useWorktree = false
@@ -60,8 +60,6 @@ struct LaunchFormView: View {
     @FocusState private var launchFocused: Bool
 
     private var store: AgentStore { model.store }
-    /// The Space picker's "New space…" entry.
-    private static let newSpaceTag = "@new"
     private var option: LaunchOption { options.first { $0.id == optionID } ?? options[0] }
 
     var body: some View {
@@ -118,8 +116,11 @@ struct LaunchFormView: View {
                 }
                 GridRow {
                     label("Name")
-                    TextField("Optional display name", text: $name)
+                    // Herdr's space.new takes no terminal name; without the app, hc run does.
+                    let nameUnused = space == .new && store.herdrAppRunning
+                    TextField(nameUnused ? "Not used for a new space" : "Optional display name", text: $name)
                         .textFieldStyle(.roundedBorder)
+                        .disabled(nameUnused)
                 }
                 if source != nil {
                     GridRow {
@@ -154,10 +155,10 @@ struct LaunchFormView: View {
                     HStack(spacing: 6) {
                         Picker("", selection: $space) {
                             // Without the app: the space it showed last.
-                            Text(store.herdrAppRunning ? "Selected space" : "Last selected space").tag("")
-                            ForEach(spaces) { Text($0.name).tag($0.id) }
+                            Text(store.herdrAppRunning ? "Selected space" : "Last selected space").tag(LaunchSpaceChoice.selected)
+                            ForEach(spaces) { Text($0.name).tag(LaunchSpaceChoice.existing($0.id)) }
                             Divider()
-                            Text("New space…").tag(Self.newSpaceTag)
+                            Text("New space…").tag(LaunchSpaceChoice.new)
                         }
                         .labelsHidden()
                         if let note = spaceNote {
@@ -168,7 +169,7 @@ struct LaunchFormView: View {
                         }
                     }
                 }
-                if space == Self.newSpaceTag {
+                if space == .new {
                     GridRow {
                         label("Space name")
                         TextField("Named after the folder", text: $newSpaceName)
@@ -324,7 +325,7 @@ struct LaunchFormView: View {
 
     /// "from island" / "same as agent" while the starting space is still the one picked.
     private var spaceNote: String? {
-        guard !space.isEmpty, space == startingSpace else { return nil }
+        guard space != .selected, space == startingSpace else { return nil }
         return switch spaceOrigin {
         case .island: "from island"
         case .agent: "same as agent"
@@ -343,8 +344,8 @@ struct LaunchFormView: View {
         }
         if folder.isEmpty { folder = settings.recentFolders.first ?? "" }
         let start = SpaceGrouping.launchSpace(agentSpace: agentSpace, island: model.spaceFilter, defaultSpace: settings.defaultSpace)
-        space = start.space
-        startingSpace = start.space
+        space = LaunchSpaceChoice(stored: start.space)
+        startingSpace = space
         spaceOrigin = start.source
         taskFocused = true
         if let templates = try? await client?.templates() {
@@ -355,7 +356,7 @@ struct LaunchFormView: View {
         }
         let list = await store.launchSpaces()
         spaces = list
-        if !space.isEmpty, space != Self.newSpaceTag, !list.contains(where: { $0.id == space }) { space = "" }
+        if case .existing(let id) = space, !list.contains(where: { $0.id == id }) { space = .selected }
         if let recipe = deferredRecipe {
             deferredRecipe = nil
             apply(recipe)
@@ -385,9 +386,9 @@ struct LaunchFormView: View {
             folder: folder,
             task: task.trimmingCharacters(in: .whitespacesAndNewlines),
             name: name.trimmingCharacters(in: .whitespaces).isEmpty ? nil : Self.sanitizeName(name),
-            space: space.isEmpty || space == Self.newSpaceTag ? nil : space,
-            template: option.id.hasPrefix("template:"),
-            newSpaceName: space == Self.newSpaceTag ? newSpaceName.trimmingCharacters(in: .whitespaces) : nil
+            optionID: option.id,
+            space: space,
+            newSpaceName: newSpaceName
         ), worktree: plan)
     }
 
@@ -396,7 +397,7 @@ struct LaunchFormView: View {
     private var currentRecipe: LaunchRecipe {
         LaunchRecipe(optionID: optionID, folder: folder, task: task.trimmingCharacters(in: .whitespacesAndNewlines),
                      name: name.trimmingCharacters(in: .whitespaces),
-                     space: space == Self.newSpaceTag ? "" : space, worktree: plan != nil)
+                     space: space.stored, worktree: plan != nil)
     }
 
     private func toolTitle(_ id: String) -> String {
@@ -481,7 +482,7 @@ struct LaunchFormView: View {
         optionID = r.optionID
         task = r.task
         name = r.name
-        space = r.space
+        space = LaunchSpaceChoice(stored: r.space)
         spaceOrigin = nil
         branchText = ""
         branchEdited = false

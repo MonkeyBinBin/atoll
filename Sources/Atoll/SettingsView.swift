@@ -185,6 +185,7 @@ struct SettingsView: View {
 
             Section("Launch") {
                 TextField("Default space id (empty = selected space)", text: $settings.defaultSpace)
+                    .help("Empty: the space Herdr shows; while the Herdr app is closed, the one it showed last")
             }
         }
         .formStyle(.grouped)
