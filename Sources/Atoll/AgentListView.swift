@@ -116,11 +116,12 @@ struct AgentCard: View {
                         .foregroundStyle(.secondary)
                 }
                 .font(.system(size: 11))
-                if let message = agent.statusMessage {
+                if let message = agent.lastWords {
                     Text(message)
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        .lineLimit(2)
+                        .help(message)
                 }
                 if let preview = agent.waitingPreview {
                     WaitingPreviewLabel(preview: preview, lineLimit: agent.permissionChoices == nil ? 1 : 2)

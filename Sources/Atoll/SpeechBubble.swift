@@ -34,7 +34,7 @@ final class SpeechBubbleController {
         panel.level = NSWindow.Level(rawValue: island.level.rawValue + 1)
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
         panel.animationBehavior = .none
-        host = FirstMouseHostingView(rootView: SpeechBubbleView(key: "", state: .unknown, kind: .state, detail: nil, tailX: 0, animate: false, onTap: {}))
+        host = FirstMouseHostingView(rootView: SpeechBubbleView(key: "", state: .unknown, kind: .state, detail: nil, message: nil, tailX: 0, animate: false, onTap: {}))
         panel.contentView = host
         trackChanges { [weak self] in self?.update() }
     }
@@ -166,7 +166,15 @@ final class SpeechBubbleController {
             default: nil
             }
         }
-        var view = SpeechBubbleView(key: shown.key, state: shown.state, kind: shown.kind, detail: detail, tailX: 0, animate: animate) { [weak self] in
+        // What the agent said last: the source's summary, else the line read off its screen.
+        let message: String? = if shown.kind == .state, [.done, .idle, .exited].contains(shown.state), let shownAgent {
+            // One row: the closing line.
+            shownAgent.lastWords?.split(separator: "\n").last.map(String.init)
+        } else {
+            nil
+        }
+        var view = SpeechBubbleView(key: shown.key, state: shown.state, kind: shown.kind, detail: detail, message: message,
+                                    tailX: 0, animate: animate) { [weak self] in
             guard let self else { return }
             self.dismissAll()
             self.hide()
@@ -219,6 +227,8 @@ struct SpeechBubbleView: View {
     let state: AgentState
     var kind: AgentBubble.Kind = .state
     var detail: String?
+    /// A second row: the agent's last words for a finished turn.
+    var message: String?
     /// Tail position from the bubble's leading edge, pointing up at the character.
     var tailX: CGFloat
     let animate: Bool
@@ -229,7 +239,7 @@ struct SpeechBubbleView: View {
 
     var body: some View {
         // A new identity per bubble so each one pops in.
-        SpeechBubbleBody(state: state, kind: kind, detail: detail, tailX: tailX, animate: animate, onTap: onTap)
+        SpeechBubbleBody(state: state, kind: kind, detail: detail, message: message, tailX: tailX, animate: animate, onTap: onTap)
             .id(key)
     }
 }
@@ -238,6 +248,7 @@ private struct SpeechBubbleBody: View {
     let state: AgentState
     let kind: AgentBubble.Kind
     let detail: String?
+    let message: String?
 
     private var symbol: String {
         switch kind {
@@ -267,14 +278,23 @@ private struct SpeechBubbleBody: View {
 
     var body: some View {
         let shape = BubbleShape(tailX: tailX, tailHeight: SpeechBubbleView.tailHeight, radius: SpeechBubbleView.radius)
-        HStack(spacing: 5) {
-            Image(systemName: symbol)
-            Text(title)
-                .lineLimit(1)
-            if let detail {
-                Text("· \(detail)")
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 5) {
+                Image(systemName: symbol)
+                Text(title)
                     .lineLimit(1)
-                    .foregroundStyle(.secondary)
+                if let detail {
+                    Text("· \(detail)")
+                        .lineLimit(1)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if let message {
+                // The bubble sizes to its content, so a long line is cut here rather than by layout.
+                Text(OutputFilter.cut(message, limit: 60))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.primary.opacity(0.85))
+                    .lineLimit(1)
             }
         }
         .font(.system(size: 11, weight: .semibold))
@@ -294,7 +314,7 @@ private struct SpeechBubbleBody: View {
         .onTapGesture(perform: onTap)
         .environment(\.colorScheme, .dark)
         .accessibilityElement()
-        .accessibilityLabel(detail.map { "\(title), \($0)" } ?? title)
+        .accessibilityLabel([title, detail, message].compactMap { $0 }.joined(separator: ", "))
         .accessibilityAddTraits(.isButton)
     }
 }

@@ -79,7 +79,7 @@ struct HoverCardView: View {
             }
             .font(.system(size: 11))
             .foregroundStyle(agent.state.color)
-            if let message = agent.statusMessage {
+            if let message = agent.lastWords {
                 Text(message)
                     .font(.system(size: 11))
                     .foregroundStyle(.primary.opacity(0.85))

@@ -53,7 +53,8 @@ public final class AgentStore {
         public var outputLines: Int = 200
         /// An agent that exited (or whose terminal no longer runs one) leaves the island after this long.
         public var hideEndedAfter: TimeInterval = 15
-        /// After entering Needs you, wait this long for the dialog to render before reading the screen.
+        /// After entering Needs you (or finishing a turn), wait this long for the screen to settle before
+        /// its one read: the waiting preview, or the turn's final message.
         public var previewDelay: TimeInterval = 0.6
         public var previewLines: Int = 80
         public init() {}
@@ -244,6 +245,12 @@ public final class AgentStore {
     private var responseEpisodes: [String: Date] = [:]
     private var responseTimers: [String: ScheduledAction] = [:]
     private var previewTimers: [String: ScheduledAction] = [:]
+    /// Final message of each agent's last finished turn, and the token of its pending read: a new turn,
+    /// or the agent going away, removes the token so a late result is thrown away.
+    private var finalMessages: [String: TurnFinalMessage] = [:]
+    private var finalReads: [String: Int] = [:]
+    private var nextFinalRead = 0
+    private var finalTimers: [String: ScheduledAction] = [:]
     /// Working-tree top level per project path ("" = not in a repo). Resolved once per path, never polled.
     private var treeCache: [String: String] = [:]
     private var pendingTrees: Set<String> = []
@@ -512,6 +519,7 @@ public final class AgentStore {
             notifyIfFinished(after, from: before)
             sendQueuedIfFinished(after, from: before)
             trackTurn(after, from: before)
+            trackFinalMessage(after, from: before)
         }
         if refreshOutput, panel?.address == address {
             refreshPanelOutput()
@@ -614,6 +622,7 @@ public final class AgentStore {
             )
             agent.source = record.source
             agent.changeSummary = changeSummaries[info.address]
+            agent.finalMessage = finalMessages[info.address]
             if state.isNeedsYou, let since = agent.waitingSince, previewEpisodes[info.address] == since {
                 agent.waitingPreview = previews[info.address]
                 agent.permissionChoices = choices[info.address]
@@ -636,6 +645,9 @@ public final class AgentStore {
         agents = built
         notifyWhenDone = notifyWhenDone.filter { records[$0] != nil }
         reconcileQueued()
+        for address in Set(finalMessages.keys).union(finalReads.keys) where records[address] == nil {
+            dropFinalMessage(address, rebuilding: false)
+        }
         for address in Set(openTurns.keys).union(changeSummaries.keys).union(toplevels.keys) where records[address] == nil {
             openTurns.removeValue(forKey: address)?.cancel()
             changeSummaries[address] = nil
@@ -999,6 +1011,53 @@ public final class AgentStore {
                 queuedMessages[address]?.status = .held
             }
         }
+    }
+
+    // MARK: Turn final message
+
+    /// A finished turn without a `statusMessage` gets one screen read (after the screen settles);
+    /// the next turn, or the agent leaving, drops the result. Done / Idle → Exited is the same turn settling.
+    private func trackFinalMessage(_ agent: Agent, from previous: AgentState?) {
+        let settling = agent.state == .exited && (previous == .done || previous == .idle)
+        if Self.turnEnded(agent.state, from: previous), !settling {
+            dropFinalMessage(agent.address)
+            guard agent.statusMessage == nil, agent.tool != .generic else { return }
+            scheduleFinalRead(agent.address, tool: agent.tool)
+        } else if agent.state == .working || agent.state == .starting || agent.state.isNeedsYou {
+            dropFinalMessage(agent.address)
+        }
+    }
+
+    private func scheduleFinalRead(_ address: String, tool: AgentTool) {
+        nextFinalRead += 1
+        let token = nextFinalRead
+        finalReads[address] = token
+        let lines = timing.previewLines
+        finalTimers[address] = scheduler.schedule(after: timing.previewDelay) { [weak self] in
+            guard let self, self.finalReads[address] == token else { return }
+            self.finalTimers[address] = nil
+            // Moved on (Error, offline…) while the screen settled: nothing to read for this turn.
+            guard let state = self.agent(address)?.state, [.done, .idle, .exited].contains(state) else {
+                self.finalReads[address] = nil
+                return
+            }
+            Task { [client = self.client(for: address)] in
+                // A failed read just means no final message; never retried for this turn.
+                let output = try? await client.read(terminal: address, lines: lines)
+                guard self.finalReads[address] == token else { return }
+                self.finalReads[address] = nil
+                guard let output, let message = TurnFinalMessage.extract(from: output.text, tool: tool) else { return }
+                self.finalMessages[address] = message
+                self.rebuild()
+            }
+        }
+    }
+
+    /// `rebuilding: false` from inside `rebuild` itself (the agent is already gone from the list).
+    private func dropFinalMessage(_ address: String, rebuilding: Bool = true) {
+        finalReads[address] = nil
+        finalTimers.removeValue(forKey: address)?.cancel()
+        if finalMessages.removeValue(forKey: address) != nil, rebuilding { rebuild() }
     }
 
     // MARK: Waiting reminders

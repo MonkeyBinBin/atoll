@@ -28,12 +28,17 @@ public enum OutputFilter {
     /// Claude Code: the prompt box is a pair of full-width `─` rules around `❯`, followed by
     /// status lines. Cut from the upper rule of the last pair.
     static func claudeMessages(_ input: [String]) -> [String] {
+        claudeMessagesAboveInput(input) ?? stripBanner(stripSidePanel(input))
+    }
+
+    /// The messages above Claude Code's input box, or nil when no input box sits near the bottom.
+    static func claudeMessagesAboveInput(_ input: [String]) -> [String]? {
         let lines = stripBanner(stripSidePanel(input))
         let rules = lines.indices.filter { isRule(lines[$0]) }
-        guard rules.count >= 2 else { return lines }
+        guard rules.count >= 2 else { return nil }
         let upper = rules[rules.count - 2]
         // Only treat it as the input box when it sits near the bottom of the screen.
-        guard lines.count - upper <= 12 else { return lines }
+        guard lines.count - upper <= 12 else { return nil }
         var kept = Array(lines[..<upper])
         // Peel the footer zone between the last message and the prompt box, bottom-up,
         // stopping at the first real content line.
@@ -158,10 +163,20 @@ public enum OutputFilter {
 
     /// Codex: the input row starts with `›` near the bottom, status lines below it.
     static func codexMessages(_ lines: [String]) -> [String] {
+        codexMessagesAboveInput(lines) ?? lines
+    }
+
+    /// The messages above Codex's input row, or nil when no input row sits near the bottom.
+    static func codexMessagesAboveInput(_ lines: [String]) -> [String]? {
         let nonEmpty = lines.indices.filter { !lines[$0].isEmpty }
         guard let input = nonEmpty.last(where: { lines[$0].trimmingCharacters(in: .whitespaces).hasPrefix("›") }),
-              nonEmpty.filter({ $0 > input }).count <= 6 else { return lines }
+              nonEmpty.filter({ $0 > input }).count <= 6 else { return nil }
         return Array(lines[..<input])
+    }
+
+    /// Cuts a line to `limit` characters, ending in "…" when it was longer.
+    public static func cut(_ text: String, limit: Int) -> String {
+        text.count > limit ? String(text.prefix(limit - 1)) + "…" : text
     }
 
     // MARK: Helpers

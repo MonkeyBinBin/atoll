@@ -27,6 +27,9 @@ final class FakeHerdrClient: HerdrClient, @unchecked Sendable {
     /// When set, send() suspends until `releaseSend()` is called.
     var holdSend = false
     private var sendContinuation: CheckedContinuation<Void, Never>?
+    /// When set, read() suspends until `releaseRead()` is called.
+    var holdRead = false
+    private var readContinuation: CheckedContinuation<Void, Never>?
 
     var commands: [Command] {
         lock.lock()
@@ -53,7 +56,22 @@ final class FakeHerdrClient: HerdrClient, @unchecked Sendable {
 
     func read(terminal: String, lines: Int) async throws -> ReadOutput {
         record(.read(terminal, lines))
+        if holdRead {
+            await withCheckedContinuation { continuation in
+                lock.lock()
+                readContinuation = continuation
+                lock.unlock()
+            }
+        }
         return try readResult.get()
+    }
+
+    func releaseRead() {
+        lock.lock()
+        let continuation = readContinuation
+        readContinuation = nil
+        lock.unlock()
+        continuation?.resume()
     }
 
     func send(terminal: String, text: String, force: Bool) async throws -> SendOutput {

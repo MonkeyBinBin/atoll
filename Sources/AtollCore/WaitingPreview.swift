@@ -138,6 +138,6 @@ public struct WaitingPreview: Equatable, Sendable {
     }
 
     static func cut(_ text: String) -> String {
-        text.count > maxLineLength ? String(text.prefix(maxLineLength - 1)) + "…" : text
+        OutputFilter.cut(text, limit: maxLineLength)
     }
 }

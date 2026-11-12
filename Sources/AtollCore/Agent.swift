@@ -159,6 +159,13 @@ public struct Agent: Identifiable, Equatable, Sendable {
     public var changeSummary: ChangeSummary?
     /// Why it waits, read once from its screen when the source gave no `statusMessage`; Needs you only.
     public var waitingPreview: WaitingPreview?
+    /// The last lines the agent wrote, read from its screen once when a turn ended without a `statusMessage`.
+    /// Dropped when the next turn starts.
+    public var finalMessage: TurnFinalMessage?
+
+    /// What the agent last said, for the list, hover card and bubble: the source's own summary
+    /// (`statusMessage`), else the lines read off its screen when the turn ended.
+    public var lastWords: String? { statusMessage ?? finalMessage?.text }
     /// Keys for answering its permission dialog straight from the list; only when the dialog's layout was
     /// recognized on screen in this Needs-you episode.
     public var permissionChoices: PermissionChoices?
