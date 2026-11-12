@@ -278,6 +278,13 @@ final class IslandController {
             model.respondToSelected(chars == "y" ? .allow : .deny)
             return true
         }
+        if model.searchFieldFocused, model.canSearch, event.keyCode == 36 || event.keyCode == 76,
+           flags.isDisjoint(with: [.command, .option, .control]),
+           // Return also commits an input method's composition (Zhuyin, Pinyin…): leave that to the field.
+           (panel.firstResponder as? NSTextView)?.hasMarkedText() != true {
+            model.stepSearch(forward: !flags.contains(.shift))
+            return true
+        }
         if isPanel, flags == .option, event.keyCode == 36 || event.keyCode == 76 {
             model.requestQueue()
             return true
@@ -292,6 +299,7 @@ final class IslandController {
             case "-": settings.adjustFontSize(-1); return true
             case "0": settings.outputFontSize = 11; return true
             case "]": model.openNextWaiting(); return true
+            case "f": model.openSearch(); return true
             default: break
             }
         }

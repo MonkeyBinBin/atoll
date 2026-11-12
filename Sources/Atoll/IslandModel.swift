@@ -122,6 +122,8 @@ final class IslandModel {
             // Leaving a panel (by any route) drops its output: it lives only while the panel is open.
             if case .panel = oldValue {
                 if case .panel = mode {} else { store.closePanel() }
+                // The find query belongs to that agent's panel only.
+                resetSearch()
             }
             onModeChange?(mode)
         }
@@ -199,6 +201,51 @@ final class IslandModel {
 
     func requestCompletionKey(_ key: CompletionKey) {
         completionKeyRequest = CompletionKeyRequest(key: key, token: (completionKeyRequest?.token ?? 0) + 1)
+    }
+
+    /// ⌘F: find in the panel's terminal output; nil while the search row is closed.
+    var outputSearch: OutputSearch?
+    /// The search box has the keyboard: the key monitor turns ↩ / ⇧↩ into next / previous.
+    var searchFieldFocused = false
+    /// Bumped to move the keyboard into the search box (⌘F) or back to the reply box (Esc).
+    private(set) var searchFocusRequest = 0
+    private(set) var replyFocusRequest = 0
+    /// Bumped when the user moves the search (typing, next / previous): the output scrolls to the current
+    /// match then. A refresh alone doesn't, so scrolling away by hand sticks.
+    private(set) var searchScrollRequest = 0
+
+    /// A panel showing terminal output (the changes view hides the search row).
+    var canSearch: Bool {
+        guard case .panel = mode else { return false }
+        return store.panel?.changes == nil
+    }
+
+    func openSearch() {
+        guard canSearch else { return }
+        if outputSearch == nil { outputSearch = OutputSearch() }
+        searchFocusRequest += 1
+    }
+
+    func closeSearch() {
+        resetSearch()
+        replyFocusRequest += 1
+    }
+
+    private func resetSearch() {
+        outputSearch = nil
+        searchFieldFocused = false
+    }
+
+    func setSearchQuery(_ query: String) {
+        guard outputSearch != nil, query != outputSearch?.query else { return }
+        outputSearch?.setQuery(query)
+        searchScrollRequest += 1
+    }
+
+    func stepSearch(forward: Bool) {
+        guard outputSearch != nil else { return }
+        outputSearch?.step(forward: forward)
+        searchScrollRequest += 1
     }
 
     /// The open panel's reply box holds unsent text: auto-advance must not yank it away.
@@ -298,6 +345,11 @@ final class IslandModel {
     func escape() {
         switch mode {
         case .panel:
+            // An open search row closes first and hands the keyboard back to the reply box.
+            if outputSearch != nil, canSearch {
+                closeSearch()
+                return
+            }
             store.closePanel()
             mode = .list
         case .list, .launch:

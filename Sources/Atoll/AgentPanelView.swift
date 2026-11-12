@@ -9,6 +9,7 @@ struct AgentPanelView: View {
     @State private var draft = ""
     @State private var focusError: HerdrError?
     @FocusState private var inputFocused: Bool
+    @FocusState private var searchFocused: Bool
     @State private var headerHovered = false
 
     private var store: AgentStore { model.store }
@@ -40,6 +41,14 @@ struct AgentPanelView: View {
         .onChange(of: draft) { _, text in
             model.panelHasDraft = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
+        .onChange(of: model.searchFocusRequest) { _, _ in
+            model.outputSearch?.update(text: outputText(store.panel))
+            searchFocused = true
+        }
+        .onChange(of: model.replyFocusRequest) { _, _ in
+            if agent.replyMode.isText || agent.replyMode == .textAndKeys { inputFocused = true }
+        }
+        .onChange(of: searchFocused) { _, focused in model.searchFieldFocused = focused }
     }
 
     private func takePrefill() {
@@ -194,15 +203,25 @@ struct AgentPanelView: View {
 
     private var terminalOutput: some View {
         let panel = store.panel
+        let text = outputText(panel)
+        // Highlights only once the search has matched this very text (it catches up right after a refresh).
+        let search = model.outputSearch.flatMap { $0.text == text ? $0 : nil }
         return VStack(alignment: .leading, spacing: 4) {
+            if model.outputSearch != nil { searchRow }
             TerminalOutputView(
-                text: outputText(panel),
+                text: text,
                 font: TerminalFont.font(family: settings.outputFontFamily, size: settings.outputFontSize),
-                wrap: settings.wrapOutput
+                wrap: settings.wrapOutput,
+                highlights: search?.matches ?? [],
+                current: search?.current,
+                searching: model.outputSearch?.query.isEmpty == false,
+                scrollRequest: model.searchScrollRequest
             )
             .frame(height: settings.largePanel ? 460 : 220)
             .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.05)))
             .clipShape(RoundedRectangle(cornerRadius: 8))
+            // Refreshed output, Messages only flipped, or back from the changes view: match the text as shown.
+            .onChange(of: text, initial: true) { _, text in model.outputSearch?.update(text: text) }
             HStack(spacing: 8) {
                 if let fetched = panel?.fetchedAt {
                     Text("Fetched at \(Format.clockSeconds.string(from: fetched))")
@@ -248,6 +267,42 @@ struct AgentPanelView: View {
             .font(.system(size: 10))
             .foregroundStyle(.secondary)
         }
+    }
+
+    /// ⌘F row: ↩ / ⇧↩ (through the key monitor) step through matches, Esc closes it.
+    private var searchRow: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Find in output", text: Binding(
+                get: { model.outputSearch?.query ?? "" },
+                set: { model.setSearchQuery($0) }
+            ))
+            .textFieldStyle(.plain)
+            .focused($searchFocused)
+            if let counter = model.outputSearch?.counter {
+                Text(counter)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            let hasMatches = model.outputSearch?.current != nil
+            Button { model.stepSearch(forward: false) } label: { Image(systemName: "chevron.up") }
+                .buttonStyle(.borderless)
+                .disabled(!hasMatches)
+                .help("Previous match (⇧↩)")
+            Button { model.stepSearch(forward: true) } label: { Image(systemName: "chevron.down") }
+                .buttonStyle(.borderless)
+                .disabled(!hasMatches)
+                .help("Next match (↩)")
+            Button { model.closeSearch() } label: { Image(systemName: "xmark.circle.fill") }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .help("Close search (esc)")
+        }
+        .font(.system(size: 11))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.08)))
     }
 
     private func outputText(_ panel: PanelState?) -> String {

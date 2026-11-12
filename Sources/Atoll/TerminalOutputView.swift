@@ -55,11 +55,23 @@ enum TerminalFont {
 
 /// Read-only terminal text: no wrapping (TUI layouts stay intact), horizontal + vertical
 /// scrolling, selectable, and pinned to the bottom when new output arrives.
+/// Search matches are painted as temporary attributes (the text itself is untouched). While searching
+/// there is no bottom pin: the view scrolls to the current match when the user moves it, and follows it
+/// across a refresh only if it was in view.
 struct TerminalOutputView: NSViewRepresentable {
     let text: String
     let font: NSFont
     /// Wrap long lines to the view width (conversation text) instead of scrolling sideways (TUI screens).
     var wrap: Bool = false
+    /// Ranges in `text` to highlight, and which of them is current.
+    var highlights: [NSRange] = []
+    var current: Int?
+    var searching = false
+    /// Changes when the user types a query or steps to another match.
+    var scrollRequest = 0
+
+    static let matchColor = NSColor.systemYellow.withAlphaComponent(0.3)
+    static let currentColor = NSColor.systemOrange.withAlphaComponent(0.8)
 
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSTextView.scrollableTextView()
@@ -80,12 +92,54 @@ struct TerminalOutputView: NSViewRepresentable {
     }
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
-        guard let textView = scroll.documentView as? NSTextView, let storage = textView.textStorage else { return }
-        guard context.coordinator.text != text || context.coordinator.font != font || context.coordinator.wrap != wrap else { return }
-        let wasAtBottom = context.coordinator.text.isEmpty || Self.isAtBottom(scroll)
-        context.coordinator.text = text
-        context.coordinator.font = font
-        context.coordinator.wrap = wrap
+        guard let textView = scroll.documentView as? NSTextView else { return }
+        let coordinator = context.coordinator
+        let textChanged = coordinator.text != text || coordinator.font != font || coordinator.wrap != wrap
+        if textChanged {
+            // The highlights for the new text arrive on a later pass; remember whether to follow them.
+            if searching, let shown = coordinator.currentRange, Self.isVisible(shown, in: textView) {
+                coordinator.followNextMatch = true
+            }
+            setText(scroll: scroll, textView: textView, coordinator: coordinator)
+        }
+        let length = (text as NSString).length
+        let valid = highlights.indices.filter { NSMaxRange(highlights[$0]) <= length }
+        if textChanged || coordinator.highlights != highlights || coordinator.current != current {
+            coordinator.highlights = highlights
+            coordinator.current = current
+            guard let layout = textView.layoutManager else { return }
+            layout.removeTemporaryAttribute(.backgroundColor, forCharacterRange: NSRange(location: 0, length: length))
+            for index in valid {
+                layout.addTemporaryAttribute(.backgroundColor, value: index == current ? Self.currentColor : Self.matchColor,
+                                             forCharacterRange: highlights[index])
+            }
+        }
+        if !searching { coordinator.followNextMatch = false }
+        coordinator.currentRange = current.flatMap { valid.contains($0) ? highlights[$0] : nil }
+        guard let target = coordinator.currentRange else { return }
+        if coordinator.scrollRequest != scrollRequest || coordinator.followNextMatch {
+            coordinator.scrollRequest = scrollRequest
+            coordinator.followNextMatch = false
+            textView.scrollRangeToVisible(target)
+        }
+    }
+
+    static func isVisible(_ range: NSRange, in textView: NSTextView) -> Bool {
+        guard let layout = textView.layoutManager, let container = textView.textContainer else { return false }
+        let glyphs = layout.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        var rect = layout.boundingRect(forGlyphRange: glyphs, in: container)
+        rect.origin.x += textView.textContainerOrigin.x
+        rect.origin.y += textView.textContainerOrigin.y
+        return textView.visibleRect.intersects(rect)
+    }
+
+    private func setText(scroll: NSScrollView, textView: NSTextView, coordinator: Coordinator) {
+        guard let storage = textView.textStorage else { return }
+        // No bottom pin while searching: the current match decides where the view sits.
+        let wasAtBottom = !searching && (coordinator.text.isEmpty || Self.isAtBottom(scroll))
+        coordinator.text = text
+        coordinator.font = font
+        coordinator.wrap = wrap
         Self.applyWrap(wrap, scroll: scroll, textView: textView)
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = wrap ? .byWordWrapping : .byClipping
@@ -129,5 +183,11 @@ struct TerminalOutputView: NSViewRepresentable {
         var text = ""
         var font: NSFont?
         var wrap: Bool?
+        var highlights: [NSRange] = []
+        var current: Int?
+        /// The current match as last highlighted, to tell whether it was in view before a refresh.
+        var currentRange: NSRange?
+        var scrollRequest = 0
+        var followNextMatch = false
     }
 }

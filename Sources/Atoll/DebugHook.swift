@@ -89,6 +89,13 @@ final class DebugHook {
                 let text = parts.dropFirst().joined(separator: " ")
                 for ch in text { postChar(String(ch)) }
                 postKey(36, command: false)
+            case "cmdf": postKey(3, command: true)
+            case "chars":
+                // chars <text>: synthetic key events for each character, no Return
+                for ch in parts.dropFirst().joined(separator: " ") { postChar(String(ch)) }
+            case "ret": postKey(36, command: false)
+            case "sret": postKey(36, command: false, shift: true)
+            case "esckey": postKey(53, command: false)
             case "draft":
                 // draft <text>: type into the focused field without pressing Return
                 for ch in parts.dropFirst().joined(separator: " ") { postChar(String(ch)) }
@@ -167,6 +174,8 @@ final class DebugHook {
         case 16: "y"
         case 45: "n"
         case 15: "r"
+        case 3: "f"
+        case 53: "\u{1b}"
         default: ""
         }
         for type in [NSEvent.EventType.keyDown, .keyUp] {
@@ -221,7 +230,7 @@ final class DebugHook {
         view.cacheDisplay(in: bounds, to: rep)
         let data = rep.representation(using: .png, properties: [:])
         try? data?.write(to: dir.appendingPathComponent("\(name).png"))
-        let info = "frame=\(panel.frame) agents=\(model.store.agents.map { "\($0.address):\($0.state.label)" }) mode=\(model.mode) key=\(panel.isKeyWindow) selection=\(model.selection) live=\(model.store.isLive) send=\(model.store.sendStates) keys=\(model.store.keyStates) responses=\(model.store.permissionResponses) queued=\(model.store.queuedMessages) notices=\(model.store.queueNotices) choices=\(model.store.agents.compactMap { a in a.permissionChoices.map { "\(a.address):\($0.allowKey)/\($0.denyKey)" } }) interrupt=\(model.store.interruptStates) feedback=\(model.store.agents.compactMap { a in a.interruptFeedback.map { o in "\(a.address):\(o)" } }) launch=\(model.store.launchState) visible=\(panel.isVisible) fullscreen=\(model.fullScreen) hidden=\(model.hiddenByFullScreen) collapsed=\(model.collapsedAgents?.map(\.address) ?? []) pinned=\(model.pinned)\n"
+        let info = "frame=\(panel.frame) agents=\(model.store.agents.map { "\($0.address):\($0.state.label)" }) mode=\(model.mode) key=\(panel.isKeyWindow) selection=\(model.selection) live=\(model.store.isLive) send=\(model.store.sendStates) keys=\(model.store.keyStates) responses=\(model.store.permissionResponses) queued=\(model.store.queuedMessages) notices=\(model.store.queueNotices) choices=\(model.store.agents.compactMap { a in a.permissionChoices.map { "\(a.address):\($0.allowKey)/\($0.denyKey)" } }) interrupt=\(model.store.interruptStates) feedback=\(model.store.agents.compactMap { a in a.interruptFeedback.map { o in "\(a.address):\(o)" } }) launch=\(model.store.launchState) visible=\(panel.isVisible) fullscreen=\(model.fullScreen) hidden=\(model.hiddenByFullScreen) collapsed=\(model.collapsedAgents?.map(\.address) ?? []) pinned=\(model.pinned) search=\(model.outputSearch.map { "\($0.query)|\($0.counter ?? "-")" } ?? "closed") searchFocused=\(model.searchFieldFocused)\n"
         try? info.write(to: dir.appendingPathComponent("\(name).txt"), atomically: true, encoding: .utf8)
     }
 }
