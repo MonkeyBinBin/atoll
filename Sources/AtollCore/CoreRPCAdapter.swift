@@ -500,7 +500,7 @@ final class LineSocket: @unchecked Sendable {
             throw HerdrError.unavailable("socket path too long")
         }
         withUnsafeMutablePointer(to: &addr.sun_path) { pointer in
-            pointer.withMemoryRebound(to: CChar.self, capacity: maxLength) { strncpy($0, path, maxLength) }
+            pointer.withMemoryRebound(to: CChar.self, capacity: maxLength) { _ = strncpy($0, path, maxLength) }
         }
         var on: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
