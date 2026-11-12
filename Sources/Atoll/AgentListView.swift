@@ -51,7 +51,9 @@ struct AgentListView: View {
                 }
                 .buttonStyle(.borderless)
                 Spacer()
-                Text("↑↓ select · ↩ open · ⌘1–9 jump · esc close")
+                Text(model.store.agents.contains { $0.permissionChoices != nil }
+                     ? "↑↓ select · ↩ open · ⌘Y allow · ⌘N deny · esc close"
+                     : "↑↓ select · ↩ open · ⌘1–9 jump · esc close")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
@@ -116,7 +118,12 @@ struct AgentCard: View {
                         .lineLimit(1)
                 }
                 if let preview = agent.waitingPreview {
-                    WaitingPreviewLabel(preview: preview)
+                    WaitingPreviewLabel(preview: preview, lineLimit: agent.permissionChoices == nil ? 1 : 2)
+                }
+                if agent.permissionChoices != nil {
+                    PermissionButtons(agent: agent, store: store, selected: selected)
+                } else if let response = store.permissionResponses[agent.address] {
+                    PermissionResponseLabel(state: response)
                 }
                 if let summary = agent.changeSummary {
                     ChangeSummaryLabel(summary: summary)
@@ -200,5 +207,68 @@ struct WaitingPreviewLabel: View {
             }
         }
         .help(preview.help)
+    }
+}
+
+/// Allow / Deny for a recognized permission dialog, right in the list row (⌘Y / ⌘N on the selected row).
+struct PermissionButtons: View {
+    let agent: Agent
+    let store: AgentStore
+    let selected: Bool
+
+    var body: some View {
+        let response = store.permissionResponses[agent.address]
+        let sending: Bool = if case .sending = response { true } else { false }
+        HStack(spacing: 6) {
+            button(.allow, shortcut: "⌘Y", disabled: sending)
+            button(.deny, shortcut: "⌘N", disabled: sending)
+            if let response {
+                PermissionResponseLabel(state: response)
+            }
+        }
+        .padding(.top, 1)
+    }
+
+    private func button(_ choice: PermissionChoice, shortcut: String, disabled: Bool) -> some View {
+        Button {
+            store.respond(choice, to: agent.address, episode: agent.waitingSince)
+        } label: {
+            HStack(spacing: 4) {
+                Text(choice.label)
+                if selected {
+                    Text(shortcut).foregroundStyle(.secondary)
+                }
+            }
+            .font(.system(size: 11, weight: .semibold))
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .tint(choice == .allow ? PixelPalette.done.color : PixelPalette.error.color)
+        .disabled(disabled)
+        .help(choice == .allow ? "Approve this once (the dialog's plain \"Yes\")" : "Reject (the dialog's \"No\")")
+    }
+}
+
+/// "Allow sent" / "Deny failed" / "No longer waiting".
+struct PermissionResponseLabel: View {
+    let state: PermissionResponseState
+
+    var body: some View {
+        let failed: Bool = switch state {
+        case .failed, .noLongerWaiting: true
+        default: false
+        }
+        Text(state.label)
+            .font(.system(size: 11))
+            .foregroundStyle(failed ? PixelPalette.waiting.color : .secondary)
+            .help(helpText)
+    }
+
+    private var helpText: String {
+        switch state {
+        case .failed(_, let error): error.message
+        case .noLongerWaiting: "The agent had already left that dialog, so nothing was sent."
+        default: ""
+        }
     }
 }

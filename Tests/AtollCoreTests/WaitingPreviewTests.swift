@@ -183,14 +183,14 @@ struct WaitingPreviewStoreTests {
         #expect(reads(h) == 0)
     }
 
-    @Test("the source already says why (status msg): no read")
+    @Test("the source already says why (status msg) for a question: no read")
     func statusMessageWins() async {
-        let h = harness()
-        h.client.emit(.event(seq: 11, .status(terminal: "t1", status: CoreStatus(state: "blocked", app: "claude-code", kind: "permission", msg: "approve Bash: touch hello.txt"), reported: true)))
+        let h = harness(WaitingScreens.claudeQuestion)
+        h.client.emit(.event(seq: 11, .status(terminal: "t1", status: CoreStatus(state: "blocked", app: "claude-code", kind: "question", msg: "answer: Which color?"), reported: true)))
         h.scheduler.advance(by: 1)
         await settle()
         #expect(reads(h) == 0)
-        #expect(h.store.agent("t1")?.statusMessage == "approve Bash: touch hello.txt")
+        #expect(h.store.agent("t1")?.statusMessage == "answer: Which color?")
         #expect(h.store.agent("t1")?.waitingPreview == nil)
     }
 

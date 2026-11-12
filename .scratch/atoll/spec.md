@@ -98,7 +98,7 @@ Status: ready-for-agent
 ### 隱私
 
 64. As a 使用者, I want 程式只與本機的 herdr-core、herdr CLI 與 cmux 溝通, so that prompt 與終端機輸出不會離開本機
-65. As a 使用者, I want 近期輸出只在面板開著時存在記憶體中、關閉即丟棄, so that 沒有殘留的本機快取。唯一例外是等待原因預覽（ticket 27）：來源沒有提供等待原因時，agent 進入 Needs you 會讀一次畫面，只保留擷取出來的最多 2 行（每行截斷），離開 Needs you 就丟棄，不寫入磁碟
+65. As a 使用者, I want 近期輸出只在面板開著時存在記憶體中、關閉即丟棄, so that 沒有殘留的本機快取。唯一例外是等待原因預覽（ticket 27）：來源沒有提供等待原因時，agent 進入 Needs you 會讀一次畫面，只保留擷取出來的最多 2 行（每行截斷），離開 Needs you 就丟棄，不寫入磁碟。permission 對話框即使來源有提供原因也會讀一次畫面，但只保留 Allow／Deny 對應的按鍵（ticket 30），同樣離開 Needs you 就丟棄
 
 ### 美術
 

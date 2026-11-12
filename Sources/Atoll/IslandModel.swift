@@ -279,6 +279,14 @@ final class IslandModel {
         openPanel(store.agents[selection].address)
     }
 
+    /// ⌘Y / ⌘N on the selected row: answer its permission dialog without opening the panel.
+    func respondToSelected(_ choice: PermissionChoice) {
+        guard mode == .list, store.agents.indices.contains(selection) else { return }
+        let agent = store.agents[selection]
+        guard agent.permissionChoices != nil else { return }
+        store.respond(choice, to: agent.address, episode: agent.waitingSince)
+    }
+
     /// ⌘1–⌘9
     func jump(to number: Int) {
         let index = number - 1

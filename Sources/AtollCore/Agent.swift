@@ -159,6 +159,9 @@ public struct Agent: Identifiable, Equatable, Sendable {
     public var changeSummary: ChangeSummary?
     /// Why it waits, read once from its screen when the source gave no `statusMessage`; Needs you only.
     public var waitingPreview: WaitingPreview?
+    /// Keys for answering its permission dialog straight from the list; only when the dialog's layout was
+    /// recognized on screen in this Needs-you episode.
+    public var permissionChoices: PermissionChoices?
     /// Other active agents in the same git working tree (addresses); empty unless this one is active too.
     public var sharedTreeWith: [String] = []
 

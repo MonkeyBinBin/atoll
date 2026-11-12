@@ -89,6 +89,12 @@ struct HoverCardView: View {
             if let preview = agent.waitingPreview {
                 WaitingPreviewLabel(preview: preview, lineLimit: 2)
             }
+            if agent.permissionChoices != nil {
+                // The card is click-through, so the answer itself lives in the list.
+                Text("Allow / Deny from the list: ⌘Y / ⌘N")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
             if let summary = agent.changeSummary {
                 ChangeSummaryLabel(summary: summary, lineLimit: 2)
             }

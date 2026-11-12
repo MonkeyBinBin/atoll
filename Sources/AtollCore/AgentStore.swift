@@ -104,6 +104,8 @@ public final class AgentStore {
     public private(set) var panel: PanelState?
     public private(set) var sendStates: [String: SendState] = [:]
     public private(set) var keyStates: [String: KeyPressState] = [:]
+    /// Allow / Deny pressed from the list, for the current Needs-you episode.
+    public private(set) var permissionResponses: [String: PermissionResponseState] = [:]
     public private(set) var interruptStates: [String: InterruptButtonState] = [:]
     public private(set) var launchState: LaunchState = .idle
 
@@ -221,6 +223,10 @@ public final class AgentStore {
     private var previewEpisodes: [String: Date] = [:]
     /// Waiting previews for the current episode only; dropped the moment the agent leaves Needs you.
     private var previews: [String: WaitingPreview] = [:]
+    private var choices: [String: PermissionChoices] = [:]
+    /// Episode each list response belongs to; a "No longer waiting" note outlives it on its own timer.
+    private var responseEpisodes: [String: Date] = [:]
+    private var responseTimers: [String: ScheduledAction] = [:]
     private var previewTimers: [String: ScheduledAction] = [:]
     /// Working-tree top level per project path ("" = not in a repo). Resolved once per path, never polled.
     private var treeCache: [String: String] = [:]
@@ -593,6 +599,7 @@ public final class AgentStore {
             agent.changeSummary = changeSummaries[info.address]
             if state.isNeedsYou, let since = agent.waitingSince, previewEpisodes[info.address] == since {
                 agent.waitingPreview = previews[info.address]
+                agent.permissionChoices = choices[info.address]
             }
             list.append((agent, record.order))
         }
@@ -626,8 +633,9 @@ public final class AgentStore {
 
     // MARK: Waiting preview
 
-    /// One screen read per Needs-you episode, only when the source didn't say why (`statusMessage`).
-    /// Leaving Needs you (or a new episode) drops the preview: the only screen text kept with the panel closed.
+    /// One screen read per Needs-you episode: for the preview when the source didn't say why (`statusMessage`),
+    /// and for a permission dialog's answer keys even when it did.
+    /// Leaving Needs you (or a new episode) drops both: the only screen text kept with the panel closed.
     private func reconcilePreviews() {
         var waiting: [String: Agent] = [:]
         for agent in agents where agent.state.isNeedsYou && agent.waitingSince != nil {
@@ -636,9 +644,14 @@ public final class AgentStore {
         for (address, episode) in previewEpisodes where waiting[address]?.waitingSince != episode {
             previewEpisodes[address] = nil
             previews[address] = nil
+            choices[address] = nil
             previewTimers.removeValue(forKey: address)?.cancel()
         }
-        for agent in waiting.values where previewEpisodes[agent.address] == nil && agent.statusMessage == nil {
+        for (address, episode) in responseEpisodes where waiting[address]?.waitingSince != episode {
+            responseEpisodes[address] = nil
+            if permissionResponses[address] != .noLongerWaiting { permissionResponses[address] = nil }
+        }
+        for agent in waiting.values where previewEpisodes[agent.address] == nil && needsScreenRead(agent) {
             guard let episode = agent.waitingSince else { continue }
             let address = agent.address
             previewEpisodes[address] = episode
@@ -649,17 +662,68 @@ public final class AgentStore {
         }
     }
 
+    private func needsScreenRead(_ agent: Agent) -> Bool {
+        if agent.statusMessage == nil { return true }
+        guard agent.tool != .generic, let kind = agent.state.blockedKind else { return false }
+        return kind == .permission || kind == .unspecified
+    }
+
     private func readPreview(_ address: String, episode: Date) {
         guard let agent = agent(address), agent.waitingSince == episode, let kind = agent.state.blockedKind else { return }
         let lines = timing.previewLines
         let tool = agent.tool
+        let keepPreview = agent.statusMessage == nil
         Task { [client = client(for: address)] in
             // A failed read just means no preview; never retried within the episode.
             guard let output = try? await client.read(terminal: address, lines: lines),
                   self.previewEpisodes[address] == episode,
                   let preview = WaitingPreview.extract(from: output.text, tool: tool, kind: kind) else { return }
-            self.previews[address] = preview
+            if keepPreview { self.previews[address] = preview }
+            self.choices[address] = PermissionChoices.extract(from: output.text, tool: tool, kind: kind)
             self.rebuild()
+        }
+    }
+
+    // MARK: Permission from the list
+
+    /// Allow / Deny a permission dialog without opening the panel. `episode` is the `waitingSince` the user
+    /// saw; if the agent has left that dialog since, nothing is sent so the key can't land in the next one.
+    public func respond(_ choice: PermissionChoice, to address: String, episode: Date?) {
+        if case .sending = permissionResponses[address] { return }
+        guard let agent = agent(address), agent.state.isNeedsYou, let episode, agent.waitingSince == episode,
+              let key = agent.permissionChoices?.key(for: choice) else {
+            showNoLongerWaiting(address)
+            return
+        }
+        responseTimers.removeValue(forKey: address)?.cancel()
+        responseEpisodes[address] = episode
+        permissionResponses[address] = .sending(choice)
+        armAdvance(address)
+        Task { [client = client(for: address)] in
+            let result: PermissionResponseState
+            do {
+                try await client.keys(terminal: address, keys: [key])
+                result = .sent(choice)
+            } catch let error as HerdrError {
+                result = .failed(choice, error)
+            } catch {
+                result = .failed(choice, .unavailable(error.localizedDescription))
+            }
+            if case .failed = result { self.disarmAdvance(address) }
+            // Never retried. Only shown while the agent is still in the episode it was sent for.
+            guard self.responseEpisodes[address] == episode else { return }
+            self.permissionResponses[address] = result
+        }
+    }
+
+    private func showNoLongerWaiting(_ address: String) {
+        responseEpisodes[address] = nil
+        permissionResponses[address] = .noLongerWaiting
+        responseTimers[address]?.cancel()
+        responseTimers[address] = scheduler.schedule(after: timing.interruptFeedbackDuration) { [weak self] in
+            guard let self else { return }
+            self.responseTimers[address] = nil
+            if self.permissionResponses[address] == .noLongerWaiting { self.permissionResponses[address] = nil }
         }
     }
 

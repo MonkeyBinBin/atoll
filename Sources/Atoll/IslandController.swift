@@ -270,6 +270,10 @@ final class IslandController {
                 return true
             }
         }
+        if model.mode == .list, flags == .command, let chars = event.charactersIgnoringModifiers?.lowercased(), chars == "y" || chars == "n" {
+            model.respondToSelected(chars == "y" ? .allow : .deny)
+            return true
+        }
         if isPanel, flags == [.command, .shift], let index = Self.quickReplyKeyCodes.firstIndex(of: event.keyCode) {
             model.requestQuickReply(index)
             return true
