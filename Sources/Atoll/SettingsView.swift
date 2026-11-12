@@ -63,6 +63,7 @@ struct SettingsView: View {
                 Toggle("Auto-advance to next waiting agent", isOn: $settings.autoAdvance)
                 Toggle("Change summary when a turn finishes (git)", isOn: $settings.changeSummary)
                 Toggle("Warn when agents share a working tree (git)", isOn: $settings.sharedTreeWarning)
+                Toggle("Today timeline (in memory, cleared at midnight)", isOn: $settings.todayTimeline)
                 Toggle("Show terminals without status", isOn: $settings.showUnreportedTerminals)
             }
 

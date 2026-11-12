@@ -51,6 +51,14 @@ struct AgentListView: View {
                     Label("Launch agent", systemImage: "plus")
                 }
                 .buttonStyle(.borderless)
+                Button {
+                    NotificationCenter.default.post(name: .atollShowToday, object: nil)
+                } label: {
+                    let unseen = model.store.timeline.unseenCount
+                    Label(unseen > 0 ? "Today · \(unseen)" : "Today", systemImage: "clock")
+                }
+                .buttonStyle(.borderless)
+                .help("Today's finished turns")
                 Spacer()
                 Text(model.store.agents.contains { $0.permissionChoices != nil }
                      ? "↑↓ select · ↩ open · ⌘Y allow · ⌘N deny · esc close"

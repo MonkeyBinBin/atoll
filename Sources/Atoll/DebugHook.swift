@@ -139,6 +139,17 @@ final class DebugHook {
                     }
                 }
             case "large": model.settings.largePanel.toggle()
+            case "today":
+                // today: open the Today window and snapshot it (title in today.txt)
+                NotificationCenter.default.post(name: .atollShowToday, object: nil)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                    MainActor.assumeIsolated {
+                        if let window = NSApp.windows.first(where: { $0.title.hasPrefix("Today") }) {
+                            self.snapshot(window: window, name: "today")
+                            try? window.title.write(to: self.dir.appendingPathComponent("today.txt"), atomically: true, encoding: .utf8)
+                        }
+                    }
+                }
             case "settings":
                 NotificationCenter.default.post(name: .atollShowSettings, object: nil)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
@@ -237,4 +248,5 @@ final class DebugHook {
 
 extension Notification.Name {
     static let atollShowSettings = Notification.Name("AtollShowSettings")
+    static let atollShowToday = Notification.Name("AtollShowToday")
 }

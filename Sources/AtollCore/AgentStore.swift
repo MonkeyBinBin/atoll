@@ -170,6 +170,20 @@ public final class AgentStore {
         }
     }
 
+    /// Today's finished turns (ticket 38). In memory only; never written to disk or put in notifications.
+    public private(set) var timeline = TodayTimeline()
+    /// Off: nothing is collected, and what was collected goes.
+    public var timelineEnabled = true {
+        didSet {
+            guard timelineEnabled != oldValue, !timelineEnabled else { return }
+            clearTimeline()
+        }
+    }
+    /// Local days for the timeline (injectable for tests).
+    public var calendar = Calendar.autoupdatingCurrent
+    /// Empties the timeline at the next local midnight.
+    private var midnightTimer: ScheduledAction?
+
     /// Messages waiting for their agent's turn to end (ticket 34). In memory only.
     public private(set) var queuedMessages: [String: QueuedMessage] = [:]
     /// Notes about a queued message for the open panel's agent; cleared with the panel.
@@ -552,6 +566,7 @@ public final class AgentStore {
             sendQueuedIfFinished(after, from: before)
             trackTurn(after, from: before)
             trackFinalMessage(after, from: before)
+            trackTimeline(after, from: before)
         }
         if refreshOutput, panel?.address == address {
             refreshPanelOutput()
@@ -686,6 +701,13 @@ public final class AgentStore {
             changeSummaries[address] = nil
             toplevels[address] = nil
             summaryGeneration[address] = nil
+        }
+        // Assigned only on a change: most rebuilds don't touch it, and every write re-renders its viewers.
+        if !timeline.entries.isEmpty {
+            var updated = timeline
+            updated.fill(built)
+            updated.markGone(built, ended: Set(records.values.filter(hasEnded).map(\.info.address)))
+            if updated != timeline { timeline = updated }
         }
         reconcileReminders()
         reconcilePreviews()
@@ -1134,6 +1156,57 @@ public final class AgentStore {
         if finalMessages.removeValue(forKey: address) != nil, rebuilding { rebuild() }
     }
 
+    // MARK: Today timeline
+
+    /// The user's Clear.
+    public func clearTimeline() {
+        timeline.clear()
+        midnightTimer?.cancel()
+        midnightTimer = nil
+    }
+
+    private func trackTimeline(_ agent: Agent, from previous: AgentState?) {
+        guard timelineEnabled else { return }
+        switch agent.state {
+        case .done, .idle, .exited:
+            guard Self.turnEnded(agent.state, from: previous) else { return }
+            recordTimeline(agent)
+        case .error:
+            recordTimeline(agent)
+        case .working, .starting, .needsYou:
+            if timeline.isOpen(agent.address) { timeline.close(agent.address) }
+        case .unknown:
+            break
+        }
+    }
+
+    /// The day may have changed without the midnight timer (it doesn't count while the Mac sleeps), or the
+    /// time zone did: drop what is no longer today. Called on wake and day / time zone changes.
+    public func rollOverTimeline() {
+        let start = calendar.startOfDay(for: scheduler.now)
+        guard timeline.entries.contains(where: { $0.at < start }) else { return }
+        timeline.drop(before: start)
+    }
+
+    private func recordTimeline(_ agent: Agent) {
+        let now = scheduler.now
+        timeline.drop(before: calendar.startOfDay(for: now))
+        timeline.record(agent, at: now, seen: panel?.address == agent.address)
+        scheduleMidnight()
+    }
+
+    private func scheduleMidnight() {
+        let now = scheduler.now
+        guard midnightTimer == nil,
+              let next = calendar.nextDate(after: now, matching: DateComponents(hour: 0, minute: 0, second: 0), matchingPolicy: .nextTime)
+        else { return }
+        midnightTimer = scheduler.schedule(after: next.timeIntervalSince(now)) { [weak self] in
+            guard let self else { return }
+            self.midnightTimer = nil
+            self.timeline.drop(before: self.calendar.startOfDay(for: self.scheduler.now))
+        }
+    }
+
     // MARK: Waiting reminders
 
     /// Keeps one timer per live Needs-you episode. The delay counts from when the episode was first
@@ -1184,6 +1257,7 @@ public final class AgentStore {
             // Local only: never written back to Herdr.
             acknowledged.insert(address)
         }
+        if timeline.hasUnseen(address) { timeline.markSeen(address) }
         rebuild()
         refreshPanelOutput()
     }

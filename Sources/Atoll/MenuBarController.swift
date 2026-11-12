@@ -1,24 +1,29 @@
 import AppKit
 import AtollCore
 
-/// Menu bar icon: waiting-count badge, Show/Hide Island, Settings…, Quit. Nothing else.
+/// Menu bar icon: waiting-count badge, Show/Hide Island, Today…, Settings…, Quit. Nothing else.
 @MainActor
 final class MenuBarController: NSObject, NSMenuDelegate {
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let store: AgentStore
     private let settings: AppSettings
     private let openSettings: () -> Void
+    private let openToday: () -> Void
     private let toggleItem = NSMenuItem(title: "Hide Island", action: #selector(toggleIsland), keyEquivalent: "")
 
-    init(store: AgentStore, settings: AppSettings, openSettings: @escaping () -> Void) {
+    init(store: AgentStore, settings: AppSettings, openSettings: @escaping () -> Void, openToday: @escaping () -> Void) {
         self.store = store
         self.settings = settings
         self.openSettings = openSettings
+        self.openToday = openToday
         super.init()
         let menu = NSMenu()
         menu.delegate = self
         toggleItem.target = self
         menu.addItem(toggleItem)
+        let todayItem = NSMenuItem(title: "Today…", action: #selector(showToday), keyEquivalent: "")
+        todayItem.target = self
+        menu.addItem(todayItem)
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
@@ -50,6 +55,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     @objc private func toggleIsland() {
         settings.islandVisible.toggle()
+    }
+
+    @objc private func showToday() {
+        openToday()
     }
 
     @objc private func showSettings() {
