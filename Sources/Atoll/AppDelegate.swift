@@ -105,6 +105,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if (store.treeProbe != nil) != settings.sharedTreeWarning {
             store.treeProbe = settings.sharedTreeWarning ? GitProbe() : nil
         }
+        store.noOutputThreshold = settings.noOutputMinutes > 0 ? TimeInterval(settings.noOutputMinutes * 60) : nil
         store.reminderDelay = settings.reminderMinutes > 0 ? TimeInterval(settings.reminderMinutes * 60) : nil
         HotKeyCenter.shared.register(id: 1, settings.listHotKey) { [weak self] in
             guard let self else { return }

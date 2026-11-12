@@ -112,6 +112,7 @@ struct AgentCard: View {
                         .foregroundStyle(agent.state.color)
                     Text("\(agent.state.fullLabel) · \(Format.duration(since: agent.stateSince, now: now))")
                         .foregroundStyle(agent.state.color)
+                    NoOutputLabel(since: agent.noOutputSince, now: now)
                     Text("· \(agent.toolName)" + (agent.whereLabel.map { " · \($0)" } ?? ""))
                         .foregroundStyle(.secondary)
                 }
@@ -310,6 +311,21 @@ extension QueuedMessage.Status {
         case .waiting: "Queued · sends when this turn ends"
         case .held: "Queued message held · agent errored"
         case .sending: "Sending queued message…"
+        }
+    }
+}
+
+/// "· No output for 12m" after a Working agent's state: a fact about its screen, in the secondary colour.
+struct NoOutputLabel: View {
+    let since: Date?
+    let now: Date
+
+    var body: some View {
+        if let since {
+            Text("· No output for \(Format.duration(since: since, now: now))")
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .help("The screen hasn't changed since \(Format.clockSeconds.string(from: since)).")
         }
     }
 }

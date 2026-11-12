@@ -76,6 +76,7 @@ struct HoverCardView: View {
             HStack(spacing: 4) {
                 Image(systemName: agent.state.symbol)
                 Text("\(agent.state.fullLabel) · \(Format.duration(since: agent.stateSince, now: now))")
+                NoOutputLabel(since: agent.noOutputSince, now: now)
             }
             .font(.system(size: 11))
             .foregroundStyle(agent.state.color)

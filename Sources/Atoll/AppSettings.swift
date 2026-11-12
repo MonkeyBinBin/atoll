@@ -63,6 +63,8 @@ final class AppSettings {
     var sharedTreeWarning: Bool { didSet { defaults.set(sharedTreeWarning, forKey: "sharedTreeWarning") } }
     /// After answering a waiting agent in its panel, open the next waiting one.
     var autoAdvance: Bool { didSet { defaults.set(autoAdvance, forKey: "autoAdvance") } }
+    /// Minutes a Working agent's screen may sit unchanged before "No output for …" shows; 0 = off.
+    var noOutputMinutes: Int { didSet { defaults.set(noOutputMinutes, forKey: "noOutputMinutes") } }
     /// Minutes in Needs you before one reminder (notification + bubble); 0 = off.
     var reminderMinutes: Int { didSet { defaults.set(reminderMinutes, forKey: "reminderMinutes") } }
     var doneNotifyAgents: Set<String> { didSet { defaults.set(Array(doneNotifyAgents), forKey: "doneNotifyAgents") } }
@@ -131,6 +133,7 @@ final class AppSettings {
         notifyShowsWaitingReason = defaults.bool(forKey: "notifyShowsWaitingReason")
         speechBubbles = defaults.object(forKey: "speechBubbles") as? Bool ?? true
         reminderMinutes = defaults.object(forKey: "reminderMinutes") as? Int ?? 5
+        noOutputMinutes = defaults.object(forKey: "noOutputMinutes") as? Int ?? 10
         autoAdvance = defaults.object(forKey: "autoAdvance") as? Bool ?? true
         changeSummary = defaults.object(forKey: "changeSummary") as? Bool ?? true
         sharedTreeWarning = defaults.object(forKey: "sharedTreeWarning") as? Bool ?? true

@@ -101,6 +101,7 @@ struct AgentPanelView: View {
                     HStack(spacing: 4) {
                         Image(systemName: agent.state.symbol)
                         Text("\(agent.state.fullLabel) · \(Format.duration(since: agent.stateSince, now: context.date))")
+                        NoOutputLabel(since: agent.noOutputSince, now: context.date)
                         Text("· Last status change \(Format.ago(agent.lastStatusChange, now: context.date))")
                             .foregroundStyle(.secondary)
                     }

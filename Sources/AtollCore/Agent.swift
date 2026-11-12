@@ -163,6 +163,10 @@ public struct Agent: Identifiable, Equatable, Sendable {
     /// Dropped when the next turn starts.
     public var finalMessage: TurnFinalMessage?
 
+    /// Working with a screen that hasn't changed since then (past the "no output" threshold). States a fact,
+    /// not that the agent is stuck.
+    public var noOutputSince: Date?
+
     /// What the agent last said, for the list, hover card and bubble: the source's own summary
     /// (`statusMessage`), else the lines read off its screen when the turn ended.
     public var lastWords: String? { statusMessage ?? finalMessage?.text }

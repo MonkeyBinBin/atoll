@@ -23,6 +23,66 @@ public enum OutputFilter {
         return kept.contains(where: { !$0.isEmpty }) ? kept.joined(separator: "\n") : clean(text)
     }
 
+    // MARK: Activity fingerprint
+
+    /// A hash of what the agent has put on screen, for "no output for 10m": the input box, status lines,
+    /// spinners, statusline art and elapsed-time / token counters are left out first, or the screen would
+    /// always look changed. Only the hash is kept; the text is dropped right away.
+    public static func activityFingerprint(_ text: String, tool: AgentTool) -> Int {
+        // FNV-1a: stable across launches, cheap, and nothing but this number is kept.
+        var hash: UInt64 = 0xcbf29ce484222325
+        for line in activityLines(text, tool: tool) {
+            for byte in line.utf8 {
+                hash = (hash ^ UInt64(byte)) &* 0x100000001b3
+            }
+            hash = (hash ^ 10) &* 0x100000001b3
+        }
+        return Int(truncatingIfNeeded: hash)
+    }
+
+    /// The rows the fingerprint is taken over, counters already blanked.
+    static func activityLines(_ text: String, tool: AgentTool) -> [String] {
+        let all = lines(text)
+        var kept: [String]
+        switch tool {
+        case .claudeCode: kept = withoutToolTitles(claudeMessages(all))
+        case .codex: kept = codexMessages(all).filter { !isCodexWorkingRow($0) }
+        case .generic: kept = all
+        }
+        kept = kept.filter { !isDecorationRow($0) && !isBrailleArt($0.trimmingCharacters(in: .whitespaces)) }
+        return trimTrailingBlankLines(kept).map(withoutCounters)
+    }
+
+    /// Claude Code's tool rows: the title right above the `⎿` output ("Running 1 shell command…") is rewritten
+    /// into a summary every couple of minutes while the tool runs; only the output below it is the tool's.
+    static func withoutToolTitles(_ lines: [String]) -> [String] {
+        lines.indices.compactMap { index in
+            let next = index + 1 < lines.count ? lines[index + 1].trimmingCharacters(in: .whitespaces) : ""
+            return next.hasPrefix("⎿") ? nil : lines[index]
+        }
+    }
+
+    /// "• Working (12s • esc to interrupt)" (its bullet may blink off).
+    static func isCodexWorkingRow(_ line: String) -> Bool {
+        var t = Substring(line.trimmingCharacters(in: .whitespaces))
+        if t.first == "•" || t.first == "◦" { t = t.dropFirst().drop { $0 == " " } }
+        return t.hasPrefix("Working (")
+    }
+
+    /// Elapsed times ("12s", "1m 40s", "1m40s", "250ms") and token counts ("12,345 tokens", "1.2k tokens") tick
+    /// on their own, and a running tool row's leading dot blinks ("⏺ Running…" / "  Running…").
+    static func withoutCounters(_ line: String) -> String {
+        var line = line
+        if let first = line.first, first == "⏺" || first == "•" || first == "◦" {
+            line = " " + line.dropFirst()
+        }
+        return line
+            .replacingOccurrences(of: #"\d[\d.,]*\s?[kKmM]?\s*tokens\b"#, with: "#", options: .regularExpression)
+            .replacingOccurrences(of: #"(?<![\w.])(\d+(\.\d+)?\s?(ms|h|m|s)){1,3}(?![A-Za-z])"#, with: "#", options: .regularExpression)
+            // "1m 40s" and "12s" are the same counter.
+            .replacingOccurrences(of: #"#(\s+#)+"#, with: "#", options: .regularExpression)
+    }
+
     // MARK: Tool layouts
 
     /// Claude Code: the prompt box is a pair of full-width `─` rules around `❯`, followed by

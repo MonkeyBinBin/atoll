@@ -66,6 +66,16 @@ struct SettingsView: View {
                 Toggle("Show terminals without status", isOn: $settings.showUnreportedTerminals)
             }
 
+            Section("No output") {
+                Picker("Mark no output after", selection: $settings.noOutputMinutes) {
+                    Text("Off").tag(0)
+                    ForEach([5, 10, 20], id: \.self) { Text("\($0) min").tag($0) }
+                }
+                Text("A Working agent whose screen hasn't changed this long shows \"No output for …\". Each screen is read every \(Int(store.timing.outputCheckInterval / 60)) minutes and only a hash of it is kept.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Output") {
                 Picker("Font", selection: $settings.outputFontFamily) {
                     Text("Automatic (\(TerminalFont.resolvedName(family: "")))").tag("")

@@ -57,6 +57,11 @@ public final class AgentStore {
         /// its one read: the waiting preview, or the turn's final message.
         public var previewDelay: TimeInterval = 0.6
         public var previewLines: Int = 80
+        /// "No output" checks: each Working agent's screen is fingerprinted this often, reading this many lines,
+        /// and never more than this many reads a minute over all agents (intervals stretch instead).
+        public var outputCheckInterval: TimeInterval = 120
+        public var outputCheckLines: Int = 40
+        public var outputChecksPerMinute: Int = 10
         public init() {}
     }
 
@@ -139,6 +144,20 @@ public final class AgentStore {
     public private(set) var notifyWhenDone: Set<String> = []
     /// An armed agent finished its turn (Done, Exited, or stopped to Idle); it is now disarmed.
     public var onNotifyWhenDone: ((_ agent: Agent) -> Void)?
+
+    /// A Working agent whose screen hasn't changed this long is marked "No output for …"; nil turns the
+    /// checks off entirely.
+    public var noOutputThreshold: TimeInterval? = 600 {
+        didSet {
+            guard noOutputThreshold != oldValue else { return }
+            if noOutputThreshold == nil {
+                noOutputWatch.removeAll()
+                noOutputTimer?.cancel()
+                noOutputTimer = nil
+            }
+            rebuild()
+        }
+    }
 
     /// Messages waiting for their agent's turn to end (ticket 34). In memory only.
     public private(set) var queuedMessages: [String: QueuedMessage] = [:]
@@ -251,6 +270,8 @@ public final class AgentStore {
     private var finalReads: [String: Int] = [:]
     private var nextFinalRead = 0
     private var finalTimers: [String: ScheduledAction] = [:]
+    private var noOutputWatch = NoOutputWatch()
+    private var noOutputTimer: ScheduledAction?
     /// Working-tree top level per project path ("" = not in a repo). Resolved once per path, never polled.
     private var treeCache: [String: String] = [:]
     private var pendingTrees: Set<String> = []
@@ -642,6 +663,7 @@ public final class AgentStore {
         }
         var built = list.map(\.0)
         let newcomers = treeProbe == nil ? [] : markSharedTrees(&built)
+        markNoOutput(&built)
         agents = built
         notifyWhenDone = notifyWhenDone.filter { records[$0] != nil }
         reconcileQueued()
@@ -1010,6 +1032,47 @@ public final class AgentStore {
             } else if queued.status == .waiting, state == .error {
                 queuedMessages[address]?.status = .held
             }
+        }
+    }
+
+    // MARK: No output
+
+    /// Keeps the watch in step with who is Working, and stamps the ones whose screen sat still too long.
+    private func markNoOutput(_ agents: inout [Agent]) {
+        guard let threshold = noOutputThreshold else { return }
+        noOutputWatch.sync(working: Set(agents.filter { $0.state == .working }.map(\.address)), now: scheduler.now)
+        for index in agents.indices {
+            agents[index].noOutputSince = noOutputWatch.quietSince(agents[index].address, threshold: threshold)
+        }
+        scheduleNoOutputTick()
+    }
+
+    /// One tick per `60 / outputChecksPerMinute` seconds while anyone is Working; each tick reads at most one
+    /// screen, so the per-minute cap holds however many agents work.
+    private func scheduleNoOutputTick() {
+        guard noOutputTimer == nil, noOutputThreshold != nil, !noOutputWatch.entries.isEmpty else { return }
+        let spacing = 60 / Double(max(1, timing.outputChecksPerMinute))
+        noOutputTimer = scheduler.schedule(after: spacing) { [weak self] in
+            guard let self else { return }
+            self.noOutputTimer = nil
+            self.checkNextOutput()
+            self.scheduleNoOutputTick()
+        }
+    }
+
+    private func checkNextOutput() {
+        guard let ticket = noOutputWatch.takeDue(now: scheduler.now, interval: timing.outputCheckInterval),
+              let tool = agent(ticket.address)?.tool else { return }
+        let lines = timing.outputCheckLines
+        Task { [client = client(for: ticket.address)] in
+            // The screen text lives only for this hash.
+            let hash = (try? await client.read(terminal: ticket.address, lines: lines))
+                .map { OutputFilter.activityFingerprint($0.text, tool: tool) }
+            let before = self.noOutputThreshold.flatMap { self.noOutputWatch.quietSince(ticket.address, threshold: $0) }
+            self.noOutputWatch.record(ticket, hash: hash, now: self.scheduler.now)
+            let after = self.noOutputThreshold.flatMap { self.noOutputWatch.quietSince(ticket.address, threshold: $0) }
+            // Most checks change nothing visible: skip the full rebuild then.
+            if before != after { self.rebuild() }
         }
     }
 
