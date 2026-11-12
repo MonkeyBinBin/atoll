@@ -95,7 +95,26 @@ struct IslandView: View {
 
     @ViewBuilder
     private func rightWing(_ layout: IslandLayout) -> some View {
-        if model.store.agents.isEmpty && model.store.isLive {
+        if let label = layout.spaceLabel {
+            HStack(spacing: 0) {
+                Text(label)
+                    .font(Font(IslandLayout.spaceFont))
+                    .foregroundStyle(Color(white: 0.7))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .padding(.leading, IslandLayout.padding)
+                    .help("Showing one Herdr space · change it in the list (Tab)")
+                    .accessibilityLabel("Space \(label)")
+                if !layout.others.isEmpty {
+                    if layout.rightScrolls {
+                        ScrollView(.horizontal, showsIndicators: false) { othersRow(layout) }
+                    } else {
+                        othersRow(layout)
+                    }
+                }
+            }
+            .frame(maxHeight: .infinity)
+        } else if model.store.agents.isEmpty && model.store.isLive {
             PixelIconView(tag: "empty")
                 .frame(width: 18, height: 18)
                 .padding(.horizontal, IslandLayout.padding + 2)

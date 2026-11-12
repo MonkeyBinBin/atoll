@@ -7,6 +7,12 @@ struct AgentListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            let choices = model.spaceChoices
+            // One space and nobody elsewhere: nothing to filter, unless a filter is still on.
+            if choices.count > 2 || model.spaceFilter != .all {
+                SpaceFilterBar(model: model, choices: choices)
+                Divider().overlay(Color.white.opacity(0.08))
+            }
             if model.store.agents.isEmpty {
                 Text(model.store.isLive ? "No agents" : (model.offlineText ?? "Unknown"))
                     .font(.callout)
@@ -14,22 +20,23 @@ struct AgentListView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 24)
             } else {
+                let ordered = model.listAgents
+                let sections = SpaceGrouping.sections(model.store.agents)
                 ScrollViewReader { proxy in
                     ScrollView {
                         TimelineView(.periodic(from: .now, by: 1)) { context in
                             VStack(spacing: 4) {
-                                ForEach(Array(model.store.agents.enumerated()), id: \.element.id) { index, agent in
-                                    AgentCard(
-                                        agent: agent,
-                                        store: model.store,
-                                        index: index,
-                                        selected: index == model.selection,
-                                        now: context.date,
-                                        animate: settings.animationsEnabled,
-                                        onLaunchWorktree: { model.openLaunchInWorktree(for: agent) }
-                                    )
-                                    .id(agent.id)
-                                    .onTapGesture { model.openPanel(agent.address) }
+                                if let sections {
+                                    ForEach(sections) { section in
+                                        SpaceHeader(section: section, filtered: model.spaceFilter == section.filter)
+                                        ForEach(section.agents) { agent in
+                                            card(agent, index: ordered.firstIndex { $0.address == agent.address } ?? 0, now: context.date)
+                                        }
+                                    }
+                                } else {
+                                    ForEach(Array(ordered.enumerated()), id: \.element.id) { index, agent in
+                                        card(agent, index: index, now: context.date)
+                                    }
                                 }
                             }
                             .padding(8)
@@ -38,8 +45,9 @@ struct AgentListView: View {
                     .frame(maxHeight: 420)
                     .fixedSize(horizontal: false, vertical: true)
                     .onChange(of: model.selection) { _, index in
-                        guard model.store.agents.indices.contains(index) else { return }
-                        withAnimation { proxy.scrollTo(model.store.agents[index].id) }
+                        let agents = model.listAgents
+                        guard agents.indices.contains(index) else { return }
+                        withAnimation { proxy.scrollTo(agents[index].id) }
                     }
                 }
             }
@@ -71,6 +79,90 @@ struct AgentListView: View {
             .padding(.vertical, 8)
         }
         .onAppear { model.validate() }
+    }
+
+    private func card(_ agent: Agent, index: Int, now: Date) -> some View {
+        AgentCard(
+            agent: agent,
+            store: model.store,
+            index: index,
+            selected: index == model.selection,
+            now: now,
+            animate: settings.animationsEnabled,
+            onLaunchWorktree: { model.openLaunchInWorktree(for: agent) }
+        )
+        .id(agent.id)
+        .onTapGesture { model.openPanel(agent.address) }
+    }
+}
+
+/// All / each Herdr space / Other: what the collapsed island shows (ticket 42). Tab / ⇧Tab cycles.
+struct SpaceFilterBar: View {
+    let model: IslandModel
+    let choices: [(SpaceFilter, String)]
+
+    var body: some View {
+        let selected = model.spaceFilter
+        HStack(spacing: 6) {
+            Text("Island")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 4) {
+                    ForEach(choices, id: \.0) { filter, name in
+                        Button {
+                            model.setSpaceFilter(filter)
+                        } label: {
+                            Text(name)
+                                .font(.system(size: 11, weight: filter == selected ? .semibold : .regular))
+                                .lineLimit(1)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 2)
+                                .background(Capsule().fill(Color.white.opacity(filter == selected ? 0.18 : 0.05)))
+                                .foregroundStyle(filter == selected ? .primary : .secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help(filter == .all
+                              ? "Show every agent in the collapsed island"
+                              : "Show only \(name) in the collapsed island; agents elsewhere that need you still show")
+                    }
+                }
+            }
+            Text("tab")
+                .font(.caption2.monospaced())
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+    }
+}
+
+/// A list section's title: the Herdr space (or Other) and how many agents it has.
+struct SpaceHeader: View {
+    let section: SpaceSection
+    /// The collapsed island is filtered to this space.
+    let filtered: Bool
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: section.filter == .other ? "square.dashed" : "square.stack")
+            Text(section.name)
+                .fontWeight(.semibold)
+                .lineLimit(1)
+            Text("\(section.agents.count)")
+                .foregroundStyle(.tertiary)
+            if filtered {
+                Text("· island")
+                    .foregroundStyle(.tertiary)
+            }
+            Spacer()
+        }
+        .font(.system(size: 11))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 4)
+        .padding(.top, 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
     }
 }
 

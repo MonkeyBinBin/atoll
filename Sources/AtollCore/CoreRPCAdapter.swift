@@ -358,14 +358,33 @@ public final class CoreRPCAdapter: HerdrClient, @unchecked Sendable {
         appRunning()
     }
 
-    /// `herdr-app ls` → spaces.
+    /// `herdr-app ls` → spaces, each with the terminals shown in it.
     public func spaces() async throws -> [HerdrSpace] {
-        let output = try await runHerdrApp(["ls"])
-        guard let object = try? JSONSerialization.jsonObject(with: output) as? [String: Any],
+        Self.spaces(inHerdrAppLs: try await runHerdrApp(["ls"]))
+    }
+
+    static func spaces(inHerdrAppLs data: Data) -> [HerdrSpace] {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let spaces = object["spaces"] as? [[String: Any]] else { return [] }
         return spaces.compactMap { space in
             guard let id = space["id"] as? String else { return nil }
-            return HerdrSpace(id: id, name: (space["name"] as? String) ?? id)
+            let name = (space["name"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? id
+            var terminals: [String] = []
+            for tab in space["tabs"] as? [[String: Any]] ?? [] {
+                terminals += addresses(in: tab["terminals"] as? [Any] ?? [])
+            }
+            return HerdrSpace(id: id, name: name, terminals: terminals)
+        }
+    }
+
+    /// Terminal addresses in a tab's `terminals`, sub-agents included, depth first. Herdr 0.1.14 lists
+    /// `sub_agents` as bare addresses; objects shaped like a terminal entry are accepted too.
+    private static func addresses(in terminals: [Any]) -> [String] {
+        terminals.flatMap { entry -> [String] in
+            if let address = entry as? String { return [address] }
+            guard let t = entry as? [String: Any] else { return [] }
+            let own = (t["terminal"] as? String).map { [$0] } ?? []
+            return own + addresses(in: t["sub_agents"] as? [Any] ?? [])
         }
     }
 
@@ -397,20 +416,7 @@ public final class CoreRPCAdapter: HerdrClient, @unchecked Sendable {
     }
 
     static func terminalsShown(inHerdrAppLs data: Data) -> Set<String> {
-        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [] }
-        var result: Set<String> = []
-        func walk(_ terminals: [[String: Any]]) {
-            for t in terminals {
-                if let address = t["terminal"] as? String { result.insert(address) }
-                if let subs = t["sub_agents"] as? [[String: Any]] { walk(subs) }
-            }
-        }
-        for space in object["spaces"] as? [[String: Any]] ?? [] {
-            for tab in space["tabs"] as? [[String: Any]] ?? [] {
-                walk(tab["terminals"] as? [[String: Any]] ?? [])
-            }
-        }
-        return result
+        Set(spaces(inHerdrAppLs: data).flatMap(\.terminals))
     }
 
     /// Finds a terminal address (`t7`) in a herdr-app command result, wherever it sits.

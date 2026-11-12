@@ -140,6 +140,8 @@ final class DebugHook {
                 }
             case "large": model.settings.largePanel.toggle()
             case "today": model.openToday()
+            case "space": model.setSpaceFilter(SpaceFilter(stored: parts.count > 1 && parts[1] != "all" ? parts[1] : ""))
+            case "tab": model.cycleSpaceFilter(1)
             case "settings":
                 NotificationCenter.default.post(name: .atollShowSettings, object: nil)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) {

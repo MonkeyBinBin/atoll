@@ -308,6 +308,7 @@ final class IslandController {
         case 126: model.moveSelection(-1); return true // ↑
         case 125: model.moveSelection(1); return true  // ↓
         case 36, 76: model.openSelected(); return true // Return / Enter
+        case 48: model.cycleSpaceFilter(flags.contains(.shift) ? -1 : 1); return true // Tab / ⇧Tab
         default: return false
         }
     }

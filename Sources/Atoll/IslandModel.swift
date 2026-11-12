@@ -47,6 +47,8 @@ struct IslandLayout: Equatable {
     var rightScrolls: Bool
     /// Extra inset at the outer ends of a floating capsule so content clears its rounding.
     var endInset: CGFloat = 0
+    /// "atoll +3": the island is filtered to a space (ticket 42), with how many agents it hides.
+    var spaceLabel: String?
 
     static let slot: CGFloat = 22
     /// Always-visible buttons (launch, today, list) at the outer end of the right wing.
@@ -54,10 +56,11 @@ struct IslandLayout: Equatable {
     static let buttonsWidth: CGFloat = buttonWidth * 3
     static let padding: CGFloat = 10
     nonisolated(unsafe) static let hintFont = NSFont.systemFont(ofSize: 11, weight: .semibold)
+    nonisolated(unsafe) static let spaceFont = NSFont.systemFont(ofSize: 10, weight: .medium)
 
     var collapsedWidth: CGFloat { leftWidth + centerWidth + rightWidth }
 
-    static func compute(agents: [Agent], geometry: ScreenGeometry, offlineText: String?) -> IslandLayout {
+    static func compute(agents: [Agent], geometry: ScreenGeometry, offlineText: String?, spaceLabel: String? = nil) -> IslandLayout {
         let pinned = agents.filter { $0.state.needsAttention }
         let others = agents.filter { !$0.state.needsAttention }
         var hint: String?
@@ -74,7 +77,11 @@ struct IslandLayout: Equatable {
         let othersWidth = CGFloat(others.count) * slot + padding * 2
         let rightMax = min(maxSide, 8 * slot + padding * 2)
         var right = others.isEmpty ? 0 : min(othersWidth, rightMax)
-        if agents.isEmpty, offlineText == nil {
+        if let spaceLabel {
+            // The filtered space's name sits in front of its characters, even when none are left to show.
+            let labelWidth = min(ceil((spaceLabel as NSString).size(withAttributes: [.font: spaceFont]).width) + 4, 110)
+            right = (others.isEmpty ? padding * 2 : right) + labelWidth
+        } else if agents.isEmpty, offlineText == nil {
             // Minimal capsule with the empty-island icon.
             right = slot + padding * 2
             left = geometry.hasNotch ? padding : 0
@@ -94,7 +101,8 @@ struct IslandLayout: Equatable {
             leftWidth: left, rightWidth: right, centerWidth: center,
             height: height,
             rightScrolls: othersWidth > rightMax,
-            endInset: endInset
+            endInset: endInset,
+            spaceLabel: spaceLabel
         )
     }
 }
@@ -153,8 +161,44 @@ final class IslandModel {
 
     /// What the collapsed island shows given full screen; nil = hidden.
     var collapsedAgents: [Agent]? {
-        FullScreenPresence.collapsedAgents(store.agents, fullScreen: fullScreen, mode: settings.fullScreenMode)
+        let shown = SpaceGrouping.islandAgents(store.agents, filter: spaceFilter)
+        return FullScreenPresence.collapsedAgents(shown, fullScreen: fullScreen, mode: settings.fullScreenMode)
     }
+
+    // MARK: Spaces (ticket 42)
+
+    /// The island's space filter as it applies now: one Herdr no longer has falls back to all.
+    var spaceFilter: SpaceFilter {
+        SpaceGrouping.effective(SpaceFilter(stored: settings.islandSpace), spaces: store.spaces)
+    }
+
+    func setSpaceFilter(_ filter: SpaceFilter) {
+        settings.islandSpace = filter.stored
+    }
+
+    var spaceChoices: [(SpaceFilter, String)] {
+        SpaceGrouping.choices(agents: store.agents, spaces: store.spaces, selected: spaceFilter)
+    }
+
+    /// Tab / ⇧Tab in the list: the next / previous island filter.
+    func cycleSpaceFilter(_ delta: Int) {
+        let choices = spaceChoices.map(\.0)
+        guard choices.count > 1 else { return }
+        let current = choices.firstIndex(of: spaceFilter) ?? 0
+        setSpaceFilter(choices[(current + delta + choices.count) % choices.count])
+    }
+
+    /// "atoll +3" in the collapsed island while it's filtered; nil showing everyone.
+    var spaceLabel: String? {
+        let filter = spaceFilter
+        guard filter != .all else { return nil }
+        let name = spaceChoices.first { $0.0 == filter }?.1 ?? SpaceGrouping.otherName
+        let hidden = store.agents.count - SpaceGrouping.islandAgents(store.agents, filter: filter).count
+        return hidden > 0 ? "\(name) +\(hidden)" : name
+    }
+
+    /// The list's order (by space when there are spaces); selection and ⌘1–9 index into it.
+    var listAgents: [Agent] { SpaceGrouping.listOrder(store.agents) }
 
     /// Collapsed and nothing to show in full screen: the island steps aside (hotkeys still expand it).
     var hiddenByFullScreen: Bool { mode == .collapsed && collapsedAgents == nil }
@@ -289,7 +333,10 @@ final class IslandModel {
             screenFrame: .zero, hasNotch: false, notchMinX: 0, notchWidth: 0, barHeight: 28, leftRoom: 400, rightRoom: 400
         )
         let agents = mode == .collapsed ? collapsedAgents ?? [] : store.agents
-        return IslandLayout.compute(agents: agents, geometry: geometry, offlineText: offlineText)
+        return IslandLayout.compute(
+            agents: agents, geometry: geometry, offlineText: offlineText,
+            spaceLabel: mode == .collapsed && collapsedAgents != nil ? spaceLabel : nil
+        )
     }
 
     // MARK: Intents
@@ -305,7 +352,7 @@ final class IslandModel {
     }
 
     func openPanel(_ address: String) {
-        if let index = store.agents.firstIndex(where: { $0.address == address }) { selection = index }
+        if let index = listAgents.firstIndex(where: { $0.address == address }) { selection = index }
         mode = .panel(address)
         store.openPanel(address)
     }
@@ -370,19 +417,22 @@ final class IslandModel {
     }
 
     func moveSelection(_ delta: Int) {
-        guard !store.agents.isEmpty else { return }
-        selection = min(max(selection + delta, 0), store.agents.count - 1)
+        let agents = listAgents
+        guard !agents.isEmpty else { return }
+        selection = min(max(selection + delta, 0), agents.count - 1)
     }
 
     func openSelected() {
-        guard store.agents.indices.contains(selection) else { return }
-        openPanel(store.agents[selection].address)
+        let agents = listAgents
+        guard agents.indices.contains(selection) else { return }
+        openPanel(agents[selection].address)
     }
 
     /// ⌘Y / ⌘N on the selected row: answer its permission dialog without opening the panel.
     func respondToSelected(_ choice: PermissionChoice) {
-        guard mode == .list, store.agents.indices.contains(selection) else { return }
-        let agent = store.agents[selection]
+        let agents = listAgents
+        guard mode == .list, agents.indices.contains(selection) else { return }
+        let agent = agents[selection]
         guard agent.permissionChoices != nil else { return }
         store.respond(choice, to: agent.address, episode: agent.waitingSince)
     }
@@ -390,9 +440,10 @@ final class IslandModel {
     /// ⌘1–⌘9
     func jump(to number: Int) {
         let index = number - 1
-        guard store.agents.indices.contains(index) else { return }
+        let agents = listAgents
+        guard agents.indices.contains(index) else { return }
         selection = index
-        openPanel(store.agents[index].address)
+        openPanel(agents[index].address)
     }
 
     /// Store: the answered agent settled; open the next waiting one unless the user is mid-typing.

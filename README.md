@@ -13,6 +13,7 @@
 - **監看**：每個 agent 一個角色，外觀代表工具、個體色在 session 內固定；動畫之外一律附圖示與文字（Working / Needs you / Done / Idle / Error / Exited / Unknown）。等待使用者與錯誤的 agent 釘在左翼，其餘依優先級排列。沒有 agent 時顯示無人小島圖示。
 - **環礁場景**：動態島背景是一片環礁，每個 agent 站在自己的沙洲上，海浪流動、偶爾有魚跳出水面；等待你或出錯的 agent 腳下水面會映出黃光／紅光。天空、海水與日月依本機時間從黎明、白天、黃昏變化到深夜。設定裡關掉 Decorations 即回到純黑。
 - **清單**：點動態島空白處或按 `⌥⌘A` 展開，依「等待使用者 > 錯誤 > 狀態未知 > 執行中 > 完成／閒置」排序。`↑↓` 選擇、`Enter` 打開、`⌘1`–`⌘9` 直接跳、`Esc` 逐層返回。展開後點 island 以外的地方會自動收起；按清單、面板或啟動表單上的釘選（📌）可以保持展開，Esc、點標題列與快捷鍵仍可收起，收起後釘選自動解除。
+- **Spaces**：agent 在 Herdr GUI 的哪個 space（含 sub-agent）由 `herdr-app ls` 得知；清單依 space 分段，段落順序跟著段內最優先的 agent（有人等你的 space 排最前），不在任何 space 的（cmux、herdr CLI、其他終端機的 `hc run`）歸「Other」，沒有任何 space 時維持平鋪。清單頂端的 Island 列（或清單內 `Tab`／`⇧Tab`）選擇收合的動態島只顯示哪個 space，右翼前面標示 space 名稱與藏起來的數量（「atoll +3」）；其他 space 的 Needs you／Error 照樣顯示在左翼，被藏起來的角色不冒泡泡。清單永遠顯示全部。Herdr app 執行中每 15 秒、以及出現還沒對應到 space 的新 agent 時重讀一次；Herdr app 沒開時全部歸 Other、動態島顯示全部。
 - **互動面板**：看近期終端機輸出、傳送訊息、回答 `blocked: question`、用按鍵排回應 permission prompt、中斷目前任務（1.5 秒內二次確認），或一鍵切回原終端機接手。送出狀態明確區分 Delivered / Agent started / Sent · unconfirmed / Failed，永不自動重送。回應完一個等待中的 agent、它確實離開等待後，面板自動切到下一個等最久的 agent（輸入框有未送出文字時不切），全部處理完顯示 All clear；標題列顯示還有幾個在等，`⌘]` 手動跳下一個。可在設定關閉自動切換。輸入框下方有快速回覆按鈕（預設「繼續」「照你的建議做」「跑測試，失敗就修到通過」，設定中可編輯，最多 5 個），點擊或 `⌘⇧1`–`⌘⇧5` 直接送出，⌥-點擊先放進輸入框修改。agent 還在 Working 時可以按 Queue（`⌥↩`）先排下一步，這個回合結束（Done，或停成 Idle）才送出，只送一次；中途 Needs you 不會拿它去回答，出錯時保留等你決定送出或取消，agent 退出就丟棄。排隊中的訊息顯示在輸入框上方（可 Edit／Cancel），清單與 hover card 標示 Queued，送出時冒泡泡；送不出去時文字放回輸入框。排隊訊息只在記憶體，Atoll 結束即丟棄。
 - **今日時間軸**：點動態島上的時鐘按鈕（或選單列「Today…」、清單底列的「Today」）展開 Today 窗格（同清單與啟動表單，`Esc` 回清單），依時間倒序列出今天每個回合結束的時間、agent、狀態、變更量與最後一句話，可依 agent 篩選；還沒打開過該 agent 面板的回合有一個點，標題列顯示未看數；點一列打開該 agent 的面板，已不在的 agent 標示 Gone。只保留今天（本機時間 00:00 起）最多 200 筆，只在記憶體。
 - **輸出搜尋**：面板按 `⌘F` 在終端機輸出上方打開搜尋列，不分大小寫比對畫面上顯示的文字（Messages only 打開時就是過濾後的內容），所有符合處高亮、顯示「3 / 12」；`↩`／`⇧↩` 下一個／上一個（到底循環），`Esc` 先關搜尋列、再按一次才返回清單。只搜尋已經讀進來的輸出，自動刷新時保留關鍵字並停在同一行附近；換 agent 或關閉面板就清掉。
@@ -110,5 +111,5 @@ scripts/                 build-app.sh、dev-run.sh、shell 包裝、占位 sprit
 ## 文件
 
 - [`spec.md`](.scratch/atoll/spec.md)：P0 規格、狀態對映、協定細節與已驗證事實
-- [`issues/`](.scratch/atoll/issues/)：實作 tickets（目前 01–26 皆已完成）
+- [`issues/`](.scratch/atoll/issues/)：實作 tickets
 - [`art/`](.scratch/atoll/art/)：風格探索 board 與 B / Toy Chunky 定稿美術

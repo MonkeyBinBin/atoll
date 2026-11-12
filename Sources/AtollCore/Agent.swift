@@ -155,6 +155,9 @@ public struct Agent: Identifiable, Equatable, Sendable {
     public var origin: String?
     /// The backend this agent comes from.
     public var source: AgentSource = .core
+    /// The Herdr space showing its terminal (ticket 42); nil = not in the Herdr window (Other).
+    public var spaceID: String?
+    public var spaceName: String?
     /// What its last finished turn changed in git; cleared when the next turn starts.
     public var changeSummary: ChangeSummary?
     /// Why it waits, read once from its screen when the source gave no `statusMessage`; Needs you only.

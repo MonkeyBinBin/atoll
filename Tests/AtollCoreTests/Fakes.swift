@@ -106,7 +106,18 @@ final class FakeHerdrClient: HerdrClient, @unchecked Sendable {
 
     func templates() async throws -> [TemplateInfo] { [] }
     func isHerdrAppRunning() async -> Bool { appRunning }
-    func spaces() async throws -> [HerdrSpace] { [] }
+    var spacesResult: Result<[HerdrSpace], HerdrError> = .success([])
+    private var _spacesCalls = 0
+    var spacesCalls: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _spacesCalls
+    }
+
+    func spaces() async throws -> [HerdrSpace] {
+        lock.withLock { _spacesCalls += 1 }
+        return try spacesResult.get()
+    }
 
     func launch(_ request: LaunchRequest) async throws -> LaunchOutput {
         record(.launch(request))

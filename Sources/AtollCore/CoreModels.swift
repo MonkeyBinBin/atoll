@@ -265,9 +265,12 @@ public struct LaunchOutput: Equatable, Sendable {
 public struct HerdrSpace: Equatable, Sendable, Identifiable {
     public var id: String
     public var name: String
+    /// Terminal addresses with a pane (or shown as a sub-agent) in this space.
+    public var terminals: [String]
 
-    public init(id: String, name: String) {
+    public init(id: String, name: String, terminals: [String] = []) {
         self.id = id
         self.name = name
+        self.terminals = terminals
     }
 }

@@ -67,6 +67,9 @@ public final class AgentStore {
         /// up, not a turn.
         public var startupWorkingWithin: TimeInterval = 3
         public var startupSettleWithin: TimeInterval = 10
+        /// Herdr spaces are re-read (`herdr-app ls`) this often while the Herdr app runs: renames and moved
+        /// panes have no event.
+        public var spaceRefreshInterval: TimeInterval = 15
         public init() {}
     }
 
@@ -106,8 +109,34 @@ public final class AgentStore {
         return !connected.isEmpty && connected.allSatisfy(\.isStale)
     }
     public var showUnreportedTerminals = false
-    /// Whether the Herdr GUI is running (launch / focus need it).
-    public var herdrAppRunning = false
+    /// Whether the Herdr GUI is running (launch / focus need it; spaces come from it).
+    public var herdrAppRunning = false {
+        didSet {
+            guard herdrAppRunning != oldValue else { return }
+            if herdrAppRunning {
+                refreshSpaces()
+            } else {
+                spaceGeneration += 1
+                spaceRefreshing = false
+                spaceRefreshAgain = false
+                spaceTimer?.cancel()
+                spaceTimer = nil
+                if !spaces.isEmpty {
+                    spaces = []
+                    rebuild()
+                }
+            }
+        }
+    }
+
+    /// Herdr GUI spaces (ticket 42), in Herdr's order; empty while the Herdr app isn't running.
+    public private(set) var spaces: [HerdrSpace] = []
+    private var spaceTimer: ScheduledAction?
+    private var spaceRefreshing = false
+    private var spaceRefreshAgain = false
+    private var spaceGeneration = 0
+    /// herdr-core agents a refresh already ran for while they had no space (each triggers one).
+    private var spaceMisses: Set<String> = []
 
     /// Visible agents, sorted by priority.
     public private(set) var agents: [Agent] = []
@@ -688,6 +717,11 @@ public final class AgentStore {
 
     private func rebuild() {
         reconcileEnded()
+        var spaceByTerminal: [String: HerdrSpace] = [:]
+        for space in spaces {
+            for terminal in space.terminals where spaceByTerminal[terminal] == nil { spaceByTerminal[terminal] = space }
+        }
+        var unmapped = false
         var list: [(Agent, Int)] = []
         for record in records.values where isVisible(record) {
             let info = record.info
@@ -712,6 +746,14 @@ public final class AgentStore {
                 origin: (info.labels[Self.originLabel] ?? info.labels[Self.legacyOriginLabel]).flatMap { $0.isEmpty ? nil : $0 }
             )
             agent.source = record.source
+            if record.source == .core {
+                if let space = spaceByTerminal[info.address] {
+                    agent.spaceID = space.id
+                    agent.spaceName = space.name
+                } else if herdrAppRunning, spaceMisses.insert(info.address).inserted {
+                    unmapped = true
+                }
+            }
             agent.changeSummary = changeSummaries[info.address]
             agent.finalMessage = finalMessages[info.address]
             if state.isNeedsYou, let since = agent.waitingSince, previewEpisodes[info.address] == since {
@@ -736,6 +778,8 @@ public final class AgentStore {
         markNoOutput(&built)
         agents = built
         notifyWhenDone = notifyWhenDone.filter { records[$0] != nil }
+        spaceMisses = spaceMisses.filter { records[$0] != nil }
+        if unmapped { refreshSpaces() }
         reconcileQueued()
         for address in Set(finalMessages.keys).union(finalReads.keys) where records[address] == nil {
             dropFinalMessage(address, rebuilding: false)
@@ -758,6 +802,39 @@ public final class AgentStore {
         dropStaleChanges()
         for address in newcomers {
             if let agent = agent(address) { onSharedTree?(agent) }
+        }
+    }
+
+    // MARK: Herdr spaces
+
+    /// Re-reads the Herdr app's spaces now (then every `spaceRefreshInterval`). A failed read keeps the last ones.
+    public func refreshSpaces() {
+        guard herdrAppRunning else { return }
+        guard !spaceRefreshing else {
+            spaceRefreshAgain = true
+            return
+        }
+        spaceRefreshing = true
+        spaceTimer?.cancel()
+        spaceTimer = nil
+        let generation = spaceGeneration
+        Task { [client] in
+            let result = try? await client.spaces()
+            guard generation == self.spaceGeneration else { return }
+            self.spaceRefreshing = false
+            if let result, result != self.spaces {
+                self.spaces = result
+                self.rebuild()
+            }
+            if self.spaceRefreshAgain {
+                self.spaceRefreshAgain = false
+                self.refreshSpaces()
+            } else {
+                self.spaceTimer = self.scheduler.schedule(after: self.timing.spaceRefreshInterval) { [weak self] in
+                    self?.spaceTimer = nil
+                    self?.refreshSpaces()
+                }
+            }
         }
     }
 

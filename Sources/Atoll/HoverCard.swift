@@ -103,7 +103,8 @@ struct HoverCardView: View {
                 ChangeSummaryLabel(summary: summary, lineLimit: 2)
             }
             SharedTreeLabel(agent: agent, store: store, lineLimit: 2)
-            Text(Format.abbreviatePath(agent.projectPath) + (agent.whereLabel.map { " · \($0)" } ?? ""))
+            Text(Format.abbreviatePath(agent.projectPath) + (agent.spaceName.map { " · space \($0)" } ?? "")
+                 + (agent.whereLabel.map { " · \($0)" } ?? ""))
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)

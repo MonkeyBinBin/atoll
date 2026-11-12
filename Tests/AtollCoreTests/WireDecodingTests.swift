@@ -84,6 +84,16 @@ struct WireDecodingTests {
         #expect(CoreRPCAdapter.terminalsShown(inHerdrAppLs: Data(ls.utf8)) == ["t3z", "t50", "t41"])
     }
 
+    @Test("herdr-app ls: each space's terminals, sub-agents included; a missing name falls back to the id")
+    func spacesFromLs() {
+        let ls = #"{"spaces":[{"id":"sp1","name":"atoll","tabs":[{"id":"tb1","terminals":[{"terminal":"t3z","sub_agents":[{"terminal":"t50","sub_agents":[]}]}]},{"id":"tb3","terminals":[{"terminal":"t7","sub_agents":["t6f"]}]}]},{"id":"sp2","name":null,"tabs":[]},{"name":"no id","tabs":[]}],"recent":[]}"#
+        #expect(CoreRPCAdapter.spaces(inHerdrAppLs: Data(ls.utf8)) == [
+            HerdrSpace(id: "sp1", name: "atoll", terminals: ["t3z", "t50", "t7", "t6f"]),
+            HerdrSpace(id: "sp2", name: "sp2", terminals: []),
+        ])
+        #expect(CoreRPCAdapter.spaces(inHerdrAppLs: Data("not json".utf8)) == [])
+    }
+
     @Test func herdrAppAddress() {
         #expect(CoreRPCAdapter.terminalAddress(inHerdrAppOutput: Data(#"{"ok":true,"tab":"tb1","terminal":"t4a"}"#.utf8)) == "t4a")
         #expect(CoreRPCAdapter.terminalAddress(inHerdrAppOutput: Data(#"{"ok":true}"#.utf8)) == nil)

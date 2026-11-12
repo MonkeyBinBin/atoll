@@ -81,6 +81,8 @@ final class AppSettings {
     var waitingHotKey: HotKey { didSet { save(waitingHotKey, "waitingHotKey") } }
     /// Herdr space id for new agents; empty = Herdr's selected space.
     var defaultSpace: String { didSet { defaults.set(defaultSpace, forKey: "defaultSpace") } }
+    /// The collapsed island's space filter (`SpaceFilter.stored`); empty = all agents.
+    var islandSpace: String { didSet { defaults.set(islandSpace, forKey: "islandSpace") } }
     var recentFolders: [String] { didSet { defaults.set(recentFolders, forKey: "recentFolders") } }
     /// The launch form's last launches and saved presets (tasks included), on this Mac only.
     var recentLaunches: [LaunchRecipe] { didSet { save(recentLaunches, "recentLaunches") } }
@@ -151,6 +153,7 @@ final class AppSettings {
         listHotKey = Self.load("listHotKey", defaults) ?? .defaultList
         waitingHotKey = Self.load("waitingHotKey", defaults) ?? .defaultWaiting
         defaultSpace = defaults.string(forKey: "defaultSpace") ?? ""
+        islandSpace = defaults.string(forKey: "islandSpace") ?? ""
         recentFolders = defaults.stringArray(forKey: "recentFolders") ?? []
         recentLaunches = Self.load("recentLaunches", defaults) ?? []
         launchPresets = Self.load("launchPresets", defaults) ?? []
