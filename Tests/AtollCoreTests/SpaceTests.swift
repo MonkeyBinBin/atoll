@@ -140,6 +140,18 @@ struct SpaceTests {
         #expect(SpaceGrouping.choices(agents: list, spaces: [], selected: .all).isEmpty)
     }
 
+    @Test("launch space: the agent's, else the island's space, else Settings' default")
+    func launchSpace() {
+        let pick = SpaceGrouping.launchSpace
+        #expect(pick("sp2", .space("sp1"), "sp9") == ("sp2", .agent))
+        #expect(pick(nil, .space("sp1"), "sp9") == ("sp1", .island))
+        #expect(pick("", .space("sp1"), "") == ("sp1", .island))
+        // All and Other don't name a space.
+        #expect(pick(nil, .all, "sp9") == ("sp9", .settings))
+        #expect(pick(nil, .other, "sp9") == ("sp9", .settings))
+        #expect(pick(nil, .all, "") == ("", nil))
+    }
+
     @Test("stored form round-trips")
     func stored() {
         for filter in [SpaceFilter.all, .other, .space("sp1")] {

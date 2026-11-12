@@ -94,6 +94,20 @@ public enum SpaceGrouping {
         return result
     }
 
+    public enum LaunchSpaceSource: Equatable, Sendable {
+        case agent, island, settings
+    }
+
+    /// The launch form's starting space (ticket 43): the agent it was opened from (Launch in new worktree),
+    /// else the island's space (All / Other don't name one), else Settings' default. Empty = Herdr's selected
+    /// space; `source` is nil then.
+    public static func launchSpace(agentSpace: String?, island: SpaceFilter, defaultSpace: String)
+        -> (space: String, source: LaunchSpaceSource?) {
+        if let agentSpace, !agentSpace.isEmpty { return (agentSpace, .agent) }
+        if case .space(let id) = island { return (id, .island) }
+        return (defaultSpace, defaultSpace.isEmpty ? nil : .settings)
+    }
+
     /// The collapsed island under a filter: its agents, plus anyone elsewhere who needs attention
     /// (a waiting or failed agent is never hidden by the filter). Order is kept.
     public static func islandAgents(_ agents: [Agent], filter: SpaceFilter) -> [Agent] {

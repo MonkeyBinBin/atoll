@@ -376,7 +376,7 @@ final class IslandModel {
         case .codex: "builtin:codex"
         case .generic: nil
         }
-        openLaunch(prefill: LaunchPrefill(folder: agent.projectPath, optionID: toolID, worktree: true))
+        openLaunch(prefill: LaunchPrefill(folder: agent.projectPath, optionID: toolID, worktree: true, space: agent.spaceID))
     }
 
     /// Values the launch form starts with once (taken when it appears).
@@ -384,6 +384,8 @@ final class IslandModel {
         var folder: String
         var optionID: String?
         var worktree: Bool
+        /// The Herdr space of the agent it came from (ticket 43).
+        var space: String?
     }
 
     var launchPrefill: LaunchPrefill?

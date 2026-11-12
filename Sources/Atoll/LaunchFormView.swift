@@ -34,6 +34,9 @@ struct LaunchFormView: View {
     @State private var name = ""
     @State private var spaces: [HerdrSpace] = []
     @State private var space = ""
+    /// Where the starting space came from, while the user hasn't changed it (ticket 43).
+    @State private var spaceOrigin: SpaceGrouping.LaunchSpaceSource?
+    @State private var startingSpace = ""
     /// The folder's repo, when it is one (offers "New worktree").
     @State private var source: WorktreeSource?
     @State private var useWorktree = false
@@ -144,11 +147,19 @@ struct LaunchFormView: View {
                 }
                 GridRow {
                     label("Space")
-                    Picker("", selection: $space) {
-                        Text("Selected space").tag("")
-                        ForEach(spaces) { Text($0.name).tag($0.id) }
+                    HStack(spacing: 6) {
+                        Picker("", selection: $space) {
+                            Text("Selected space").tag("")
+                            ForEach(spaces) { Text($0.name).tag($0.id) }
+                        }
+                        .labelsHidden()
+                        if let note = spaceNote {
+                            Text(note)
+                                .font(.system(size: 11))
+                                .foregroundStyle(.tertiary)
+                                .fixedSize()
+                        }
                     }
-                    .labelsHidden()
                 }
             }
             .font(.system(size: 12))
@@ -294,15 +305,30 @@ struct LaunchFormView: View {
         }
     }
 
+    /// "from island" / "same as agent" while the starting space is still the one picked.
+    private var spaceNote: String? {
+        guard !space.isEmpty, space == startingSpace else { return nil }
+        return switch spaceOrigin {
+        case .island: "from island"
+        case .agent: "same as agent"
+        case .settings, nil: nil
+        }
+    }
+
     private func load() async {
+        var agentSpace: String?
         if let prefill = model.launchPrefill {
             model.launchPrefill = nil
             folder = prefill.folder
             if let id = prefill.optionID { optionID = id }
             useWorktree = prefill.worktree
+            agentSpace = prefill.space
         }
         if folder.isEmpty { folder = settings.recentFolders.first ?? "" }
-        space = settings.defaultSpace
+        let start = SpaceGrouping.launchSpace(agentSpace: agentSpace, island: model.spaceFilter, defaultSpace: settings.defaultSpace)
+        space = start.space
+        startingSpace = start.space
+        spaceOrigin = start.source
         taskFocused = true
         if let templates = try? await client?.templates() {
             options = LaunchOption.builtIns + templates.filter { $0.error == nil }.map(LaunchOption.template)
@@ -437,6 +463,7 @@ struct LaunchFormView: View {
         task = r.task
         name = r.name
         space = r.space
+        spaceOrigin = nil
         branchText = ""
         branchEdited = false
         if r.folder == folder, sourceFolder == folder {
