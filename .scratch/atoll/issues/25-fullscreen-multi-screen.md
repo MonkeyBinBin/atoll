@@ -23,3 +23,4 @@
 - 2026-11-11（agent）：實作：`FullScreenPresence.collapsedAgents`（AtollCore）決定收合態要排入哪些角色，nil 代表隱藏；`FullScreenDetector` 在 `activeSpaceDidChange`、`didActivateApplication`、換螢幕時於 0／0.7／1.6 秒各檢查一次（等全螢幕動畫結束）。`IslandModel.hiddenByFullScreen` 只在收合態成立，所以快捷鍵展開照常出現，收合後再隱藏；泡泡在隱藏時不出現，Attention only 時只給顯示中的角色。Follow mouse 以 `displayID = UInt32.max` 表示，每秒檢查游標所在螢幕，展開時不移動。順手修掉一個既有的耦合：`AppDelegate.applySettings` 在追蹤範圍內同步呼叫 `refreshScreen()`，連帶追蹤了 `mode` 與 `agents`，導致展開時重新選螢幕，且每次 agent 狀態變化都重新定位；改成延到追蹤範圍外執行。另外，來源離線時 agent 為 Unknown，不算需要注意，所以 Attention only 下動態島會隱藏。
 - 2026-11-11（agent）：dev-run 實測（以探測程式在主螢幕開原生全螢幕視窗，OSC 7501 做假狀態）：全螢幕＋只有 Working → 隱藏；測試 agent 轉 Needs you → 出現且只排入它、泡泡在它上方；離開全螢幕 → 恢復全部；隱藏時展開清單 → 出現，收合 → 再隱藏；Follow mouse 游標移到上方螢幕 → 跟過去（該螢幕因 Herdr 全螢幕而隱藏），展開時移回下方 → 不動，收合後 1.2 秒內跟過去。Hide 模式只有單元測試，未實測；螢幕拔除時退回的行為也未實測。第一條的偵測方法已確認，但列出的三種誤判情況都還沒驗證，所以維持未勾選。`FullScreenPresenceTests` 5 個測試，全套 157 個通過。
 
+- 2026-11-13（agent）：未驗證的誤判情境、Hide 模式與螢幕拔除拆到 53。
