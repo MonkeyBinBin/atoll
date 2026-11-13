@@ -103,6 +103,26 @@ struct CmuxTests {
         #expect(t.status?.kind == "question")
     }
 
+    @Test("cmux's own AskUserQuestion hook and the Notification after it keep the question open")
+    func questionAsCmuxSendsIt() throws {
+        // Recorded from cmux: PreToolUse(AskUserQuestion) → agent.hook.AskUserQuestion → Notification.
+        var s = CmuxSessions()
+        s.apply(hook("UserPromptSubmit"))
+        for name in ["PreToolUse", "AskUserQuestion"] {
+            var frame = hook(name)
+            var payload = frame["payload"] as! [String: Any]
+            payload["tool_name"] = "AskUserQuestion"
+            frame["payload"] = payload
+            s.apply(frame)
+        }
+        s.apply(hook("Notification"))
+        let t = try #require(s.terminals().first)
+        #expect(t.status?.state == "blocked")
+        #expect(t.status?.kind == "question")
+        s.apply(hook("PostToolUse"))
+        #expect(status(s) == "working")
+    }
+
     @Test("an idle-reminder Notification keeps the previous state (an unseen Done stays Done)")
     func idleReminder() {
         var s = CmuxSessions()

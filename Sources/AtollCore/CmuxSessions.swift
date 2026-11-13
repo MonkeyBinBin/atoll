@@ -64,9 +64,10 @@ public struct CmuxSessions: Sendable {
         switch hook {
         case "SessionEnd":
             session.ended = true
-        case "SubagentStart", "SubagentStop", "PreCompact", "Notification":
+        case "SubagentStart", "SubagentStop", "PreCompact", "Notification", "AskUserQuestion":
             // Sub-agent and housekeeping hooks don't change the main agent's state. Notification
             // follows a PermissionRequest, or is an idle reminder: either way keep the state.
+            // cmux's own AskUserQuestion hook repeats the PreToolUse(AskUserQuestion) before it.
             break
         default:
             session.lastHook = hook

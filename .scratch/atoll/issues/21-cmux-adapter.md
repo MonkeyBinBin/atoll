@@ -8,7 +8,7 @@
 
 - [x] 事前驗證：真正的權限 prompt 會產生哪些事件（實測為 `agent.hook.PermissionRequest`，帶 session_id）、`send`／`send-key` 被拒絕時的 exit code 與訊息（`Error: <code>: <message>`，exit 1）
 - [x] cmux 沒開時不會被啟動：所有呼叫都以 cmux 執行中為前提；實測 cmux 關閉時 Atoll 執行期間沒有任何 cmux 子程序，cmux 也沒有被開啟
-- [ ] `AskUserQuestion` 提問：依 `PreToolUse` 的 tool_name 判斷，尚未用真實提問驗證
+- [x] `AskUserQuestion` 提問：依 `PreToolUse` 的 tool_name 判斷，cmux 自訂的 `AskUserQuestion` hook 不改變狀態（2026-11-13 實測）
 - [x] 只用 `agent.hook.*`（不用重複的 `feed.item.*`）；`SubagentStop` 不把主 agent 標成 Done；跨 `boot_id` 的歷史不沿用；以 hook 的 `_ppid` 判斷程序是否仍在（改以 pid 而非 `surface.list` 過濾）
 - [x] 重播的歷史摺疊成 snapshot，不觸發通知或特效
 - [x] 讀畫面 `read-screen --scrollback`、傳送 `send --paste` ＋ Enter、按鍵 `send-key`、聚焦 `surface.focus`；不使用 `--cursor-file`，結束時關閉 `cmux events` 子程序
@@ -19,3 +19,4 @@
 
 - 2026-11-10（agent）：`CmuxAdapter`＋`CmuxSessions`：`cmux events --snapshot` 取得保留範圍，子程序 `cmux events --after … --reconnect` 重播歷史後發一份 snapshot（不觸發通知），之後比對成事件；cmux 關閉時終止子程序、來源離線，且不呼叫任何 cmux 指令。實測發現 herdr server 從 cmux surface 啟動，herdr 的 Claude 也會以同一個 surface 回報 hook，所以改以 `session_id` 識別，並用 sysctl 讀取 `_ppid` 程序環境，排除屬於 herdr／herdr-core 的 session。`Notification` 只在 workspace 側欄為 Waiting 時才算 Needs you，否則視為閒置提醒（cmux 遮掉了 notification 類型，真正的權限 prompt 尚未實際觀察到）。按鍵：`send-key` 不認得數字，單一字元改用 `send` 打字。已對你 cmux 裡的 dotfiles Claude 實測顯示與讀輸出；聚焦、送字、按鍵在自建的測試 workspace 驗證後已刪除。
 - 2026-11-10（agent，更正）：權限判斷改為 `PermissionRequest` → Needs you · Permission，`Notification` 維持原狀態，不再參考 workspace 側欄（同一 workspace 會有 herdr 的 session 共用，會誤判）。在自建的 cmux workspace 以 manual mode 的真實 Claude 驗證：app 傳送 → 權限 prompt → 顯示 Needs you · Permission → 面板按「1」→ 指令執行、轉為 Done。agent 改以程序 pid 識別，`/clear` 後仍是同一個角色。Claude Code 在 cmux 的畫面（右側面板、statusline 圖形、context 統計、快捷鍵列、回合摘要、橫幅）由 Messages only 過濾。cmux 裡的 Codex 尚未實際觀察。
+- 2026-11-13（agent）：`AskUserQuestion` 實測：cmux 送出的順序是 `PreToolUse`（tool_name `AskUserQuestion`）→ cmux 自訂的 `agent.hook.AskUserQuestion` → `Notification`。第二個 hook 被當成一般 hook，把 `lastHook` 蓋掉，狀態落到 Unknown。修正：`AskUserQuestion` hook 跟 `Notification` 一樣不改變狀態；新增以實測序列為資料的測試，全套 499 個通過。使用者重測後顯示 Needs you · Question。
