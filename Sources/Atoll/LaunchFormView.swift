@@ -33,6 +33,8 @@ struct LaunchFormView: View {
     @State private var task = ""
     @State private var name = ""
     @State private var spaces: [HerdrSpace] = []
+    /// False until `spaces` loads and the starting space is checked against it.
+    @State private var spacesLoaded = false
     @State private var space: LaunchSpaceChoice = .selected
     /// The name for a new space (`space == .new`); empty = Herdr names it after the folder.
     @State private var newSpaceName = ""
@@ -273,7 +275,7 @@ struct LaunchFormView: View {
     }
 
     private var canLaunch: Bool {
-        !folder.isEmpty && !store.isLaunchBusy
+        spacesLoaded && !folder.isEmpty && !store.isLaunchBusy
             && (plan == nil || !branch.trimmingCharacters(in: .whitespaces).isEmpty)
     }
 
@@ -355,15 +357,17 @@ struct LaunchFormView: View {
         startingSpace = space
         spaceOrigin = start.source
         taskFocused = true
+        // Spaces first: Launch waits for them (a stale starting space must fall back first), not for templates.
+        let list = await store.launchSpaces()
+        spaces = list
+        if case .existing(let id) = space, !list.contains(where: { $0.id == id }) { space = .selected }
+        spacesLoaded = true
         if let templates = try? await client?.templates() {
             options = LaunchOption.builtIns + templates.filter { $0.error == nil }.map(LaunchOption.template)
             templatesLoaded = true
         } else {
             templatesLoaded = false
         }
-        let list = await store.launchSpaces()
-        spaces = list
-        if case .existing(let id) = space, !list.contains(where: { $0.id == id }) { space = .selected }
         if let recipe = deferredRecipe {
             deferredRecipe = nil
             apply(recipe)
