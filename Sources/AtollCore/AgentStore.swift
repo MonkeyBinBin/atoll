@@ -348,7 +348,10 @@ public final class AgentStore {
     private var colors: [String: Int] = [:]
     private var nextColor = 0
     private var nextOrder = 0
-    private var runtimes: [String: AgentRuntime] = [:]
+    /// Not observed: timers come and go on every schedule / cancel, and nothing renders from it (what views
+    /// show is copied into `agents` by `rebuild`; `isReadingWaitingScreen` is a one-off read with its own
+    /// `onWaitingDetails` callback).
+    @ObservationIgnored private var runtimes: [String: AgentRuntime] = [:]
     private var launching: Set<String> = []
     private var snapshotSeq: [AgentSource: UInt64] = [:]
     private var staleTimers: [AgentSource: ScheduledAction] = [:]

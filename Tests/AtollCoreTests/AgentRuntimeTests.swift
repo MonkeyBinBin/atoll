@@ -3,6 +3,8 @@ import Testing
 @testable import AtollCore
 
 /// Ticket 51: an agent that goes away leaves no per-agent state or pending timer behind.
+/// A deliberate exception to the spec's "public behaviour only" rule: leftovers have no outward effect to
+/// observe, so these tests look inside (`AgentStore.residue(of:)`, `FakeScheduler.liveCount`).
 @MainActor
 @Suite("Agent runtime teardown")
 struct AgentRuntimeTests {
