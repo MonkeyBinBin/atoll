@@ -226,3 +226,15 @@ public struct Agent: Identifiable, Equatable, Sendable {
 
     public var replyMode: ReplyMode { .forState(state) }
 }
+
+extension AgentState {
+    /// Entering this state ends a turn: Done or Exited, or Idle straight from Working / Starting (stopped
+    /// without reporting Done). Error ends it too but is handled on its own; Needs you is mid-turn.
+    func endsTurn(from previous: AgentState?) -> Bool {
+        switch self {
+        case .done, .exited: true
+        case .idle: previous == .working || previous == .starting
+        default: false
+        }
+    }
+}

@@ -179,10 +179,7 @@ public final class AgentStore {
     public var reminderDelay: TimeInterval? {
         didSet {
             guard reminderDelay != oldValue else { return }
-            for address in runtimes.keys {
-                cancel(.reminder, for: address)
-                runtimes[address]?.reminderEpisode = nil
-            }
+            reminders.delay = reminderDelay
             reconcileReminders()
         }
     }
@@ -246,12 +243,8 @@ public final class AgentStore {
 
     public var changeProbe: (any ChangeProbing)? {
         didSet {
+            changes.probe = changeProbe
             guard changeProbe == nil, oldValue != nil else { return }
-            for address in runtimes.keys {
-                runtimes[address]?.openTurn = nil
-                runtimes[address]?.changeSummary = nil
-                runtimes[address]?.summaryGeneration = nil
-            }
             rebuild()
         }
     }
@@ -294,45 +287,23 @@ public final class AgentStore {
         var startupWorking = false
     }
 
-    /// Per-agent working state that lives and dies with the agent's record (ticket 51): `rebuild` tears it
-    /// down (timers cancelled, git baseline dropped) as soon as the record is gone. Kept beside `records`, not
-    /// in `Record`, because event handling copies and replaces records. Published per-agent dictionaries
-    /// (`sendStates`…) stay separate, since views observe each one, and are pruned at the same moment.
+    /// Per-agent state of the store's own features (interrupt, list response, acknowledgement) that lives and
+    /// dies with the agent's record. The larger features keep theirs in their trackers (`previews`, `finals`,
+    /// `reminders`, `changes`); `forget(_:)` clears all of it when the record goes.
     private struct AgentRuntime {
         enum Timer: Hashable {
-            case ended, interruptConfirm, interruptFeedback, reminder, preview, response, finalMessage
+            case ended, interruptConfirm, interruptFeedback, response
         }
 
         var timers: [Timer: ScheduledAction] = [:]
         /// Done and opened here; local only, never written back to Herdr.
         var acknowledged = false
         var interruptFeedback: InterruptOutcome?
-        /// Needs-you episode (its `waitingSince`) whose screen was read, or is being read; its preview and
-        /// permission keys, current episode only; and whether that read is over, found or not.
-        var previewEpisode: Date?
-        var preview: WaitingPreview?
-        var choices: PermissionChoices?
-        var previewResolved: Date?
         /// Episode the list's Allow / Deny belongs to; a "No longer waiting" note outlives it on its own timer.
         var responseEpisode: Date?
-        /// Needs-you episode the pending reminder is for, and the last one reminded (or skipped): never twice.
-        var reminderEpisode: Date?
-        var remindedEpisode: Date?
-        /// The turn in progress, with its git baseline being captured as it started; the last finished turn's
-        /// summary; the working-tree top level last seen (from baselines and summaries); and the generation
-        /// stamped per turn start / finish so a late git result never lands on a newer turn.
-        var openTurn: Task<TurnBaseline?, Never>?
-        var changeSummary: ChangeSummary?
-        var toplevel: String?
-        var summaryGeneration: Int?
-        /// Final message of the last finished turn, and the token of its pending read: a new turn, or the
-        /// agent going away, clears the token so a late result is thrown away.
-        var finalMessage: TurnFinalMessage?
-        var finalRead: Int?
 
         @MainActor func tearDown() {
             timers.values.forEach { $0.cancel() }
-            openTurn?.cancel()
         }
     }
 
@@ -348,10 +319,14 @@ public final class AgentStore {
     private var colors: [String: Int] = [:]
     private var nextColor = 0
     private var nextOrder = 0
-    /// Not observed: timers come and go on every schedule / cancel, and nothing renders from it (what views
+    /// Not observed: timers come and go on every schedule / cancel, and nothing renders from these (what views
     /// show is copied into `agents` by `rebuild`; `isReadingWaitingScreen` is a one-off read with its own
     /// `onWaitingDetails` callback).
     @ObservationIgnored private var runtimes: [String: AgentRuntime] = [:]
+    @ObservationIgnored private let previews: WaitingPreviewTracker
+    @ObservationIgnored private let finals: FinalMessageTracker
+    @ObservationIgnored private let reminders: WaitingReminderTracker
+    @ObservationIgnored private let changes = TurnChangeTracker()
     private var launching: Set<String> = []
     private var snapshotSeq: [AgentSource: UInt64] = [:]
     private var staleTimers: [AgentSource: ScheduledAction] = [:]
@@ -362,8 +337,6 @@ public final class AgentStore {
     /// Without a task an agent never goes working; its first status counts as started.
     private var launchHasTask = true
     private var outputRequest = 0
-    private var nextSummaryGeneration = 0
-    private var nextFinalRead = 0
     private var noOutputWatch = NoOutputWatch()
     private var noOutputTimer: ScheduledAction?
     /// Working-tree top level per project path ("" = not in a repo). Resolved once per path, never polled.
@@ -384,7 +357,44 @@ public final class AgentStore {
         self.clients = Dictionary(uniqueKeysWithValues: clients)
         self.scheduler = scheduler
         self.timing = timing
+        previews = WaitingPreviewTracker(scheduler: scheduler, delay: timing.previewDelay, lines: timing.previewLines)
+        finals = FinalMessageTracker(scheduler: scheduler, delay: timing.previewDelay, lines: timing.previewLines)
+        reminders = WaitingReminderTracker(scheduler: scheduler)
         for source in sources { sourceStatus[source] = SourceStatus() }
+        wireTrackers()
+    }
+
+    private func wireTrackers() {
+        let read: @MainActor (String, Int) async -> String? = { [weak self] address, lines in
+            guard let client = self?.client(for: address) else { return nil }
+            return try? await client.read(terminal: address, lines: lines).text
+        }
+        previews.read = read
+        previews.onChange = { [weak self] in self?.rebuild() }
+        previews.onResolved = { [weak self] address, episode in
+            guard let self, let agent = self.agent(address), agent.waitingSince == episode else { return }
+            self.onWaitingDetails?(agent)
+        }
+        finals.read = read
+        finals.currentState = { [weak self] address in self?.agent(address)?.state }
+        finals.onChange = { [weak self] in self?.rebuild() }
+        reminders.isStillWaiting = { [weak self] address, episode in
+            guard let agent = self?.agent(address) else { return false }
+            return agent.state.isNeedsYou && agent.waitingSince == episode
+        }
+        reminders.onDue = { [weak self] address, episode in
+            // The user is already looking at it.
+            guard let self, self.panel?.address != address, let agent = self.agent(address) else { return }
+            self.onReminder?(agent, self.scheduler.now.timeIntervalSince(episode))
+        }
+        changes.onChange = { [weak self] in self?.rebuild() }
+        changes.sharesTree = { [weak self] address, toplevel in
+            guard let self else { return false }
+            return self.agents.contains {
+                let tree = self.treeCache[$0.projectPath].flatMap { $0.isEmpty ? nil : $0 } ?? self.changes.toplevel(for: $0.address)
+                return $0.address != address && $0.state != .exited && tree == toplevel
+            }
+        }
     }
 
     public func start() {
@@ -633,13 +643,13 @@ public final class AgentStore {
         if let after = agent(address), after.state != before, isLive(source) {
             // Settling after start-up: reported as a first sighting, so nothing treats it as a finished turn.
             let from = startupSettle ? nil : before
-            if startupSettle { discardOpenTurn(address) }
+            if startupSettle { changes.discardOpenTurn(address) }
             onTransition?(after, from)
             advanceAfterTransition(after, from: from)
             notifyIfFinished(after, from: from)
             sendQueuedIfFinished(after, from: from)
-            trackTurn(after, from: from)
-            trackFinalMessage(after, from: from)
+            changes.track(after, from: from)
+            finals.track(after, from: from)
             trackTimeline(after, from: from)
         }
         if refreshOutput, panel?.address == address {
@@ -731,23 +741,45 @@ public final class AgentStore {
         runtimes[address]?.timers.removeValue(forKey: timer)?.cancel()
     }
 
-    /// Agents whose record is gone: their runtime goes, and their entries in the published dictionaries
-    /// (which their cancelled timers would otherwise have cleared). A `.sending` queued message stays until its
-    /// send finishes (`reconcileQueued`), so its failure still reaches `onQueuedFailed`.
-    private func tearDownGone() {
-        for (address, runtime) in runtimes where records[address] == nil {
-            runtime.tearDown()
-            runtimes[address] = nil
-        }
-        func kept<V>(_ dict: [String: V]) -> [String: V]? {
-            dict.keys.contains { records[$0] == nil } ? dict.filter { records[$0.key] != nil } : nil
-        }
-        if let kept = kept(sendStates) { sendStates = kept }
-        if let kept = kept(keyStates) { keyStates = kept }
-        if let kept = kept(permissionResponses) { permissionResponses = kept }
-        if let kept = kept(interruptStates) { interruptStates = kept }
-        if let kept = kept(lastInterruptError) { lastInterruptError = kept }
+    /// The one place an agent's per-agent state goes away: every agent something is still held for whose record
+    /// is gone. Two exceptions: a `.sending` queued message stays until its send finishes, so its failure still
+    /// reaches `onQueuedFailed`; and `launching`, which names a terminal before its record exists.
+    private func forgetGone() {
+        var held = Set(runtimes.keys)
+        held.formUnion(previews.addresses)
+        held.formUnion(finals.addresses)
+        held.formUnion(reminders.addresses)
+        held.formUnion(changes.addresses)
+        held.formUnion(sendStates.keys)
+        held.formUnion(keyStates.keys)
+        held.formUnion(permissionResponses.keys)
+        held.formUnion(interruptStates.keys)
+        held.formUnion(lastInterruptError.keys)
+        held.formUnion(queuedMessages.keys)
+        held.formUnion(notifyWhenDone)
+        held.formUnion(spaceMisses)
+        for address in held where !isKnown(address) { forget(address) }
     }
+
+    private func forget(_ address: String) {
+        runtimes.removeValue(forKey: address)?.tearDown()
+        previews.remove(address)
+        finals.remove(address)
+        reminders.remove(address)
+        changes.remove(address)
+        // Published: written only when present, since every write re-renders their viewers.
+        if sendStates[address] != nil { sendStates[address] = nil }
+        if keyStates[address] != nil { keyStates[address] = nil }
+        if permissionResponses[address] != nil { permissionResponses[address] = nil }
+        if interruptStates[address] != nil { interruptStates[address] = nil }
+        if lastInterruptError[address] != nil { lastInterruptError[address] = nil }
+        if let queued = queuedMessages[address], queued.status != .sending { queuedMessages[address] = nil }
+        if notifyWhenDone.contains(address) { notifyWhenDone.remove(address) }
+        spaceMisses.remove(address)
+    }
+
+    /// Whether the agent is (still) here. Late results check it before writing anything for an agent.
+    private func isKnown(_ address: String) -> Bool { records[address] != nil }
 
     /// Stamps `endedSince` and keeps one timer per ended agent to drop it from the list on time.
     private func reconcileEnded() {
@@ -774,7 +806,7 @@ public final class AgentStore {
     }
 
     private func rebuild() {
-        tearDownGone()
+        forgetGone()
         reconcileEnded()
         var spaceByTerminal: [String: HerdrSpace] = [:]
         for space in spaces {
@@ -813,12 +845,12 @@ public final class AgentStore {
                     unmapped = true
                 }
             }
-            agent.changeSummary = runtimes[info.address]?.changeSummary
-            agent.finalMessage = runtimes[info.address]?.finalMessage
-            if state.isNeedsYou, let since = agent.waitingSince, let runtime = runtimes[info.address],
-               runtime.previewEpisode == since {
-                agent.waitingPreview = runtime.preview
-                agent.permissionChoices = runtime.choices
+            agent.changeSummary = changes.summary(for: info.address)
+            agent.finalMessage = finals.message(for: info.address)
+            if state.isNeedsYou, let since = agent.waitingSince,
+               let found = previews.result(for: info.address, episode: since) {
+                agent.waitingPreview = found.preview
+                agent.permissionChoices = found.choices
             }
             list.append((agent, record.order))
         }
@@ -838,8 +870,6 @@ public final class AgentStore {
         markNoOutput(&built)
         // Every write re-renders all viewers (island, list, panel); most rebuilds change nothing.
         if built != agents { agents = built }
-        notifyWhenDone = notifyWhenDone.filter { records[$0] != nil }
-        spaceMisses = spaceMisses.filter { records[$0] != nil }
         if unmapped { refreshSpaces() }
         reconcileQueued()
         // Assigned only on a change: most rebuilds don't touch it, and every write re-renders its viewers.
@@ -850,7 +880,8 @@ public final class AgentStore {
             if updated != timeline { timeline = updated }
         }
         reconcileReminders()
-        reconcilePreviews()
+        previews.sync(agents)
+        reconcileResponses()
         dropStaleChanges()
         for address in newcomers {
             if let agent = agent(address) { onSharedTree?(agent) }
@@ -964,75 +995,9 @@ public final class AgentStore {
 
     // MARK: Waiting preview
 
-    /// One screen read per Needs-you episode: for the preview when the source didn't say why (`statusMessage`),
-    /// and for a permission dialog's answer keys even when it did.
-    /// Leaving Needs you (or a new episode) drops both: the only screen text kept with the panel closed.
-    private func reconcilePreviews() {
-        var waiting: [String: Agent] = [:]
-        for agent in agents where agent.state.isNeedsYou && agent.waitingSince != nil {
-            waiting[agent.address] = agent
-        }
-        for (address, runtime) in runtimes {
-            if let episode = runtime.previewEpisode, waiting[address]?.waitingSince != episode {
-                runtimes[address]?.previewEpisode = nil
-                runtimes[address]?.preview = nil
-                runtimes[address]?.choices = nil
-                runtimes[address]?.previewResolved = nil
-                cancel(.preview, for: address)
-            }
-            if let episode = runtime.responseEpisode, waiting[address]?.waitingSince != episode {
-                runtimes[address]?.responseEpisode = nil
-                if permissionResponses[address] != .noLongerWaiting { permissionResponses[address] = nil }
-            }
-        }
-        for agent in waiting.values where runtimes[agent.address]?.previewEpisode == nil && needsScreenRead(agent) {
-            guard let episode = agent.waitingSince else { continue }
-            let address = agent.address
-            runtimes[address, default: AgentRuntime()].previewEpisode = episode
-            schedule(.preview, for: address, after: timing.previewDelay) { [weak self] in
-                self?.readPreview(address, episode: episode)
-            }
-        }
-    }
-
-    private func needsScreenRead(_ agent: Agent) -> Bool {
-        if agent.statusMessage == nil { return true }
-        guard agent.tool != .generic, let kind = agent.state.blockedKind else { return false }
-        return kind == .permission || kind == .unspecified
-    }
-
-    private func readPreview(_ address: String, episode: Date) {
-        guard let agent = agent(address), agent.waitingSince == episode, let kind = agent.state.blockedKind else {
-            resolvePreview(address, episode: episode)
-            return
-        }
-        let lines = timing.previewLines
-        let tool = agent.tool
-        let keepPreview = agent.statusMessage == nil
-        Task { [client = client(for: address)] in
-            // A failed read just means no preview; never retried within the episode.
-            let output = try? await client.read(terminal: address, lines: lines)
-            guard self.runtimes[address]?.previewEpisode == episode else { return }
-            if let output, let preview = WaitingPreview.extract(from: output.text, tool: tool, kind: kind) {
-                if keepPreview { self.runtimes[address]?.preview = preview }
-                self.runtimes[address]?.choices = PermissionChoices.extract(from: output.text, tool: tool, kind: kind)
-            }
-            // Rebuild first so whoever hears "resolved" sees the preview and keys on the agent.
-            self.rebuild()
-            self.resolvePreview(address, episode: episode)
-        }
-    }
-
-    private func resolvePreview(_ address: String, episode: Date) {
-        guard runtimes[address]?.previewEpisode == episode else { return }
-        runtimes[address]?.previewResolved = episode
-        if let agent = agent(address), agent.waitingSince == episode { onWaitingDetails?(agent) }
-    }
-
     /// The current Needs-you episode's screen read hasn't finished yet (so its preview and keys may still come).
     public func isReadingWaitingScreen(_ address: String) -> Bool {
-        guard let runtime = runtimes[address], let episode = runtime.previewEpisode else { return false }
-        return runtime.previewResolved != episode
+        previews.isReading(address)
     }
 
     // MARK: Permission from the list
@@ -1072,9 +1037,23 @@ public final class AgentStore {
         }
     }
 
+    /// A list response belongs to one Needs-you episode: leaving it drops the response (a "No longer waiting"
+    /// note runs out on its own timer).
+    private func reconcileResponses() {
+        var waiting: [String: Date] = [:]
+        for agent in agents where agent.state.isNeedsYou {
+            if let since = agent.waitingSince { waiting[agent.address] = since }
+        }
+        for (address, runtime) in runtimes {
+            guard let episode = runtime.responseEpisode, waiting[address] != episode else { continue }
+            runtimes[address]?.responseEpisode = nil
+            if permissionResponses[address] != .noLongerWaiting { permissionResponses[address] = nil }
+        }
+    }
+
     private func showNoLongerWaiting(_ address: String) {
         // Not an agent here (any more): nothing to show the note on.
-        guard records[address] != nil else { return }
+        guard isKnown(address) else { return }
         runtimes[address]?.responseEpisode = nil
         permissionResponses[address] = .noLongerWaiting
         schedule(.response, for: address, after: timing.interruptFeedbackDuration) { [weak self] in
@@ -1132,95 +1111,11 @@ public final class AgentStore {
         return newcomers
     }
 
-    // MARK: Change summary
-
-    /// A turn starts on Working / Starting (Needs you and Unknown stay inside it); it finishes on Done,
-    /// Exited, or Idle that ends it. Error closes it without a summary (Error is its own announcement).
-    private func trackTurn(_ agent: Agent, from previous: AgentState?) {
-        guard let probe = changeProbe else { return }
-        let address = agent.address
-        let directory = agent.projectPath
-        let isOpen = runtimes[address]?.openTurn != nil
-        switch agent.state {
-        case .working, .starting:
-            guard !isOpen else { return }
-            let generation = bumpGeneration(address)
-            let hadSummary = runtimes[address]?.changeSummary != nil
-            runtimes[address]?.changeSummary = nil
-            let baseline = Task { await probe.baseline(in: directory) }
-            runtimes[address, default: AgentRuntime()].openTurn = baseline
-            Task {
-                guard let toplevel = await baseline.value?.toplevel,
-                      self.runtimes[address]?.summaryGeneration == generation else { return }
-                self.runtimes[address]?.toplevel = toplevel
-            }
-            if hadSummary { rebuild() }
-        case .done, .exited, .idle:
-            let wasRunning = previous == .working || previous == .starting
-            // Done → Idle / Exited is the same turn settling: keep its summary.
-            guard isOpen || (agent.state == .done && previous != nil) || wasRunning else { return }
-            let baseline = runtimes[address]?.openTurn
-            runtimes[address]?.openTurn = nil
-            let generation = bumpGeneration(address)
-            Task {
-                let base = await baseline?.value
-                let summary = await probe.summary(in: directory, since: base)
-                self.finishSummary(address, generation: generation, summary: summary)
-            }
-        case .error:
-            discardOpenTurn(address)
-        case .needsYou, .unknown:
-            break
-        }
-    }
-
-    /// Drops a turn's git baseline without a summary, and any summary still on its way.
-    private func discardOpenTurn(_ address: String) {
-        runtimes[address]?.openTurn?.cancel()
-        runtimes[address]?.openTurn = nil
-        bumpGeneration(address)
-    }
-
-    @discardableResult
-    private func bumpGeneration(_ address: String) -> Int {
-        // Store-wide, so a late result from an earlier agent at the same address can't match.
-        nextSummaryGeneration += 1
-        runtimes[address, default: AgentRuntime()].summaryGeneration = nextSummaryGeneration
-        return nextSummaryGeneration
-    }
-
-    private func finishSummary(_ address: String, generation: Int, summary: ChangeSummary?) {
-        guard changeProbe != nil, runtimes[address]?.summaryGeneration == generation, records[address] != nil else { return }
-        guard var summary else {
-            runtimes[address]?.changeSummary = nil
-            rebuild()
-            return
-        }
-        runtimes[address]?.toplevel = summary.toplevel
-        // Another agent still around in the same tree: the diff can't be pinned on this one.
-        summary.sharedTree = agents.contains {
-            let tree = treeCache[$0.projectPath].flatMap { $0.isEmpty ? nil : $0 } ?? runtimes[$0.address]?.toplevel
-            return $0.address != address && $0.state != .exited && tree == summary.toplevel
-        }
-        runtimes[address]?.changeSummary = summary
-        rebuild()
-    }
-
     // MARK: Notify when done
 
     public func toggleNotifyWhenDone(_ address: String) {
-        guard records[address] != nil else { return }
+        guard isKnown(address) else { return }
         if notifyWhenDone.contains(address) { notifyWhenDone.remove(address) } else { notifyWhenDone.insert(address) }
-    }
-
-    /// A turn ended: Done or Exited, or Idle straight from Working / Starting (stopped without reporting Done).
-    /// Error ends it too but is handled on its own; Needs you is mid-turn.
-    private static func turnEnded(_ state: AgentState, from previous: AgentState?) -> Bool {
-        switch state {
-        case .done, .exited: true
-        case .idle: previous == .working || previous == .starting
-        default: false
-        }
     }
 
     /// Error already notifies, so it just disarms the bell; Needs you keeps it armed.
@@ -1230,7 +1125,7 @@ public final class AgentStore {
             notifyWhenDone.remove(agent.address)
             return
         }
-        guard Self.turnEnded(agent.state, from: previous) else { return }
+        guard agent.state.endsTurn(from: previous) else { return }
         notifyWhenDone.remove(agent.address)
         onNotifyWhenDone?(agent)
     }
@@ -1271,7 +1166,7 @@ public final class AgentStore {
     /// Exited drops the message instead of sending it.
     private func sendQueuedIfFinished(_ agent: Agent, from previous: AgentState?) {
         guard let queued = queuedMessages[agent.address], queued.status == .waiting,
-              agent.state != .exited, Self.turnEnded(agent.state, from: previous) else { return }
+              agent.state != .exited, agent.state.endsTurn(from: previous) else { return }
         deliverQueued(agent.address, text: queued.text)
     }
 
@@ -1305,15 +1200,11 @@ public final class AgentStore {
         }
     }
 
-    /// State-based upkeep on every rebuild: Error holds a waiting message, Exited or removed drops it
-    /// (one already being sent finishes first). Sending only ever happens on a live transition, so a turn end
+    /// State-based upkeep on every rebuild: Error holds a waiting message, Exited drops it (one already being
+    /// sent finishes first; a removed agent's goes in `forget`). Sending only ever happens on a live transition, so a turn end
     /// missed while offline isn't caught up.
     private func reconcileQueued() {
         for (address, queued) in queuedMessages where queued.status != .sending {
-            guard records[address] != nil else {
-                queuedMessages[address] = nil
-                continue
-            }
             let state = agent(address)?.state
             if records[address]?.info.state == "finished" || state == .exited {
                 queuedMessages[address] = nil
@@ -1365,53 +1256,6 @@ public final class AgentStore {
         }
     }
 
-    // MARK: Turn final message
-
-    /// A finished turn without a `statusMessage` gets one screen read (after the screen settles);
-    /// the next turn, or the agent leaving, drops the result. Done / Idle → Exited is the same turn settling.
-    private func trackFinalMessage(_ agent: Agent, from previous: AgentState?) {
-        let settling = agent.state == .exited && (previous == .done || previous == .idle)
-        if Self.turnEnded(agent.state, from: previous), !settling {
-            dropFinalMessage(agent.address)
-            guard agent.statusMessage == nil, agent.tool != .generic else { return }
-            scheduleFinalRead(agent.address, tool: agent.tool)
-        } else if agent.state == .working || agent.state == .starting || agent.state.isNeedsYou {
-            dropFinalMessage(agent.address)
-        }
-    }
-
-    private func scheduleFinalRead(_ address: String, tool: AgentTool) {
-        nextFinalRead += 1
-        let token = nextFinalRead
-        runtimes[address, default: AgentRuntime()].finalRead = token
-        let lines = timing.previewLines
-        schedule(.finalMessage, for: address, after: timing.previewDelay) { [weak self] in
-            guard let self, self.runtimes[address]?.finalRead == token else { return }
-            // Moved on (Error, offline…) while the screen settled: nothing to read for this turn.
-            guard let state = self.agent(address)?.state, [.done, .idle, .exited].contains(state) else {
-                self.runtimes[address]?.finalRead = nil
-                return
-            }
-            Task { [client = self.client(for: address)] in
-                // A failed read just means no final message; never retried for this turn.
-                let output = try? await client.read(terminal: address, lines: lines)
-                guard self.runtimes[address]?.finalRead == token else { return }
-                self.runtimes[address]?.finalRead = nil
-                guard let output, let message = TurnFinalMessage.extract(from: output.text, tool: tool) else { return }
-                self.runtimes[address]?.finalMessage = message
-                self.rebuild()
-            }
-        }
-    }
-
-    private func dropFinalMessage(_ address: String) {
-        runtimes[address]?.finalRead = nil
-        cancel(.finalMessage, for: address)
-        guard runtimes[address]?.finalMessage != nil else { return }
-        runtimes[address]?.finalMessage = nil
-        rebuild()
-    }
-
     // MARK: Today timeline
 
     /// The user's Clear.
@@ -1425,7 +1269,7 @@ public final class AgentStore {
         guard timelineEnabled else { return }
         switch agent.state {
         case .done, .idle, .exited:
-            guard Self.turnEnded(agent.state, from: previous) else { return }
+            guard agent.state.endsTurn(from: previous) else { return }
             recordTimeline(agent)
         case .error:
             recordTimeline(agent)
@@ -1465,48 +1309,18 @@ public final class AgentStore {
 
     // MARK: Waiting reminders
 
-    /// Keeps one timer per live Needs-you episode. The delay counts from when the episode was first
-    /// seen here, so a snapshot carrying an old `waitingSince` doesn't remind the moment it arrives.
     private func reconcileReminders() {
         var waiting: [String: Date] = [:]
-        if reminderDelay != nil {
-            for agent in agents where agent.state.isNeedsYou {
-                if let since = agent.waitingSince { waiting[agent.address] = since }
-            }
+        for agent in agents where agent.state.isNeedsYou {
+            if let since = agent.waitingSince { waiting[agent.address] = since }
         }
-        for (address, runtime) in runtimes {
-            if let episode = runtime.reminderEpisode, waiting[address] != episode {
-                cancel(.reminder, for: address)
-                runtimes[address]?.reminderEpisode = nil
-            }
-            // Offline agents keep their mark: the same episode isn't re-reminded after a reconnect.
-            if let reminded = runtime.remindedEpisode, records[address]?.waitingSince != reminded {
-                runtimes[address]?.remindedEpisode = nil
-            }
-        }
-        guard let delay = reminderDelay else { return }
-        for (address, since) in waiting
-        where runtimes[address]?.reminderEpisode != since && runtimes[address]?.remindedEpisode != since {
-            runtimes[address, default: AgentRuntime()].reminderEpisode = since
-            schedule(.reminder, for: address, after: delay) { [weak self] in
-                self?.fireReminder(address, episode: since)
-            }
-        }
-    }
-
-    private func fireReminder(_ address: String, episode: Date) {
-        runtimes[address]?.reminderEpisode = nil
-        guard let agent = agent(address), agent.state.isNeedsYou, agent.waitingSince == episode else { return }
-        runtimes[address]?.remindedEpisode = episode
-        // The user is already looking at it.
-        if panel?.address == address { return }
-        onReminder?(agent, scheduler.now.timeIntervalSince(episode))
+        reminders.sync(waiting: waiting) { [records] in records[$0]?.waitingSince }
     }
 
     // MARK: Panel
 
     public func openPanel(_ address: String) {
-        guard records[address] != nil else { return }
+        guard isKnown(address) else { return }
         if panel?.address != address {
             outputRequest += 1
             panel = PanelState(address: address)
@@ -1688,8 +1502,7 @@ public final class AgentStore {
                 state = .failed(.unavailable(error.localizedDescription))
                 self.disarmAdvance(address)
             }
-            // Gone meanwhile: the caller still hears how it went, but no state is kept for it.
-            if self.records[address] != nil { self.sendStates[address] = state }
+            self.keepSendState(state, for: address)
             completion?(state)
         }
         return true
@@ -1705,6 +1518,12 @@ public final class AgentStore {
         if !send(text, to: address, completion: { completion($0) }) {
             completion(.failed(HerdrError(kind: "not_sent", message: "Another message is still being sent, or the reply was empty.")))
         }
+    }
+
+    /// Gone meanwhile: the caller still hears how it went, but no state is kept for it.
+    private func keepSendState(_ state: SendState, for address: String) {
+        guard isKnown(address) else { return }
+        sendStates[address] = state
     }
 
     public func clearSendState(_ address: String) {
@@ -1733,8 +1552,13 @@ public final class AgentStore {
                 result = .failed(key, .unavailable(error.localizedDescription))
                 self.disarmAdvance(address)
             }
-            if self.records[address] != nil { self.keyStates[address] = result }
+            self.keepKeyState(result, for: address)
         }
+    }
+
+    private func keepKeyState(_ state: KeyPressState, for address: String) {
+        guard isKnown(address) else { return }
+        keyStates[address] = state
     }
 
     // MARK: Interrupt
@@ -1778,7 +1602,7 @@ public final class AgentStore {
 
     private func finishInterrupt(_ address: String, outcome: InterruptOutcome, failure: HerdrError?) {
         // Gone while the interrupt was out: nothing to show it on.
-        guard records[address] != nil else { return }
+        guard isKnown(address) else { return }
         interruptStates[address] = .ready
         runtimes[address, default: AgentRuntime()].interruptFeedback = outcome
         lastInterruptError[address] = failure
@@ -1791,21 +1615,6 @@ public final class AgentStore {
     }
 
     public private(set) var lastInterruptError: [String: HerdrError] = [:]
-
-    /// Per-agent state still held for `address`; tests check that nothing outlives the agent (ticket 51).
-    func residue(of address: String) -> [String] {
-        var found: [String] = []
-        func check(_ name: String, _ held: Bool) { if held { found.append(name) } }
-        check("runtime", runtimes[address] != nil)
-        check("sendStates", sendStates[address] != nil)
-        check("keyStates", keyStates[address] != nil)
-        check("permissionResponses", permissionResponses[address] != nil)
-        check("interruptStates", interruptStates[address] != nil)
-        check("lastInterruptError", lastInterruptError[address] != nil)
-        check("notifyWhenDone", notifyWhenDone.contains(address))
-        check("queuedMessages", queuedMessages[address] != nil)
-        return found
-    }
 
     // MARK: Launch
 
