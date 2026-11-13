@@ -6,7 +6,7 @@
 
 **Status:** resolved
 
-- [ ] 事前驗證：找出不需要 Screen Recording／Accessibility 權限、也能可靠判斷「某個螢幕的前景 app 是否全螢幕」的方法（候選：`CGWindowListCopyWindowInfo` 找前景 app 中 layer 0、bounds 等於螢幕 frame 的視窗；只讀 bounds 與 owner，不讀視窗標題），並在 Comments 記下結論。另外確認以下情況不會誤判：開啟「自動隱藏選單列」、無邊框但沒有全螢幕的視窗、影片在瀏覽器內全螢幕
+- [x] 事前驗證：找出不需要 Screen Recording／Accessibility 權限、也能可靠判斷「某個螢幕的前景 app 是否全螢幕」的方法（候選：`CGWindowListCopyWindowInfo` 找前景 app 中 layer 0、bounds 等於螢幕 frame 的視窗；只讀 bounds 與 owner，不讀視窗標題），並在 Comments 記下結論。另外確認以下情況不會誤判：開啟「自動隱藏選單列」、無邊框但沒有全螢幕的視窗、影片在瀏覽器內全螢幕（誤判情境的驗證與修正見 53）
 - [x] 進出全螢幕時（`activeSpaceDidChange`、前景 app 改變）重新判斷，不用高頻輪詢
 - [x] Attention only：收合態只排入需要注意的角色，泡泡只出現在顯示中的角色上；全部恢復正常狀態時隱藏動態島，又有 agent 需要注意時再出現
 - [x] Hide：收合態與泡泡都隱藏
