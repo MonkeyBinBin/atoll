@@ -250,10 +250,13 @@ final class IslandController {
     private func handleKey(_ event: NSEvent) -> Bool {
         guard event.window === panel else { return false }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let step = Self.navigationStep(event, flags: flags)
+        if model.completionActive, let step {
+            model.requestCompletionKey(step == .next ? .next : .previous)
+            return true
+        }
         if model.completionActive, flags.isDisjoint(with: [.command, .option, .control]) {
             let key: IslandModel.CompletionKey? = switch event.keyCode {
-            case 126: .previous                                   // ↑
-            case 125: .next                                       // ↓
             case 48: flags.contains(.shift) ? .previous : .complete // Tab / ⇧Tab
             case 36, 76: flags.contains(.shift) ? nil : .accept   // Return / Enter
             case 53: .dismiss                                     // Esc
@@ -303,13 +306,34 @@ final class IslandController {
             default: break
             }
         }
+        if model.mode == .list, let step {
+            model.moveSelection(step == .next ? 1 : -1)
+            return true
+        }
         guard model.mode == .list, flags.isDisjoint(with: [.command, .option, .control]) else { return false }
         switch event.keyCode {
-        case 126: model.moveSelection(-1); return true // ↑
-        case 125: model.moveSelection(1); return true  // ↓
         case 36, 76: model.openSelected(); return true // Return / Enter
         case 48: model.cycleSpaceFilter(flags.contains(.shift) ? -1 : 1); return true // Tab / ⇧Tab
         default: return false
+        }
+    }
+
+    private enum NavigationStep { case next, previous }
+
+    /// ↓ / ⌃N and ↑ / ⌃P (readline-style). ⌃N / ⌃P are matched by character so other keyboard layouts work too.
+    private static func navigationStep(_ event: NSEvent, flags: NSEvent.ModifierFlags) -> NavigationStep? {
+        if flags.isDisjoint(with: [.command, .option, .control]) {
+            switch event.keyCode {
+            case 125: return .next     // ↓
+            case 126: return .previous // ↑
+            default: return nil
+            }
+        }
+        guard flags.subtracting(.capsLock) == .control else { return nil }
+        switch event.charactersIgnoringModifiers?.lowercased() {
+        case "n": return .next
+        case "p": return .previous
+        default: return nil
         }
     }
 
