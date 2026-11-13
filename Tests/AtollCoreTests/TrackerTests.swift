@@ -40,7 +40,6 @@ struct WaitingPreviewTrackerTests {
     let scheduler = FakeScheduler()
     let reads = ScreenReads(WaitingScreens.claudePermission)
     let tracker: WaitingPreviewTracker
-    var changes = 0
 
     init() {
         tracker = WaitingPreviewTracker(scheduler: scheduler, delay: 0.6, lines: 80)

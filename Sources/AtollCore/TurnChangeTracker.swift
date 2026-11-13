@@ -34,8 +34,6 @@ final class TurnChangeTracker {
     private var entries: [String: Entry] = [:]
     private var nextGeneration = 0
 
-    init() {}
-
     var addresses: some Collection<String> { entries.keys }
 
     func summary(for address: String) -> ChangeSummary? { entries[address]?.summary }

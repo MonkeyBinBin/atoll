@@ -741,41 +741,29 @@ public final class AgentStore {
         runtimes[address]?.timers.removeValue(forKey: timer)?.cancel()
     }
 
-    /// The one place an agent's per-agent state goes away: every agent something is still held for whose record
-    /// is gone. Two exceptions: a `.sending` queued message stays until its send finishes, so its failure still
-    /// reaches `onQueuedFailed`; and `launching`, which names a terminal before its record exists.
+    /// The one place an agent's per-agent state goes away: for each kind of state, the agents it is held for
+    /// whose record is gone. One row per kind, so adding per-agent state means adding one line here. Kept on
+    /// purpose: `colors` (an agent's color is fixed for the session), a `.sending` queued message (its send
+    /// finishes first, so a failure still reaches `onQueuedFailed`), and `launching` (it names a terminal
+    /// before its record exists).
     private func forgetGone() {
-        var held = Set(runtimes.keys)
-        held.formUnion(previews.addresses)
-        held.formUnion(finals.addresses)
-        held.formUnion(reminders.addresses)
-        held.formUnion(changes.addresses)
-        held.formUnion(sendStates.keys)
-        held.formUnion(keyStates.keys)
-        held.formUnion(permissionResponses.keys)
-        held.formUnion(interruptStates.keys)
-        held.formUnion(lastInterruptError.keys)
-        held.formUnion(queuedMessages.keys)
-        held.formUnion(notifyWhenDone)
-        held.formUnion(spaceMisses)
-        for address in held where !isKnown(address) { forget(address) }
-    }
-
-    private func forget(_ address: String) {
-        runtimes.removeValue(forKey: address)?.tearDown()
-        previews.remove(address)
-        finals.remove(address)
-        reminders.remove(address)
-        changes.remove(address)
-        // Published: written only when present, since every write re-renders their viewers.
-        if sendStates[address] != nil { sendStates[address] = nil }
-        if keyStates[address] != nil { keyStates[address] = nil }
-        if permissionResponses[address] != nil { permissionResponses[address] = nil }
-        if interruptStates[address] != nil { interruptStates[address] = nil }
-        if lastInterruptError[address] != nil { lastInterruptError[address] = nil }
-        if let queued = queuedMessages[address], queued.status != .sending { queuedMessages[address] = nil }
-        if notifyWhenDone.contains(address) { notifyWhenDone.remove(address) }
-        spaceMisses.remove(address)
+        // Published ones are written only for those present, since every write re-renders their viewers.
+        func drop(_ held: some Collection<String>, _ remove: (String) -> Void) {
+            for address in Array(held) where !isKnown(address) { remove(address) }
+        }
+        drop(runtimes.keys) { runtimes.removeValue(forKey: $0)?.tearDown() }
+        drop(previews.addresses) { previews.remove($0) }
+        drop(finals.addresses) { finals.remove($0) }
+        drop(reminders.addresses) { reminders.remove($0) }
+        drop(changes.addresses) { changes.remove($0) }
+        drop(sendStates.keys) { sendStates[$0] = nil }
+        drop(keyStates.keys) { keyStates[$0] = nil }
+        drop(permissionResponses.keys) { permissionResponses[$0] = nil }
+        drop(interruptStates.keys) { interruptStates[$0] = nil }
+        drop(lastInterruptError.keys) { lastInterruptError[$0] = nil }
+        drop(queuedMessages.filter { $0.value.status != .sending }.keys) { queuedMessages[$0] = nil }
+        drop(notifyWhenDone) { notifyWhenDone.remove($0) }
+        drop(spaceMisses) { spaceMisses.remove($0) }
     }
 
     /// Whether the agent is (still) here. Late results check it before writing anything for an agent.
