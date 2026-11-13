@@ -39,6 +39,7 @@ final class IslandController {
     private var fullScreenDetector: FullScreenDetector?
     private var currentScreen: NSScreen?
     private var followMouseTimer: Timer?
+    private var awayReasons: Set<AwayReason> = []
 
     init(model: IslandModel, settings: AppSettings, client: HerdrClient) {
         self.model = model
@@ -69,6 +70,7 @@ final class IslandController {
         followMouseTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.followMouse() }
         }
+        observeScreenAway()
         refreshScreen()
         debugHook = DebugHook(panel: panel, model: model)
         hoverCard = HoverCardController(model: model, island: panel, settings: settings)
@@ -116,6 +118,33 @@ final class IslandController {
         // Not NSScreen.main: that follows the key window and would make the island hop between displays.
         // screens[0] is the primary display (the one with the menu bar).
         return screens.first(where: { $0.safeAreaInsets.top > 0 }) ?? screens[0]
+    }
+
+    /// Displays asleep, screen locked, another user's session: nobody sees the island, so animations pause.
+    private func observeScreenAway() {
+        let workspace = NSWorkspace.shared.notificationCenter
+        let distributed = DistributedNotificationCenter.default()
+        let events: [(NotificationCenter, Notification.Name, AwayReason, Bool)] = [
+            (workspace, NSWorkspace.screensDidSleepNotification, .asleep, true),
+            (workspace, NSWorkspace.screensDidWakeNotification, .asleep, false),
+            (workspace, NSWorkspace.sessionDidResignActiveNotification, .inactiveSession, true),
+            (workspace, NSWorkspace.sessionDidBecomeActiveNotification, .inactiveSession, false),
+            (distributed, Notification.Name("com.apple.screenIsLocked"), .locked, true),
+            (distributed, Notification.Name("com.apple.screenIsUnlocked"), .locked, false),
+        ]
+        for (center, name, reason, away) in events {
+            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.setAway(reason, away) }
+            }
+        }
+    }
+
+    private enum AwayReason { case asleep, locked, inactiveSession }
+
+    private func setAway(_ reason: AwayReason, _ away: Bool) {
+        if away { awayReasons.insert(reason) } else { awayReasons.remove(reason) }
+        let value = !awayReasons.isEmpty
+        if model.screenAway != value { model.screenAway = value }
     }
 
     private func applyVisibility() {

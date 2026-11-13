@@ -788,7 +788,8 @@ public final class AgentStore {
         var built = list.map(\.0)
         let newcomers = treeProbe == nil ? [] : markSharedTrees(&built)
         markNoOutput(&built)
-        agents = built
+        // Every write re-renders all viewers (island, list, panel); most rebuilds change nothing.
+        if built != agents { agents = built }
         notifyWhenDone = notifyWhenDone.filter { records[$0] != nil }
         spaceMisses = spaceMisses.filter { records[$0] != nil }
         if unmapped { refreshSpaces() }

@@ -88,7 +88,7 @@ struct AgentListView: View {
             index: index,
             selected: index == model.selection,
             now: now,
-            animate: settings.animationsEnabled,
+            animate: model.animating,
             onLaunchWorktree: { model.openLaunchInWorktree(for: agent) }
         )
         .id(agent.id)

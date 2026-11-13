@@ -33,12 +33,13 @@ struct IslandView: View {
                 layout: layout, width: width, expanded: expanded, offline: offline,
                 urgency: model.store.agents.first(where: { $0.state.needsAttention })?.state,
                 islets: islets(layout),
-                decorations: settings.decorations, animate: settings.animationsEnabled
+                decorations: settings.decorations, animate: model.animating
             )
         )
         .clipShape(IslandShape(topRadius: hasNotch ? 0 : layout.height / 2, bottomRadius: expanded ? 18 : (hasNotch ? 10 : layout.height / 2)))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .environment(\.colorScheme, .dark)
+        .environment(\.islandAnimating, model.animating)
         .animation(.snappy(duration: 0.18), value: expanded)
     }
 

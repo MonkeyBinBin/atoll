@@ -205,6 +205,15 @@ final class IslandModel {
     /// Collapsed and nothing to show in full screen: the island steps aside (hotkeys still expand it).
     var hiddenByFullScreen: Bool { mode == .collapsed && collapsedAgents == nil }
 
+    /// Nobody can see the island: displays asleep, screen locked, or another user's session is active.
+    var screenAway = false
+
+    /// Animations play only when enabled and the island is on screen; otherwise every view shows its
+    /// still frame, so idle ticks stop costing CPU.
+    var animating: Bool {
+        settings.animationsEnabled && settings.islandVisible && !screenAway && !hiddenByFullScreen
+    }
+
     func showsInCollapsedIsland(_ address: String) -> Bool {
         collapsedAgents?.contains { $0.address == address } ?? false
     }

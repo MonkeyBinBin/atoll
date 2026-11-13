@@ -25,6 +25,8 @@ struct IslandBackground: View {
     let animate: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    private var calm: Bool { !expanded && urgency == nil }
+
     static let plum = Color(red: 0x7A / 255, green: 0x3F / 255, blue: 0x6E / 255)
 
     enum Lagoon {
@@ -57,7 +59,8 @@ struct IslandBackground: View {
                     ZStack(alignment: .top) {
                         sky(palette)
                         if animate && !reduceMotion {
-                            TimelineView(.animation(minimumInterval: 0.2)) { context in
+                            // Collapsed with nobody waiting, the lagoon drifts at a calmer 2 fps.
+                            TimelineView(.animation(minimumInterval: calm ? 0.5 : 0.2)) { context in
                                 scene(time: context.date.timeIntervalSinceReferenceDate, palette: palette, hour: hour)
                             }
                         } else {

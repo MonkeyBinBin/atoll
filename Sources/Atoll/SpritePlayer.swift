@@ -298,7 +298,7 @@ struct AgentSprite: View {
     let store: AgentStore
     var scale: Int = 1
     var settleAfter: TimeInterval? = nil
-    @Environment(AppSettings.self) private var settings
+    @Environment(\.islandAnimating) private var animating
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var effect: (tag: String, start: Date)?
 
@@ -306,7 +306,7 @@ struct AgentSprite: View {
         let tag = SpriteLibrary.tagName(for: agent)
         ZStack(alignment: .topTrailing) {
             SpriteView(tool: agent.tool, tag: tag, colorIndex: agent.colorIndex, scale: scale,
-                       animate: settings.animationsEnabled, settleAfter: settleAfter)
+                       animate: animating, settleAfter: settleAfter)
             if let effect {
                 EffectView(tag: effect.tag, startedAt: effect.start, scale: scale)
                     .id(effect.start)
@@ -332,7 +332,7 @@ struct AgentSprite: View {
     }
 
     private func play(_ name: String) {
-        guard settings.animationsEnabled, !reduceMotion else { return }
+        guard animating, !reduceMotion else { return }
         let start = Date()
         effect = (name, start)
         DispatchQueue.main.asyncAfter(deadline: .now() + EffectView.duration(name) + 0.05) {
@@ -392,4 +392,9 @@ struct StatusBubbleView: View {
                 .frame(width: 8 * CGFloat(scale), height: 8 * CGFloat(scale))
         }
     }
+}
+
+extension EnvironmentValues {
+    /// The island's `IslandModel.animating`: false while animations are off or nobody can see the island.
+    @Entry var islandAnimating = true
 }
