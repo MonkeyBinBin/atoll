@@ -1,0 +1,61 @@
+import Foundation
+import Testing
+@testable import AtollCore
+
+/// Spawns real processes, so it's opt-in:
+///   ATOLL_PROCESS_TESTS=1 swift test --filter ProcessRunner
+@Suite("Process runner (real processes)",
+       .enabled(if: ProcessInfo.processInfo.environment["ATOLL_PROCESS_TESTS"] == "1"))
+struct ProcessRunnerTests {
+    func sh(_ script: String, environment: [String: String]? = nil, timeout: TimeInterval? = nil) throws -> ProcessRunner.Output {
+        try ProcessRunner.run("/bin/sh", ["-c", script], environment: environment, timeout: timeout)
+    }
+
+    @Test func capturesStatusStdoutAndStderr() throws {
+        let output = try sh("printf out; printf err >&2; exit 3")
+        #expect(output.status == 3)
+        #expect(output.exited)
+        #expect(String(decoding: output.stdout, as: UTF8.self) == "out")
+        #expect(String(decoding: output.stderr, as: UTF8.self) == "err")
+    }
+
+    @Test func largeStderrDoesntBlockStdout() throws {
+        let output = try sh("head -c 200000 /dev/zero | tr '\\\\0' e >&2; printf done", timeout: 10)
+        #expect(String(decoding: output.stdout, as: UTF8.self) == "done")
+        #expect(output.stderr.count == 200_000)
+    }
+
+    @Test func usesTheGivenEnvironment() throws {
+        let output = try sh(#"printf '%s' "$ATOLL_X""#, environment: ["ATOLL_X": "1"])
+        #expect(String(decoding: output.stdout, as: UTF8.self) == "1")
+    }
+
+    @Test func aBackgroundChildHoldingStdoutDoesntBlock() throws {
+        let start = Date()
+        let output = try sh("sleep 30 & printf ok", timeout: 10)
+        #expect(String(decoding: output.stdout, as: UTF8.self) == "ok")
+        #expect(Date().timeIntervalSince(start) < 10)
+    }
+
+    @Test func aProgramThatOutlivesTheTimeoutIsStopped() {
+        let start = Date()
+        #expect(throws: ProcessRunner.Failure.timedOut) { try sh("sleep 30", timeout: 0.5) }
+        #expect(Date().timeIntervalSince(start) < 10)
+    }
+
+    @Test func aSignalIsNotAnExit() throws {
+        let output = try sh("kill -9 $$")
+        #expect(!output.exited)
+    }
+
+    @Test func aProgramThatCantStart() {
+        #expect(throws: ProcessRunner.Failure.self) {
+            try ProcessRunner.run("/nonexistent/tool", [])
+        }
+    }
+
+    @Test func asyncVariant() async throws {
+        let output = try await ProcessRunner.run("/bin/sh", ["-c", "printf hi"], timeout: 5)
+        #expect(String(decoding: output.stdout, as: UTF8.self) == "hi")
+    }
+}

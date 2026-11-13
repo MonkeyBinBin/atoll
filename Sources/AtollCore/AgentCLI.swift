@@ -69,40 +69,8 @@ public struct AgentCLI: Equatable, Sendable {
     /// Asks an interactive login shell — the one launches run in, so nvm/PATH match — which CLIs exist.
     /// nil when the shell fails or doesn't finish within `timeout`.
     static func detect(_ clis: [AgentCLI], shell: String, timeout: TimeInterval) async -> [AgentCLI]? {
-        let script = detectionScript(clis)
-        let output = await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                continuation.resume(returning: run(shell, ["-lic", script], timeout: timeout))
-            }
-        }
-        return output.map { parseDetected($0, from: clis) }
-    }
-
-    /// Runs a program and returns its stdout, or nil if it can't start or outlives `timeout`. Stdout goes to a
-    /// file, not a pipe: a background child of the shell (gitstatusd, a daemon) keeping a pipe open would block
-    /// reading it to EOF long after the shell itself exits.
-    static func run(_ executable: String, _ arguments: [String], timeout: TimeInterval) -> String? {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("atoll-detect-\(UUID().uuidString)")
-        guard FileManager.default.createFile(atPath: url.path, contents: nil),
-              let output = try? FileHandle(forWritingTo: url) else { return nil }
-        defer {
-            try? output.close()
-            try? FileManager.default.removeItem(at: url)
-        }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = arguments
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-        process.standardInput = FileHandle.nullDevice
-        let exited = DispatchSemaphore(value: 0)
-        process.terminationHandler = { _ in exited.signal() }
-        do { try process.run() } catch { return nil }
-        guard exited.wait(timeout: .now() + timeout) == .success else {
-            process.terminate()
-            return nil
-        }
-        return (try? Data(contentsOf: url)).flatMap { String(data: $0, encoding: .utf8) }
+        guard let output = try? await ProcessRunner.run(shell, ["-lic", detectionScript(clis)], timeout: timeout) else { return nil }
+        return parseDetected(String(decoding: output.stdout, as: UTF8.self), from: clis)
     }
 }
 
@@ -125,7 +93,7 @@ public actor AgentCLIDetector {
                 shell: String? = nil, timeout: TimeInterval = 5, detect: Detect? = nil) {
         self.clis = clis
         self.onDetected = onDetected
-        let shell = shell ?? CoreRPCAdapter.loginShell()
+        let shell = shell ?? ProcessRunner.loginShell()
         self.detect = detect ?? { clis in await AgentCLI.detect(clis, shell: shell, timeout: timeout) }
         lastKnown = saved.map { commands in clis.filter { commands.contains($0.command) } }
     }

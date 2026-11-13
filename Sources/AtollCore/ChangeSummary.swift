@@ -290,47 +290,15 @@ public struct ProcessGitRunner: GitRunner {
         return execute(gitPath, base + filterOverrides(listed.stdout) + arguments, timeout: timeout)
     }
 
-    private final class ProcessBox: @unchecked Sendable {
-        let process = Process()
-    }
-
-    private final class DataBox: @unchecked Sendable {
-        var data = Data()
-    }
-
-    /// nil when it couldn't start or was killed by the timeout.
+    /// nil when it couldn't start, was killed by the timeout or ended by a signal.
     private static func execute(_ gitPath: String, _ arguments: [String], timeout: TimeInterval) -> GitOutput? {
-        let box = ProcessBox()
-        let process = box.process
-        process.executableURL = URL(fileURLWithPath: gitPath)
-        process.arguments = arguments
         var env = ProcessInfo.processInfo.environment
         env["GIT_TERMINAL_PROMPT"] = "0"
         env["GIT_OPTIONAL_LOCKS"] = "0"
         env["LC_ALL"] = "C"
-        process.environment = env
-        let out = Pipe()
-        let err = Pipe()
-        process.standardOutput = out
-        process.standardError = err
-        process.standardInput = FileHandle.nullDevice
-        do { try process.run() } catch { return nil }
-        DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
-            if box.process.isRunning { box.process.terminate() }
-        }
-        // Drain stderr on another thread so a chatty stderr can't block git while stdout is read.
-        let errBox = DataBox()
-        let group = DispatchGroup()
-        group.enter()
-        DispatchQueue.global().async {
-            errBox.data = err.fileHandleForReading.readDataToEndOfFile()
-            group.leave()
-        }
-        let data = out.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        group.wait()
-        guard process.terminationReason == .exit else { return nil }
-        return GitOutput(status: process.terminationStatus, stdout: String(decoding: data, as: UTF8.self),
-                         stderr: String(decoding: errBox.data, as: UTF8.self))
+        guard let output = try? ProcessRunner.run(gitPath, arguments, environment: env, timeout: timeout),
+              output.exited else { return nil }
+        return GitOutput(status: output.status, stdout: String(decoding: output.stdout, as: UTF8.self),
+                         stderr: String(decoding: output.stderr, as: UTF8.self))
     }
 }

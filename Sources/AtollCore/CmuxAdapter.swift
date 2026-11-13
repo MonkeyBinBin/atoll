@@ -270,24 +270,13 @@ public final class CmuxAdapter: HerdrClient, @unchecked Sendable {
 
     /// Runs the cmux CLI; nonzero exit → HerdrError from "Error: <code>: <message>".
     static func run(_ path: String, _ arguments: [String]) throws -> Data {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: path)
-        process.arguments = arguments
         var environment = ProcessInfo.processInfo.environment
         environment["CMUX_QUIET"] = "1"
-        process.environment = environment
-        let out = Pipe()
-        let err = Pipe()
-        process.standardOutput = out
-        process.standardError = err
-        try process.run()
-        let data = out.fileHandleForReading.readDataToEndOfFile()
-        let errData = err.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        if process.terminationStatus != 0 {
-            throw parseError(String(decoding: errData.isEmpty ? data : errData, as: UTF8.self))
+        let output = try ProcessRunner.run(path, arguments, environment: environment)
+        if output.status != 0 {
+            throw parseError(String(decoding: output.stderr.isEmpty ? output.stdout : output.stderr, as: UTF8.self))
         }
-        return data
+        return output.stdout
     }
 
     static func parseError(_ text: String) -> HerdrError {

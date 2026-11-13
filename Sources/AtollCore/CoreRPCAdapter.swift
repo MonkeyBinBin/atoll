@@ -404,7 +404,7 @@ public final class CoreRPCAdapter: HerdrClient, @unchecked Sendable {
             guard let hcPath else {
                 throw HerdrError(kind: "not_installed", message: "hc not found", hint: "Install herdr-core (hc) in ~/.local/bin.")
             }
-            let output = try await Self.run(hcPath, Self.hcRunArguments(request, shell: Self.loginShell()), tool: "hc")
+            let output = try await Self.run(hcPath, Self.hcRunArguments(request, shell: ProcessRunner.loginShell()), tool: "hc")
             return LaunchOutput(terminal: Self.terminalAddress(inHerdrAppOutput: output))
         }
         var args: [String: Any] = ["folder": request.folder, "argv": request.argv]
@@ -441,10 +441,6 @@ public final class CoreRPCAdapter: HerdrClient, @unchecked Sendable {
             args += [shell, "-lic", #""$@"; exec "$0" -li"#, shell] + request.argv + task
         }
         return args
-    }
-
-    static func loginShell() -> String {
-        ProcessInfo.processInfo.environment["SHELL"].flatMap { $0.isEmpty ? nil : $0 } ?? "/bin/zsh"
     }
 
     public func renameSpace(id: String, name: String) async throws {
@@ -500,35 +496,20 @@ public final class CoreRPCAdapter: HerdrClient, @unchecked Sendable {
     }
 
     /// Runs herdr-app or hc; both report failures as `{"error": {kind, message, hint}}`.
-    private static func run(_ path: String, _ arguments: [String], tool: String) async throws -> Data {
-        try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: path)
-                process.arguments = arguments
-                let out = Pipe()
-                let err = Pipe()
-                process.standardOutput = out
-                process.standardError = err
-                do {
-                    try process.run()
-                    let data = out.fileHandleForReading.readDataToEndOfFile()
-                    let errData = err.fileHandleForReading.readDataToEndOfFile()
-                    process.waitUntilExit()
-                    if let error = Self.herdrAppError(data) ?? Self.herdrAppError(errData) {
-                        continuation.resume(throwing: error)
-                    } else if process.terminationStatus != 0 {
-                        let message = String(decoding: errData.isEmpty ? data : errData, as: UTF8.self)
-                            .trimmingCharacters(in: .whitespacesAndNewlines)
-                        continuation.resume(throwing: HerdrError(kind: "app_command_failed", message: message.isEmpty ? "\(tool) exited with \(process.terminationStatus)" : message))
-                    } else {
-                        continuation.resume(returning: data)
-                    }
-                } catch {
-                    continuation.resume(throwing: HerdrError(kind: "app_command_failed", message: "\(error)"))
-                }
-            }
+    static func run(_ path: String, _ arguments: [String], tool: String) async throws -> Data {
+        let output: ProcessRunner.Output
+        do {
+            output = try await ProcessRunner.run(path, arguments)
+        } catch {
+            throw HerdrError(kind: "app_command_failed", message: "\(error)")
         }
+        if let error = herdrAppError(output.stdout) ?? herdrAppError(output.stderr) { throw error }
+        guard output.status == 0 else {
+            let message = String(decoding: output.stderr.isEmpty ? output.stdout : output.stderr, as: UTF8.self)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            throw HerdrError(kind: "app_command_failed", message: message.isEmpty ? "\(tool) exited with \(output.status)" : message)
+        }
+        return output.stdout
     }
 
     static func herdrAppError(_ data: Data) -> HerdrError? {

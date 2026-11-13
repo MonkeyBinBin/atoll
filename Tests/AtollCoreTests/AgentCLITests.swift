@@ -87,19 +87,6 @@ struct AgentCLIProcessTests {
         #expect(found?.map(\.command) == ["ls"])
     }
 
-    @Test func aBackgroundChildHoldingStdoutDoesntBlock() {
-        let start = Date()
-        let output = AgentCLI.run("/bin/sh", ["-c", "sleep 30 & printf ok"], timeout: 10)
-        #expect(output == "ok")
-        #expect(Date().timeIntervalSince(start) < 10)
-    }
-
-    @Test func aShellThatHangsTimesOut() {
-        let start = Date()
-        #expect(AgentCLI.run("/bin/sh", ["-c", "sleep 30"], timeout: 0.5) == nil)
-        #expect(Date().timeIntervalSince(start) < 10)
-    }
-
     @Test func detectorRemembersOnlySuccessfulDetections() async {
         let detector = AgentCLIDetector(clis: clis, shell: "/bin/sh")
         #expect(await detector.lastKnown == nil)
