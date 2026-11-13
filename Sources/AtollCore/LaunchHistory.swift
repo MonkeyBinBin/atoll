@@ -3,7 +3,7 @@ import Foundation
 /// What the launch form had filled in: kept as a recent launch or saved as a preset. The folder is the one the
 /// user picked (never the worktree's), and a worktree's branch is never kept: it is generated again.
 public struct LaunchRecipe: Codable, Equatable, Sendable {
-    /// `LaunchOption.id`: "builtin:claude", "builtin:codex" or "template:<name>".
+    /// `LaunchOption.id`: "builtin:<command>" (claude, codex or a detected `AgentCLI`) or "template:<name>".
     public var optionID: String
     public var folder: String
     public var task: String

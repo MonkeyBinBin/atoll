@@ -61,7 +61,7 @@ macOS 瀏海上的像素風「動態島」，即時顯示本機所有 AI coding 
 
 ### 啟動 agent
 
-- 從動態島的「＋」透過 Herdr 開新的 Claude Code、Codex 或 herdr-core template agent
+- 從動態島的「＋」透過 Herdr 開新的 Claude Code、Codex 或 herdr-core template agent；另會在 login shell 偵測已安裝的 OpenCode、GitHub Copilot CLI、Factory Droid、Qwen Code、Cursor Agent、Kimi Code CLI，有裝才列出（以通用角色顯示；Kimi 不支援帶 initial task）
 - New worktree：在 `<repo>.worktrees/<slug>` 開新 branch（`atoll/<slug>`）再啟動
 - Space 預設跟著動態島選的 space（從 agent 的「Launch in new worktree」進來則用該 agent 的 space），其次是 Settings 的 Default space
 - 「New space…」開新的 Herdr space 並可自訂名稱（留白則依資料夾命名）

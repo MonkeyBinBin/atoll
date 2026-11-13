@@ -2,12 +2,13 @@ import AppKit
 import AtollCore
 import SwiftUI
 
-/// What can be launched: built-in tools plus herdr-core templates.
+/// What can be launched: built-in tools, other agent CLIs found on this Mac, and herdr-core templates.
 struct LaunchOption: Identifiable, Hashable {
     var id: String
     var title: String
     var argv: [String]
     var tool: AgentTool
+    var taskPassing: TaskPassing = .lastArgument
 
     /// Plain argv: `herdr-app do tab.new` already runs it as `$SHELL -lic '"$@"; exec "$0" -li' <argv…> <task>`,
     /// so shell init (nvm, PATH) is loaded and the task arrives as the program's last argument.
@@ -15,6 +16,18 @@ struct LaunchOption: Identifiable, Hashable {
         LaunchOption(id: "builtin:claude", title: "Claude Code", argv: ["claude"], tool: .claudeCode),
         LaunchOption(id: "builtin:codex", title: "Codex", argv: ["codex", "--no-daemon"], tool: .codex),
     ]
+
+    static func detected(_ cli: AgentCLI) -> LaunchOption {
+        LaunchOption(id: detectedID(cli), title: cli.title, argv: [cli.command], tool: .from(app: cli.command),
+                     taskPassing: cli.taskPassing)
+    }
+
+    static func detectedID(_ cli: AgentCLI) -> String { "builtin:\(cli.command)" }
+
+    /// The catalog CLI an option id names, if it's one.
+    static func catalogCLI(id: String) -> AgentCLI? {
+        AgentCLI.catalog.first { detectedID($0) == id }
+    }
 
     static func template(_ t: TemplateInfo) -> LaunchOption {
         // argv[0] naming a template makes core start its command and send its body.
@@ -27,7 +40,13 @@ struct LaunchFormView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(\.herdrClient) private var client
 
-    @State private var options = LaunchOption.builtIns
+    /// Agent CLIs from `AgentCLI.catalog` found on this Mac.
+    @State private var installed: [AgentCLI] = []
+    /// The latest detection failed, so `installed` may be missing CLIs: a restored recipe's CLI is trusted.
+    @State private var detectionFailed = false
+    /// The background re-detection after showing the cached list is still running.
+    @State private var refreshing = true
+    @State private var templateOptions: [LaunchOption] = []
     @State private var optionID = LaunchOption.builtIns[0].id
     @State private var folder = ""
     @State private var task = ""
@@ -50,9 +69,11 @@ struct LaunchFormView: View {
     @State private var pendingWorktree: Bool?
     /// The folder `source` was checked for (nil while a check runs).
     @State private var sourceFolder: String?
-    /// nil while herdr-core templates load; false when that failed.
-    @State private var templatesLoaded: Bool?
-    /// A recipe picked before the templates arrived, applied once they do.
+    /// False until installed CLIs and herdr-core templates are in the tool list.
+    @State private var toolsLoaded = false
+    /// False when the herdr-core templates couldn't be loaded.
+    @State private var templatesLoaded = false
+    /// A recipe picked before the tool list was complete, applied once it is.
     @State private var deferredRecipe: LaunchRecipe?
     /// What a restored recipe couldn't bring back.
     @State private var restoreNotes: [String] = []
@@ -62,7 +83,9 @@ struct LaunchFormView: View {
     @FocusState private var launchFocused: Bool
 
     private var store: AgentStore { model.store }
+    private var options: [LaunchOption] { LaunchOption.builtIns + installed.map(LaunchOption.detected) + templateOptions }
     private var option: LaunchOption { options.first { $0.id == optionID } ?? options[0] }
+    private var taskSupported: Bool { option.taskPassing != .unsupported }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -114,7 +137,9 @@ struct LaunchFormView: View {
                 }
                 GridRow(alignment: .top) {
                     label("Task")
-                    TextField("Initial task", text: $task, axis: .vertical)
+                    TextField(taskSupported ? "Initial task" : "\(option.title) can't start with a task",
+                              text: $task, axis: .vertical)
+                        .disabled(!taskSupported)
                         .lineLimit(2...5)
                         .textFieldStyle(.roundedBorder)
                         .focused($taskFocused)
@@ -362,16 +387,46 @@ struct LaunchFormView: View {
         spaces = list
         if space.isMissing(from: list) { space = .selected }
         spacesLoaded = true
-        if let templates = try? await client?.templates() {
-            options = LaunchOption.builtIns + templates.filter { $0.error == nil }.map(LaunchOption.template)
-            templatesLoaded = true
+        // Installed CLIs: the last detection shows at once and is refreshed in the background; only the first
+        // detection is waited for (alongside the templates).
+        let detector = AgentCLIDetector.shared
+        let refresh = Task { await detector.refresh() }
+        let cached = await detector.lastKnown
+        let templates = try? await client?.templates()
+        templateOptions = (templates ?? []).filter { $0.error == nil }.map(LaunchOption.template)
+        templatesLoaded = templates != nil
+        if let cached {
+            installed = cached
         } else {
-            templatesLoaded = false
+            let firstDetection = await refresh.value
+            installed = firstDetection ?? []
+            detectionFailed = firstDetection == nil
+            refreshing = false
         }
-        if let recipe = deferredRecipe {
-            deferredRecipe = nil
-            apply(recipe)
+        toolsLoaded = true
+        applyDeferredRecipe()
+        guard refreshing else { return }
+        let fresh = await refresh.value
+        refreshing = false
+        detectionFailed = fresh == nil
+        if let fresh { takeRefreshed(fresh) }
+        applyDeferredRecipe()
+    }
+
+    private func applyDeferredRecipe() {
+        guard let recipe = deferredRecipe else { return }
+        deferredRecipe = nil
+        apply(recipe)
+    }
+
+    /// A newer detection; the selected CLI stays selectable (with a note) even if it's no longer found.
+    private func takeRefreshed(_ fresh: [AgentCLI]) {
+        var list = fresh
+        if let selected = LaunchOption.catalogCLI(id: optionID), !fresh.contains(selected) {
+            list.append(selected)
+            restoreNotes.append("\(selected.title) (\(selected.command)) wasn't found on this Mac")
         }
+        installed = list
     }
 
     private func chooseFolder() {
@@ -392,10 +447,11 @@ struct LaunchFormView: View {
         model.pendingLaunchRecipe = currentRecipe
         restoreNotes = []
         settings.rememberFolder(folder)
+        let start = option.taskPassing.apply(argv: option.argv, task: task.trimmingCharacters(in: .whitespacesAndNewlines))
         store.launch(LaunchRequest(
-            argv: option.argv,
+            argv: start.argv,
             folder: folder,
-            task: task.trimmingCharacters(in: .whitespacesAndNewlines),
+            task: start.task,
             name: name.trimmingCharacters(in: .whitespaces).isEmpty ? nil : Self.sanitizeName(name),
             optionID: option.id,
             space: space,
@@ -406,7 +462,7 @@ struct LaunchFormView: View {
     // MARK: Recent launches and presets
 
     private var currentRecipe: LaunchRecipe {
-        LaunchRecipe(optionID: optionID, folder: folder, task: task.trimmingCharacters(in: .whitespacesAndNewlines),
+        LaunchRecipe(optionID: optionID, folder: folder, task: taskSupported ? task.trimmingCharacters(in: .whitespacesAndNewlines) : "",
                      name: name.trimmingCharacters(in: .whitespaces),
                      space: space.stored, worktree: plan != nil,
                      newSpaceName: space == .new ? newSpaceName.trimmingCharacters(in: .whitespaces) : nil)
@@ -474,11 +530,14 @@ struct LaunchFormView: View {
     /// Fills the form (never launches). Checks the folder and tool still exist; a worktree comes back only if the
     /// folder is still a repo, always on a freshly generated branch.
     private func apply(_ recipe: LaunchRecipe) {
-        // The tool list isn't complete until the templates arrive: don't call a template gone before that.
-        guard let templatesLoaded else {
+        // The tool list isn't complete until templates and installed CLIs arrive, and a CLI missing from the
+        // cached list may have been installed since: don't call a tool gone before the list is current.
+        let cli = LaunchOption.catalogCLI(id: recipe.optionID)
+        guard toolsLoaded, !(refreshing && cli.map { !installed.contains($0) } == true) else {
             deferredRecipe = recipe
             return
         }
+        if detectionFailed, let cli, !installed.contains(cli) { installed.append(cli) }
         let restored = LaunchHistory.restore(
             recipe,
             folderExists: { path in

@@ -374,7 +374,7 @@ final class IslandModel {
         let toolID: String? = switch agent.tool {
         case .claudeCode: "builtin:claude"
         case .codex: "builtin:codex"
-        case .generic: nil
+        case .generic: agent.app.flatMap(AgentCLI.matching(app:)).map(LaunchOption.detectedID)
         }
         openLaunch(prefill: LaunchPrefill(folder: agent.projectPath, optionID: toolID, worktree: true, space: agent.spaceID))
     }

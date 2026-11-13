@@ -443,7 +443,7 @@ public final class CoreRPCAdapter: HerdrClient, @unchecked Sendable {
         return args
     }
 
-    private static func loginShell() -> String {
+    static func loginShell() -> String {
         ProcessInfo.processInfo.environment["SHELL"].flatMap { $0.isEmpty ? nil : $0 } ?? "/bin/zsh"
     }
 
