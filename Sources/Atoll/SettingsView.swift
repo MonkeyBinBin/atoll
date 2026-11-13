@@ -87,6 +87,36 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Pinned folders") {
+                if settings.pinnedFolders.isEmpty {
+                    Text("Pin a recent folder to keep it at the top of the Folder menu.")
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(Array(settings.pinnedFolders.enumerated()), id: \.element) { index, path in
+                    FolderRow(path: path, pinned: true, isFirst: index == 0, isLast: index == settings.pinnedFolders.count - 1)
+                }
+            }
+
+            Section("Recent folders") {
+                let recent = settings.folders.unpinnedRecent
+                if recent.isEmpty {
+                    Text("Folders you launch in show up here and in the launch form's Folder menu.")
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(recent, id: \.self) { path in
+                    FolderRow(path: path, pinned: false)
+                }
+                HStack {
+                    Button("Add folder…", action: addFolder)
+                    Button("Clear") { settings.folders = settings.folders.clearingRecent() }
+                        .disabled(recent.isEmpty)
+                    Spacer()
+                    Text("Keeps the last \(FolderList.limit); launching moves a folder to the top.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Section("No output") {
                 Picker("Mark no output after", selection: $settings.noOutputMinutes) {
                     Text("Off").tag(0)
@@ -198,6 +228,17 @@ struct SettingsView: View {
         }
     }
 
+    private func addFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = true
+        panel.prompt = "Add"
+        NSApp.activate()
+        guard panel.runModal() == .OK else { return }
+        for url in panel.urls.reversed() { settings.rememberFolder(url.path) }
+    }
+
     private func moveReply(_ id: UUID, by delta: Int) {
         guard let index = replyRows.firstIndex(where: { $0.id == id }) else { return }
         let target = index + delta
@@ -271,6 +312,56 @@ struct HotKeyRecorder: View {
         recording = false
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
+    }
+}
+
+/// One folder in Settings: pin / unpin, reorder (pinned), reveal in Finder, delete; flags folders gone from disk.
+private struct FolderRow: View {
+    @Environment(AppSettings.self) private var settings
+    let path: String
+    let pinned: Bool
+    var isFirst = false
+    var isLast = false
+
+    var body: some View {
+        let exists = FileManager.default.fileExists(atPath: path)
+        HStack(spacing: 6) {
+            Text(Format.abbreviatePath(path))
+                .lineLimit(1)
+                .truncationMode(.head)
+                .foregroundStyle(exists ? .primary : .secondary)
+                .help(path)
+            if !exists {
+                Image(systemName: "exclamationmark.triangle")
+                    .foregroundStyle(.orange)
+                    .help("Folder no longer exists")
+            }
+            Spacer()
+            if pinned {
+                Button { settings.folders = settings.folders.movingPinned(path, by: -1) } label: { Image(systemName: "chevron.up") }
+                    .buttonStyle(.borderless)
+                    .disabled(isFirst)
+                Button { settings.folders = settings.folders.movingPinned(path, by: 1) } label: { Image(systemName: "chevron.down") }
+                    .buttonStyle(.borderless)
+                    .disabled(isLast)
+            }
+            Button {
+                settings.folders = pinned ? settings.folders.unpinning(path) : settings.folders.pinning(path)
+            } label: {
+                Image(systemName: pinned ? "pin.slash" : "pin")
+            }
+            .buttonStyle(.borderless)
+            .help(pinned ? "Unpin" : "Pin to the top of the Folder menu")
+            Button { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) } label: {
+                Image(systemName: "folder")
+            }
+            .buttonStyle(.borderless)
+            .disabled(!exists)
+            .help("Reveal in Finder")
+            Button { settings.folders = settings.folders.forgetting(path) } label: { Image(systemName: "trash") }
+                .buttonStyle(.borderless)
+                .help(pinned ? "Remove from pinned and recent folders" : "Remove from recent folders")
+        }
     }
 }
 

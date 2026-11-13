@@ -177,7 +177,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             window.title = "Atoll Settings"
             window.isReleasedWhenClosed = false
-            window.contentViewController = NSHostingController(rootView: SettingsView(store: store, settings: settings))
+            window.contentViewController = NSHostingController(rootView: SettingsView(store: store, settings: settings).environment(settings))
             window.center()
             settingsWindow = window
         }

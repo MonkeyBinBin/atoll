@@ -91,10 +91,17 @@ struct LaunchFormView: View {
                     label("Folder")
                     HStack(spacing: 6) {
                         Menu {
-                            ForEach(settings.recentFolders, id: \.self) { path in
+                            let folders = settings.folders
+                            ForEach(folders.pinned, id: \.self) { path in
+                                Button { pickFolder(path) } label: { Label(Format.abbreviatePath(path), systemImage: "pin") }
+                            }
+                            if !folders.pinned.isEmpty { Divider() }
+                            ForEach(folders.unpinnedRecent, id: \.self) { path in
                                 Button(Format.abbreviatePath(path)) { pickFolder(path) }
                             }
-                            if settings.recentFolders.isEmpty { Text("No recent folders") }
+                            if folders.recent.isEmpty { Text("No recent folders") }
+                            Divider()
+                            Button("Edit…") { NotificationCenter.default.post(name: .atollShowSettings, object: nil) }
                         } label: {
                             Text(folder.isEmpty ? "Choose a folder" : Format.abbreviatePath(folder))
                                 .lineLimit(1)

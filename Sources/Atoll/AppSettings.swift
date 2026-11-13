@@ -86,6 +86,8 @@ final class AppSettings {
     /// The collapsed island's space filter (`SpaceFilter.stored`); empty = all agents.
     var islandSpace: String { didSet { defaults.set(islandSpace, forKey: "islandSpace") } }
     var recentFolders: [String] { didSet { defaults.set(recentFolders, forKey: "recentFolders") } }
+    /// Folders pinned at the top of the launch form's Folder menu, in the user's order.
+    var pinnedFolders: [String] { didSet { defaults.set(pinnedFolders, forKey: "pinnedFolders") } }
     /// The last spaces read from the Herdr app, for launches while it isn't running.
     var herdrSpaceCache: [HerdrSpace] { didSet { save(herdrSpaceCache, "herdrSpaceCache") } }
     /// Names waiting for spaces that launches without the Herdr app made (space id → name).
@@ -162,6 +164,7 @@ final class AppSettings {
         defaultSpace = defaults.string(forKey: "defaultSpace") ?? ""
         islandSpace = defaults.string(forKey: "islandSpace") ?? ""
         recentFolders = defaults.stringArray(forKey: "recentFolders") ?? []
+        pinnedFolders = defaults.stringArray(forKey: "pinnedFolders") ?? []
         herdrSpaceCache = Self.load("herdrSpaceCache", defaults) ?? []
         pendingSpaceNames = defaults.dictionary(forKey: "pendingSpaceNames") as? [String: String] ?? [:]
         recentLaunches = Self.load("recentLaunches", defaults) ?? []
@@ -178,10 +181,16 @@ final class AppSettings {
                              showWaitingReason: notifyShowsWaitingReason)
     }
 
+    var folders: FolderList {
+        get { FolderList(pinned: pinnedFolders, recent: recentFolders) }
+        set {
+            if pinnedFolders != newValue.pinned { pinnedFolders = newValue.pinned }
+            if recentFolders != newValue.recent { recentFolders = newValue.recent }
+        }
+    }
+
     func rememberFolder(_ path: String) {
-        var list = recentFolders.filter { $0 != path }
-        list.insert(path, at: 0)
-        recentFolders = Array(list.prefix(10))
+        folders = folders.remembering(path)
     }
 
     func recordLaunch(_ recipe: LaunchRecipe) {
