@@ -115,8 +115,12 @@ final class FakeHerdrClient: HerdrClient, @unchecked Sendable {
         return _spacesCalls
     }
 
+    /// `herdr-app ls` that never answers (until cancelled).
+    var spacesHang = false
+
     func spaces() async throws -> [HerdrSpace] {
         lock.withLock { _spacesCalls += 1 }
+        if spacesHang { try await Task.sleep(for: .seconds(3600)) }
         return try spacesResult.get()
     }
 

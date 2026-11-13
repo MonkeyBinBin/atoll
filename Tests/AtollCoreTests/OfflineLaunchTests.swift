@@ -39,6 +39,22 @@ struct OfflineLaunchTests {
         #expect(h.client.spacesCalls == 0)
     }
 
+    @Test("launch spaces with the app: its answer; a hung read falls back to the cache after the timeout")
+    func launchSpacesTimeout() async {
+        let h = Harness()
+        h.connect()
+        h.store.herdrAppRunning = true
+        h.client.spacesResult = .success([HerdrSpace(id: "live", name: "live")])
+        #expect(await h.store.launchSpaces().map(\.id) == ["live"])
+
+        h.store.cachedSpaces = [HerdrSpace(id: "sp1", name: "a")]
+        h.client.spacesHang = true
+        let read = Task { await h.store.launchSpaces() }
+        await settle()
+        h.scheduler.advance(by: AgentStore.Timing().launchSpacesTimeout)
+        #expect(await read.value.map(\.id) == ["sp1"])
+    }
+
     @Test("new space: a fresh id, its name kept until the app shows it, then renamed and dropped")
     func newSpaceNamedLater() async {
         let h = Harness()

@@ -70,6 +70,8 @@ public final class AgentStore {
         /// Herdr spaces are re-read (`herdr-app ls`) this often while the Herdr app runs: renames and moved
         /// panes have no event.
         public var spaceRefreshInterval: TimeInterval = 15
+        /// The launch form waits this long for `herdr-app ls` before falling back to the cached spaces.
+        public var launchSpacesTimeout: TimeInterval = 2
         public init() {}
     }
 
@@ -878,10 +880,41 @@ public final class AgentStore {
     }
 
     /// The spaces a launch can pick: the app's, read now; without the app, the cached ones as herdr-core's
-    /// labels have them now (`HerdrLabels.spaces`).
+    /// labels have them now (`HerdrLabels.spaces`). A read that fails or takes longer than
+    /// `launchSpacesTimeout` gets the cached ones too: the launch form waits on this.
     public func launchSpaces() async -> [HerdrSpace] {
-        if herdrAppRunning, let shown = try? await client.spaces() { return shown }
-        return offlineSpaces
+        guard herdrAppRunning else { return offlineSpaces }
+        let client = client
+        return await withCheckedContinuation { continuation in
+            let once = Once(continuation)
+            let read = Task { @MainActor [weak self] in
+                let shown = try? await client.spaces()
+                once.resume(shown ?? self?.offlineSpaces ?? [])
+            }
+            let timer = scheduler.schedule(after: timing.launchSpacesTimeout) { [weak self] in
+                read.cancel()
+                once.resume(self?.offlineSpaces ?? [])
+            }
+            once.onResume = { timer.cancel() }
+        }
+    }
+
+    /// Resumes a continuation the first time only (a read racing its timeout).
+    @MainActor
+    private final class Once {
+        private var continuation: CheckedContinuation<[HerdrSpace], Never>?
+        var onResume: () -> Void = {}
+
+        init(_ continuation: CheckedContinuation<[HerdrSpace], Never>) {
+            self.continuation = continuation
+        }
+
+        func resume(_ value: [HerdrSpace]) {
+            guard let continuation else { return }
+            self.continuation = nil
+            onResume()
+            continuation.resume(returning: value)
+        }
     }
 
     private var offlineSpaces: [HerdrSpace] {
