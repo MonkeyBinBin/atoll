@@ -225,6 +225,9 @@ struct SettingsView: View {
                 .help("The launch form's starting space when it isn't opened from an agent and the island shows "
                     + "all agents. Selected space: the one Herdr shows; while the Herdr app is closed, the one it showed last")
                 .task { launchSpaces = await store.launchSpaces() }
+                .onReceive(NotificationCenter.default.publisher(for: .atollSettingsShown)) { _ in
+                    Task { launchSpaces = await store.launchSpaces() }
+                }
             }
         }
         .formStyle(.grouped)

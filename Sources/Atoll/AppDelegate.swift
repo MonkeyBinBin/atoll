@@ -183,6 +183,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         NSApp.activate()
         settingsWindow?.makeKeyAndOrderFront(nil)
+        // The window is reused: tell its view to re-read what may have changed while it was closed.
+        NotificationCenter.default.post(name: .atollSettingsShown, object: nil)
     }
 
     /// Today's finished turns: an island pane, like the list and the launch form.
@@ -190,4 +192,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings.islandVisible = true
         model.openToday()
     }
+}
+
+extension Notification.Name {
+    /// Posted each time the Settings window is shown.
+    static let atollSettingsShown = Notification.Name("AtollSettingsShown")
 }

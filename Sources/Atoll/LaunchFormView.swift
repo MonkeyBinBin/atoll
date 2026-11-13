@@ -97,7 +97,7 @@ struct LaunchFormView: View {
                             ForEach(folders.pinned, id: \.self) { path in
                                 Button { pickFolder(path) } label: { Label(Format.abbreviatePath(path), systemImage: "pin") }
                             }
-                            if !folders.pinned.isEmpty { Divider() }
+                            if !folders.pinned.isEmpty, !folders.unpinnedRecent.isEmpty { Divider() }
                             ForEach(folders.unpinnedRecent, id: \.self) { path in
                                 Button(Format.abbreviatePath(path)) { pickFolder(path) }
                             }
