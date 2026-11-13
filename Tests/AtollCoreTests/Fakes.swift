@@ -159,6 +159,9 @@ final class FakeScheduler: IslandScheduler {
         return handle
     }
 
+    /// Scheduled actions still due to run (not cancelled).
+    var liveCount: Int { items.filter { !$0.handle.isCancelled }.count }
+
     func advance(by seconds: TimeInterval) {
         let target = now.addingTimeInterval(seconds)
         while let index = items.indices.filter({ items[$0].due <= target }).min(by: { items[$0].due < items[$1].due }) {
