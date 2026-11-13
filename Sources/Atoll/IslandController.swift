@@ -67,9 +67,6 @@ final class IslandController {
         }
         model.onModeChange = { [weak self] mode in self?.modeChanged(mode) }
         fullScreenDetector = FullScreenDetector { [weak self] in self?.checkFullScreen() }
-        followMouseTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.followMouse() }
-        }
         observeScreenAway()
         refreshScreen()
         debugHook = DebugHook(panel: panel, model: model)
@@ -78,6 +75,7 @@ final class IslandController {
         debugHook?.onBubble = { [weak self] address in self?.bubbles?.force(address) }
         trackChanges { [weak self] in self?.updateFrame() }
         trackChanges { [weak self] in self?.applyVisibility() }
+        trackChanges { [weak self] in self?.updateFollowMouseTimer() }
     }
 
     func refreshScreen() {
@@ -92,6 +90,20 @@ final class IslandController {
         guard let currentScreen else { return }
         let value = FullScreenDetector.isFullScreen(currentScreen)
         if model.fullScreen != value { model.fullScreen = value }
+    }
+
+    /// The once-a-second pointer check runs only while the island is set to follow the mouse.
+    private func updateFollowMouseTimer() {
+        let follow = settings.displayID == AppSettings.followMouseDisplay
+        guard follow != (followMouseTimer != nil) else { return }
+        if follow {
+            followMouseTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.followMouse() }
+            }
+        } else {
+            followMouseTimer?.invalidate()
+            followMouseTimer = nil
+        }
     }
 
     /// Follow mouse: move to the screen under the pointer, but never while expanded.
