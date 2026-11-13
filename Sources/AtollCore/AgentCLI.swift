@@ -70,7 +70,7 @@ public struct AgentCLI: Equatable, Sendable {
     /// nil when the shell fails or doesn't finish within `timeout`.
     static func detect(_ clis: [AgentCLI], shell: String, timeout: TimeInterval) async -> [AgentCLI]? {
         guard let output = try? await ProcessRunner.run(shell, ["-lic", detectionScript(clis)], timeout: timeout) else { return nil }
-        return parseDetected(String(decoding: output.stdout, as: UTF8.self), from: clis)
+        return parseDetected(output.stdoutText, from: clis)
     }
 }
 

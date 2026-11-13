@@ -136,8 +136,8 @@ struct TerminalOutputView: NSViewRepresentable {
     private func setText(scroll: NSScrollView, textView: NSTextView, coordinator: Coordinator) {
         guard let storage = textView.textStorage else { return }
         // No bottom pin while searching: the current match decides where the view sits.
-        let firstText = coordinator.text.isEmpty
-        let wasAtBottom = !searching && (firstText || Self.isAtBottom(scroll))
+        let hadNoText = coordinator.text.isEmpty
+        let wasAtBottom = !searching && (hadNoText || Self.isAtBottom(scroll))
         coordinator.text = text
         coordinator.font = font
         coordinator.wrap = wrap
@@ -154,7 +154,7 @@ struct TerminalOutputView: NSViewRepresentable {
         Self.scrollToBottom(scroll, textView: textView)
         // A view just created (e.g. back from the changes view) gets its text before its first layout, which
         // undoes the scroll: pin it again once laid out.
-        if firstText {
+        if hadNoText {
             DispatchQueue.main.async { Self.scrollToBottom(scroll, textView: textView) }
         }
     }

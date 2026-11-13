@@ -270,12 +270,21 @@ public final class CmuxAdapter: HerdrClient, @unchecked Sendable {
 
     /// Runs the cmux CLI; nonzero exit → HerdrError from "Error: <code>: <message>".
     static func run(_ path: String, _ arguments: [String]) throws -> Data {
+        try data(from: ProcessRunner.run(path, arguments, environment: environment))
+    }
+
+    static func run(_ path: String, _ arguments: [String]) async throws -> Data {
+        try data(from: await ProcessRunner.run(path, arguments, environment: environment))
+    }
+
+    private static var environment: [String: String] {
         var environment = ProcessInfo.processInfo.environment
         environment["CMUX_QUIET"] = "1"
-        let output = try ProcessRunner.run(path, arguments, environment: environment)
-        if output.status != 0 {
-            throw parseError(String(decoding: output.stderr.isEmpty ? output.stdout : output.stderr, as: UTF8.self))
-        }
+        return environment
+    }
+
+    private static func data(from output: ProcessRunner.Output) throws -> Data {
+        guard output.status == 0 else { throw parseError(output.errorText) }
         return output.stdout
     }
 
@@ -294,16 +303,7 @@ public final class CmuxAdapter: HerdrClient, @unchecked Sendable {
     private func cli(_ arguments: [String]) async throws -> Data {
         guard let path = cmuxPath else { throw HerdrError(kind: "not_installed", message: "cmux isn't installed") }
         guard appRunning() else { throw HerdrError(kind: "unavailable", message: "cmux isn't running") }
-        let args = arguments
-        return try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                do {
-                    continuation.resume(returning: try Self.run(path, args))
-                } catch {
-                    continuation.resume(throwing: error)
-                }
-            }
-        }
+        return try await Self.run(path, arguments)
     }
 
     /// Key names cmux's send-key knows; single printable characters are typed instead.

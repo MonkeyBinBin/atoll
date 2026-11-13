@@ -505,8 +505,7 @@ public final class CoreRPCAdapter: HerdrClient, @unchecked Sendable {
         }
         if let error = herdrAppError(output.stdout) ?? herdrAppError(output.stderr) { throw error }
         guard output.status == 0 else {
-            let message = String(decoding: output.stderr.isEmpty ? output.stdout : output.stderr, as: UTF8.self)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let message = output.errorText.trimmingCharacters(in: .whitespacesAndNewlines)
             throw HerdrError(kind: "app_command_failed", message: message.isEmpty ? "\(tool) exited with \(output.status)" : message)
         }
         return output.stdout

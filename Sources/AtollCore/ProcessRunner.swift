@@ -10,13 +10,23 @@ enum ProcessRunner {
         var exited: Bool
         var stdout: Data
         var stderr: Data
+
+        var stdoutText: String { String(decoding: stdout, as: UTF8.self) }
+        var stderrText: String { String(decoding: stderr, as: UTF8.self) }
+        /// What a CLI said when it failed: stderr, or stdout when stderr is empty.
+        var errorText: String { stderr.isEmpty ? stdoutText : stderrText }
     }
 
+    /// A program that can't be started throws the system's error instead.
     enum Failure: Error, Equatable {
-        case couldNotStart(String)
-        /// Still running after the timeout; it was sent SIGTERM.
+        /// Still running after the timeout: stopped with SIGTERM, then SIGKILL if it ignored that.
         case timedOut
+        /// No temporary file for its output (the temporary directory isn't writable).
+        case noOutputFile(String)
     }
+
+    /// How long a program stopped for the timeout gets to exit on SIGTERM before SIGKILL.
+    static let terminationGrace: TimeInterval = 1
 
     /// The user's login shell, the one launches and agent CLI detection run through.
     static func loginShell() -> String {
@@ -38,10 +48,14 @@ enum ProcessRunner {
         process.standardInput = FileHandle.nullDevice
         let exited = DispatchSemaphore(value: 0)
         process.terminationHandler = { _ in exited.signal() }
-        do { try process.run() } catch { throw Failure.couldNotStart("\(error)") }
+        try process.run()
         if let timeout {
             guard exited.wait(timeout: .now() + timeout) == .success else {
                 process.terminate()
+                if exited.wait(timeout: .now() + terminationGrace) == .timedOut {
+                    kill(process.processIdentifier, SIGKILL)
+                    exited.wait()
+                }
                 throw Failure.timedOut
             }
         } else {
@@ -53,9 +67,9 @@ enum ProcessRunner {
 
     /// `run` off the caller's thread.
     static func run(_ executable: String, _ arguments: [String], environment: [String: String]? = nil,
-                    timeout: TimeInterval? = nil, qos: DispatchQoS.QoSClass = .userInitiated) async throws -> Output {
+                    timeout: TimeInterval? = nil) async throws -> Output {
         try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global(qos: qos).async {
+            DispatchQueue.global(qos: .userInitiated).async {
                 continuation.resume(with: Result { try run(executable, arguments, environment: environment, timeout: timeout) })
             }
         }
@@ -68,9 +82,14 @@ enum ProcessRunner {
 
         init() throws {
             guard FileManager.default.createFile(atPath: url.path, contents: nil) else {
-                throw Failure.couldNotStart("can't create \(url.path)")
+                throw Failure.noOutputFile(url.path)
             }
-            handle = try FileHandle(forWritingTo: url)
+            do {
+                handle = try FileHandle(forWritingTo: url)
+            } catch {
+                try? FileManager.default.removeItem(at: url)
+                throw Failure.noOutputFile(url.path)
+            }
         }
 
         func contents() -> Data {

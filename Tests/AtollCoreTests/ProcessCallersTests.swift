@@ -61,6 +61,7 @@ struct ProcessCallersTests {
     @Test func herdrAppThatCantStart() async {
         let error = await herdrError("/nonexistent/hc")
         #expect(error?.kind == "app_command_failed")
+        #expect(error?.message.hasPrefix("Error Domain=NSCocoaErrorDomain") == true)
     }
 
     @Test func herdrAppBackgroundChildHoldingOutputDoesntBlock() async throws {

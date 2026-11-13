@@ -37,10 +37,34 @@ struct ProcessRunnerTests {
         #expect(Date().timeIntervalSince(start) < 10)
     }
 
-    @Test func aProgramThatOutlivesTheTimeoutIsStopped() {
+    @Test func aProgramThatOutlivesTheTimeoutIsStopped() throws {
+        let pidFile = FileManager.default.temporaryDirectory.appendingPathComponent("atoll-pid-\(UUID().uuidString)").path
         let start = Date()
-        #expect(throws: ProcessRunner.Failure.timedOut) { try sh("sleep 30", timeout: 0.5) }
+        #expect(throws: ProcessRunner.Failure.timedOut) { try sh("echo $$ > \(pidFile); sleep 30", timeout: 0.5) }
         #expect(Date().timeIntervalSince(start) < 10)
+        #expect(!isRunning(try pid(in: pidFile)))
+    }
+
+    @Test func aProgramIgnoringSIGTERMIsKilled() throws {
+        let pidFile = FileManager.default.temporaryDirectory.appendingPathComponent("atoll-pid-\(UUID().uuidString)").path
+        let start = Date()
+        #expect(throws: ProcessRunner.Failure.timedOut) {
+            try sh("echo $$ > \(pidFile); trap '' TERM; while :; do sleep 0.1; done", timeout: 0.5)
+        }
+        #expect(Date().timeIntervalSince(start) < 10)
+        #expect(!isRunning(try pid(in: pidFile)))
+    }
+
+    func pid(in file: String) throws -> pid_t {
+        pid_t(try String(contentsOfFile: file, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+    }
+
+    /// Alive and not a zombie waiting to be reaped.
+    func isRunning(_ pid: pid_t) -> Bool {
+        guard pid > 0, kill(pid, 0) == 0 else { return false }
+        var info = proc_bsdinfo()
+        let size = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, Int32(MemoryLayout<proc_bsdinfo>.size))
+        return size > 0 && info.pbi_status != UInt32(SZOMB)
     }
 
     @Test func aSignalIsNotAnExit() throws {
@@ -48,9 +72,11 @@ struct ProcessRunnerTests {
         #expect(!output.exited)
     }
 
-    @Test func aProgramThatCantStart() {
-        #expect(throws: ProcessRunner.Failure.self) {
+    @Test func aProgramThatCantStartThrowsTheSystemError() {
+        #expect {
             try ProcessRunner.run("/nonexistent/tool", [])
+        } throws: { error in
+            !(error is ProcessRunner.Failure) && "\(error)".contains("Error Domain=")
         }
     }
 

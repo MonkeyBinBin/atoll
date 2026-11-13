@@ -298,7 +298,6 @@ public struct ProcessGitRunner: GitRunner {
         env["LC_ALL"] = "C"
         guard let output = try? ProcessRunner.run(gitPath, arguments, environment: env, timeout: timeout),
               output.exited else { return nil }
-        return GitOutput(status: output.status, stdout: String(decoding: output.stdout, as: UTF8.self),
-                         stderr: String(decoding: output.stderr, as: UTF8.self))
+        return GitOutput(status: output.status, stdout: output.stdoutText, stderr: output.stderrText)
     }
 }
