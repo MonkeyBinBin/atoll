@@ -888,9 +888,10 @@ public final class AgentStore {
         spaceTimer?.cancel()
         spaceTimer = nil
         let generation = spaceGeneration
-        Task { [client] in
+        // Weak like the timer it schedules: neither the read nor the next refresh keeps the store alive.
+        Task { [weak self, client] in
             let result = try? await client.spaces()
-            guard generation == self.spaceGeneration else { return }
+            guard let self, generation == self.spaceGeneration else { return }
             self.spaceRefreshing = false
             if let result, result != self.spaces {
                 self.spaces = result
