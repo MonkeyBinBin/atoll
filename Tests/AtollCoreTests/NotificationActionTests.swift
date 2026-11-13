@@ -185,7 +185,7 @@ struct NotificationActionStoreTests {
         h.status("t1", "blocked", kind: "permission", seq: 11)
         h.scheduler.advance(by: 1)
         await settle()
-        var outcomes: [PermissionResponseState] = []
+        var outcomes: [ListAnswerState] = []
         h.store.respond(.deny, to: "t1", episode: h.store.agent("t1")?.waitingSince) { outcomes.append($0) }
         await settle()
         h.store.respond(.allow, to: "t1", episode: Date(timeIntervalSince1970: 1)) { outcomes.append($0) }

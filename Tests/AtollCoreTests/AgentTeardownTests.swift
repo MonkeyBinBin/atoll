@@ -29,7 +29,7 @@ struct AgentTeardownTests {
 
     private func holdsNothing(_ store: AgentStore, for address: String) -> Bool {
         store.sendStates[address] == nil && store.keyStates[address] == nil
-            && store.permissionResponses[address] == nil && store.interruptStates[address] == nil
+            && store.listAnswers[address] == nil && store.interruptStates[address] == nil
             && store.lastInterruptError[address] == nil && !store.notifyWhenDone.contains(address)
             && store.queuedMessages[address] == nil && !store.isReadingWaitingScreen(address)
     }

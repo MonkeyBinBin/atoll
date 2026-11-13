@@ -133,8 +133,8 @@ struct QuestionResponseTests {
         h.store.respond(.option(rice), to: "t1", episode: agent.waitingSince)
         await settle()
         #expect(keys(h) == [["2"]])
-        #expect(h.store.permissionResponses["t1"] == .sent(.option(rice)))
-        #expect(h.store.permissionResponses["t1"]?.label == "飯 sent")
+        #expect(h.store.listAnswers["t1"] == .sent(.option(rice)))
+        #expect(h.store.listAnswers["t1"]?.label == "飯 sent")
     }
 
     @Test("the source says why (herdr-core status msg): the screen is still read for the options")
@@ -161,6 +161,6 @@ struct QuestionResponseTests {
         h.store.respond(.option(rice), to: "t1", episode: seen.waitingSince)
         await settle()
         #expect(keys(h).isEmpty)
-        #expect(h.store.permissionResponses["t1"] == .noLongerWaiting)
+        #expect(h.store.listAnswers["t1"] == .noLongerWaiting)
     }
 }

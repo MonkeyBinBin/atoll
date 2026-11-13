@@ -157,7 +157,7 @@ public final class AgentStore {
     public private(set) var sendStates: [String: SendState] = [:]
     public private(set) var keyStates: [String: KeyPressState] = [:]
     /// Allow / Deny pressed from the list, for the current Needs-you episode.
-    public private(set) var permissionResponses: [String: PermissionResponseState] = [:]
+    public private(set) var listAnswers: [String: ListAnswerState] = [:]
     public private(set) var interruptStates: [String: InterruptButtonState] = [:]
     public private(set) var launchState: LaunchState = .idle {
         didSet {
@@ -758,7 +758,7 @@ public final class AgentStore {
         drop(changes.addresses) { changes.remove($0) }
         drop(sendStates.keys) { sendStates[$0] = nil }
         drop(keyStates.keys) { keyStates[$0] = nil }
-        drop(permissionResponses.keys) { permissionResponses[$0] = nil }
+        drop(listAnswers.keys) { listAnswers[$0] = nil }
         drop(interruptStates.keys) { interruptStates[$0] = nil }
         drop(lastInterruptError.keys) { lastInterruptError[$0] = nil }
         drop(queuedMessages.filter { $0.value.status != .sending }.keys) { queuedMessages[$0] = nil }
@@ -837,9 +837,7 @@ public final class AgentStore {
             agent.finalMessage = finals.message(for: info.address)
             if state.isNeedsYou, let since = agent.waitingSince,
                let found = previews.result(for: info.address, episode: since) {
-                agent.waitingPreview = found.preview
-                agent.permissionChoices = found.choices
-                agent.questionChoices = found.questionChoices
+                agent.waitingDialog = found
             }
             list.append((agent, record.order))
         }
@@ -994,22 +992,22 @@ public final class AgentStore {
     /// Allow / Deny a permission dialog without opening the panel. `episode` is the `waitingSince` the user
     /// saw; if the agent has left that dialog since, nothing is sent so the key can't land in the next one.
     public func respond(
-        _ choice: PermissionChoice, to address: String, episode: Date?,
-        completion: (@MainActor (PermissionResponseState) -> Void)? = nil
+        _ choice: ListAnswer, to address: String, episode: Date?,
+        completion: (@MainActor (ListAnswerState) -> Void)? = nil
     ) {
-        if case .sending = permissionResponses[address] { return }
+        if case .sending = listAnswers[address] { return }
         guard let agent = agent(address), agent.state.isNeedsYou, let episode, agent.waitingSince == episode,
-              let key = Self.key(for: choice, of: agent) else {
+              let key = agent.key(for: choice) else {
             showNoLongerWaiting(address)
             completion?(.noLongerWaiting)
             return
         }
         cancel(.response, for: address)
         runtimes[address, default: AgentRuntime()].responseEpisode = episode
-        permissionResponses[address] = .sending(choice)
+        listAnswers[address] = .sending(choice)
         armAdvance(address)
         Task { [client = client(for: address)] in
-            let result: PermissionResponseState
+            let result: ListAnswerState
             do {
                 try await client.keys(terminal: address, keys: [key])
                 result = .sent(choice)
@@ -1022,15 +1020,7 @@ public final class AgentStore {
             completion?(result)
             // Never retried. Only shown while the agent is still in the episode it was sent for.
             guard self.runtimes[address]?.responseEpisode == episode else { return }
-            self.permissionResponses[address] = result
-        }
-    }
-
-    /// The key an answer sends, only while the agent still offers it (the option read off this episode's screen).
-    private static func key(for choice: PermissionChoice, of agent: Agent) -> String? {
-        switch choice {
-        case .allow, .deny: agent.permissionChoices?.key(for: choice)
-        case .option(let option): agent.questionChoices?.options.contains(option) == true ? option.key : nil
+            self.listAnswers[address] = result
         }
     }
 
@@ -1044,7 +1034,7 @@ public final class AgentStore {
         for (address, runtime) in runtimes {
             guard let episode = runtime.responseEpisode, waiting[address] != episode else { continue }
             runtimes[address]?.responseEpisode = nil
-            if permissionResponses[address] != .noLongerWaiting { permissionResponses[address] = nil }
+            if listAnswers[address] != .noLongerWaiting { listAnswers[address] = nil }
         }
     }
 
@@ -1052,10 +1042,10 @@ public final class AgentStore {
         // Not an agent here (any more): nothing to show the note on.
         guard isKnown(address) else { return }
         runtimes[address]?.responseEpisode = nil
-        permissionResponses[address] = .noLongerWaiting
+        listAnswers[address] = .noLongerWaiting
         schedule(.response, for: address, after: timing.interruptFeedbackDuration) { [weak self] in
             guard let self else { return }
-            if self.permissionResponses[address] == .noLongerWaiting { self.permissionResponses[address] = nil }
+            if self.listAnswers[address] == .noLongerWaiting { self.listAnswers[address] = nil }
         }
     }
 

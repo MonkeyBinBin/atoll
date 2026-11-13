@@ -499,7 +499,7 @@ struct AgentPanelView: View {
                         }
                     } label: {
                         HStack(spacing: 4) {
-                            Text(Self.chipTitle(text)).lineLimit(1)
+                            Text(Format.chipTitle(text)).lineLimit(1)
                             Text("⌘⇧\(index + 1)").foregroundStyle(.tertiary)
                         }
                         .font(.system(size: 11))
@@ -516,11 +516,6 @@ struct AgentPanelView: View {
         }
     }
 
-    /// Chips hug their text; long replies are cut (the help shows the full text).
-    static func chipTitle(_ text: String) -> String {
-        let oneLine = text.replacingOccurrences(of: "\n", with: " ")
-        return oneLine.count > 28 ? String(oneLine.prefix(27)) + "…" : oneLine
-    }
 
     /// Same path as the reply box, but leaves the draft alone.
     private func sendQuickReply(_ text: String) {

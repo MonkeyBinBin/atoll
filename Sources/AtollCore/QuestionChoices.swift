@@ -37,8 +37,7 @@ public struct QuestionChoices: Equatable, Sendable {
     public static func extract(from screen: String, tool: AgentTool, kind: BlockedKind) -> QuestionChoices? {
         guard tool == .claudeCode, kind == .question || kind == .unspecified else { return nil }
         let lines = OutputFilter.dialogLines(screen)
-        guard let header = lines.lastIndex(where: { WaitingPreview.trimmed($0).first.map { "☐☒✔".contains($0) } ?? false })
-        else { return nil }
+        guard let header = lines.lastIndex(where: WaitingPreview.isQuestionHeader) else { return nil }
         var options: [Option] = []
         var lastNumber = 0
         for line in lines[(header + 1)...] {

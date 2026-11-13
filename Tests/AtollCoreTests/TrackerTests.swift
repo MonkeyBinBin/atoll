@@ -63,7 +63,7 @@ struct WaitingPreviewTrackerTests {
         #expect(reads.calls == ["a"])
         let found = tracker.result(for: "a", episode: t0)
         #expect(found?.preview != nil)
-        #expect(found?.choices != nil)
+        #expect(found?.permissionChoices != nil)
         #expect(!tracker.isReading("a"))
         #expect(resolved == [t0])
         #expect(changed == 1)
@@ -109,7 +109,7 @@ struct WaitingPreviewTrackerTests {
         #expect(reads.calls == ["a"])
         let found = tracker.result(for: "a", episode: t0)
         #expect(found?.preview == nil)
-        #expect(found?.choices != nil)
+        #expect(found?.permissionChoices != nil)
     }
 
     @Test("a removed agent: its read never happens, and one in flight reports nothing")

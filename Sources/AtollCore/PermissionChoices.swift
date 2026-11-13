@@ -13,15 +13,6 @@ public struct PermissionChoices: Equatable, Sendable {
         self.denyKey = denyKey
     }
 
-    /// Nil for a question option, which a permission dialog never has.
-    public func key(for choice: PermissionChoice) -> String? {
-        switch choice {
-        case .allow: allowKey
-        case .deny: denyKey
-        case .option: nil
-        }
-    }
-
     public static func extract(from screen: String, tool: AgentTool, kind: BlockedKind) -> PermissionChoices? {
         guard kind == .permission || kind == .unspecified else { return nil }
         let lines = OutputFilter.dialogLines(screen)
@@ -104,38 +95,5 @@ public struct PermissionChoices: Equatable, Sendable {
     static func isNo(_ label: String) -> Bool {
         let text = withoutHotkey(label).lowercased()
         return text == "no" || text.hasPrefix("no,") || text.hasPrefix("no ")
-    }
-}
-
-/// An answer given from the list without opening the panel: a permission dialog's Allow / Deny, or one
-/// option of a question (`QuestionChoices`).
-public enum PermissionChoice: Equatable, Sendable {
-    case allow, deny
-    case option(QuestionChoices.Option)
-
-    public var label: String {
-        switch self {
-        case .allow: "Allow"
-        case .deny: "Deny"
-        case .option(let option): option.label
-        }
-    }
-}
-
-/// Answering a permission dialog or question from the list; per agent, for the episode it was pressed in.
-public enum PermissionResponseState: Equatable, Sendable {
-    case sending(PermissionChoice)
-    case sent(PermissionChoice)
-    case failed(PermissionChoice, HerdrError)
-    /// The agent had already left that dialog (or moved on to a new one): nothing was sent.
-    case noLongerWaiting
-
-    public var label: String {
-        switch self {
-        case .sending(let choice): "\(choice.label)…"
-        case .sent(let choice): "\(choice.label) sent"
-        case .failed(let choice, _): "\(choice.label) failed"
-        case .noLongerWaiting: "No longer waiting"
-        }
     }
 }

@@ -77,6 +77,12 @@ extension AgentState {
 }
 
 enum Format {
+    /// Chips hug their text; long text is cut (the help shows the full text).
+    static func chipTitle(_ text: String) -> String {
+        let oneLine = text.replacingOccurrences(of: "\n", with: " ")
+        return oneLine.count > 28 ? String(oneLine.prefix(27)) + "…" : oneLine
+    }
+
     static let clock: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "HH:mm"

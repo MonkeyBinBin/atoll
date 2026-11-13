@@ -232,8 +232,8 @@ struct AgentCard: View {
                     PermissionButtons(agent: agent, store: store, selected: selected)
                 } else if let choices = agent.questionChoices {
                     QuestionButtons(agent: agent, choices: choices, store: store)
-                } else if let response = store.permissionResponses[agent.address] {
-                    PermissionResponseLabel(state: response)
+                } else if let response = store.listAnswers[agent.address] {
+                    ListAnswerLabel(state: response)
                 }
                 if let summary = agent.changeSummary {
                     ChangeSummaryLabel(summary: summary)
@@ -337,19 +337,13 @@ struct PermissionButtons: View {
     let selected: Bool
 
     var body: some View {
-        let response = store.permissionResponses[agent.address]
-        let sending: Bool = if case .sending = response { true } else { false }
-        HStack(spacing: 6) {
+        ListAnswerRow(agent: agent, store: store) { sending in
             button(.allow, shortcut: "⌘Y", disabled: sending)
             button(.deny, shortcut: "⌘N", disabled: sending)
-            if let response {
-                PermissionResponseLabel(state: response)
-            }
         }
-        .padding(.top, 1)
     }
 
-    private func button(_ choice: PermissionChoice, shortcut: String, disabled: Bool) -> some View {
+    private func button(_ choice: ListAnswer, shortcut: String, disabled: Bool) -> some View {
         Button {
             store.respond(choice, to: agent.address, episode: agent.waitingSince)
         } label: {
@@ -379,10 +373,8 @@ struct QuestionButtons: View {
     private var tint: Color { agent.state.color }
 
     var body: some View {
-        let response = store.permissionResponses[agent.address]
-        let sending: Bool = if case .sending = response { true } else { false }
         // Wraps instead of widening the row when the labels are long.
-        FlowLayout(spacing: 6, lineSpacing: 4) {
+        ListAnswerRow(agent: agent, store: store, wraps: true) { sending in
             ForEach(Array(choices.options.enumerated()), id: \.offset) { _, option in
                 Button {
                     store.respond(.option(option), to: agent.address, episode: agent.waitingSince)
@@ -391,7 +383,7 @@ struct QuestionButtons: View {
                         Text(option.key)
                             .font(.system(size: 10, weight: .semibold, design: .monospaced))
                             .foregroundStyle(tint)
-                        Text(AgentPanelView.chipTitle(option.label))
+                        Text(Format.chipTitle(option.label))
                             .font(.system(size: 11, weight: .medium))
                             .lineLimit(1)
                     }
@@ -406,8 +398,26 @@ struct QuestionButtons: View {
                 .opacity(sending ? 0.5 : 1)
                 .help([option.label, option.detail].compactMap { $0 }.joined(separator: "\n"))
             }
+        }
+    }
+}
+
+/// The frame both answer rows share: the buttons (disabled while an answer is sending), then the answer's
+/// state ("Allow sent", "No longer waiting"…).
+struct ListAnswerRow<Buttons: View>: View {
+    let agent: Agent
+    let store: AgentStore
+    var wraps = false
+    @ViewBuilder let buttons: (_ sending: Bool) -> Buttons
+
+    var body: some View {
+        let response = store.listAnswers[agent.address]
+        let sending: Bool = if case .sending = response { true } else { false }
+        let layout = wraps ? AnyLayout(FlowLayout(spacing: 6, lineSpacing: 4)) : AnyLayout(HStackLayout(spacing: 6))
+        layout {
+            buttons(sending)
             if let response {
-                PermissionResponseLabel(state: response)
+                ListAnswerLabel(state: response)
             }
         }
         .padding(.top, 1)
@@ -415,8 +425,8 @@ struct QuestionButtons: View {
 }
 
 /// "Allow sent" / "Deny failed" / "No longer waiting".
-struct PermissionResponseLabel: View {
-    let state: PermissionResponseState
+struct ListAnswerLabel: View {
+    let state: ListAnswerState
 
     var body: some View {
         let failed: Bool = switch state {

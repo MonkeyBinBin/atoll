@@ -70,7 +70,7 @@ public struct WaitingPreview: Equatable, Sendable {
     ///   2. Blue
     ///   3. Type something.
     static func claudeQuestion(_ lines: [String]) -> WaitingPreview? {
-        guard let header = lines.lastIndex(where: { trimmed($0).first.map { "☐☒✔".contains($0) } ?? false }) else { return nil }
+        guard let header = lines.lastIndex(where: isQuestionHeader) else { return nil }
         var question: String?
         var options: [String] = []
         for line in lines[(header + 1)...] {
@@ -126,6 +126,15 @@ public struct WaitingPreview: Equatable, Sendable {
         guard !digits.isEmpty, rest.dropFirst(digits.count).hasPrefix(". ") else { return nil }
         let label = rest.dropFirst(digits.count + 2).trimmingCharacters(in: .whitespaces)
         return label.isEmpty ? nil : label
+    }
+
+    /// The checkbox Claude Code puts before a question's header (unanswered / answered / done).
+    static let questionHeaderMarks: Set<Character> = ["☐", "☒", "✔"]
+
+    /// " ☐ Header": the line a single question starts at. The tabbed "←  ☐ A  ☐ B  ✔ Submit  →" header of
+    /// several questions or a multiSelect starts with an arrow instead.
+    static func isQuestionHeader(_ line: String) -> Bool {
+        trimmed(line).first.map(questionHeaderMarks.contains) ?? false
     }
 
     static func isRule(_ line: String, _ glyph: Character) -> Bool {

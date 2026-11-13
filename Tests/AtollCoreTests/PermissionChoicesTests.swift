@@ -96,13 +96,13 @@ struct PermissionResponseTests {
         let agent = try #require(h.store.agent("t1"))
         #expect(agent.permissionChoices == PermissionChoices(allowKey: "1", denyKey: "4"))
         h.store.respond(.allow, to: "t1", episode: agent.waitingSince)
-        #expect(h.store.permissionResponses["t1"] == .sending(.allow))
+        #expect(h.store.listAnswers["t1"] == .sending(.allow))
         await settle()
         #expect(keys(h) == [["1"]])
-        #expect(h.store.permissionResponses["t1"] == .sent(.allow))
+        #expect(h.store.listAnswers["t1"] == .sent(.allow))
         // Leaving Needs you clears it.
         h.status("t1", "working", seq: 12)
-        #expect(h.store.permissionResponses["t1"] == nil)
+        #expect(h.store.listAnswers["t1"] == nil)
     }
 
     @Test("Deny sends the dialog's No key")
@@ -127,9 +127,9 @@ struct PermissionResponseTests {
         h.store.respond(.allow, to: "t1", episode: seen)
         await settle()
         #expect(keys(h).isEmpty)
-        #expect(h.store.permissionResponses["t1"] == .noLongerWaiting)
+        #expect(h.store.listAnswers["t1"] == .noLongerWaiting)
         h.scheduler.advance(by: h.store.timing.interruptFeedbackDuration)
-        #expect(h.store.permissionResponses["t1"] == nil)
+        #expect(h.store.listAnswers["t1"] == nil)
     }
 
     @Test("no longer Needs you: nothing sent")
@@ -140,7 +140,7 @@ struct PermissionResponseTests {
         h.store.respond(.allow, to: "t1", episode: seen)
         await settle()
         #expect(keys(h).isEmpty)
-        #expect(h.store.permissionResponses["t1"] == .noLongerWaiting)
+        #expect(h.store.listAnswers["t1"] == .noLongerWaiting)
     }
 
     @Test("a failed send is reported and never retried")
@@ -153,7 +153,7 @@ struct PermissionResponseTests {
         h.scheduler.advance(by: 10)
         await settle()
         #expect(keys(h) == [["1"]])
-        #expect(h.store.permissionResponses["t1"] == .failed(.allow, .unavailable("gone")))
+        #expect(h.store.listAnswers["t1"] == .failed(.allow, .unavailable("gone")))
     }
 
     @Test("the source says why (status msg): the screen is still read for the keys, the preview stays the msg")

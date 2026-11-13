@@ -6,17 +6,11 @@ import Foundation
 /// copies the result onto the waiting ones.
 @MainActor
 final class WaitingPreviewTracker {
-    struct Result: Equatable {
-        var preview: WaitingPreview?
-        var choices: PermissionChoices?
-        var questionChoices: QuestionChoices?
-    }
-
     private struct Episode {
         var since: Date
         /// The agent as last seen in this episode: its tool, kind and message decide what the read keeps.
         var agent: Agent
-        var result = Result()
+        var result = WaitingDialog()
         var resolved = false
         var timer: ScheduledAction?
     }
@@ -66,7 +60,7 @@ final class WaitingPreviewTracker {
     }
 
     /// What the read found for this episode (empty while reading or when nothing was recognized).
-    func result(for address: String, episode: Date) -> Result? {
+    func result(for address: String, episode: Date) -> WaitingDialog? {
         guard let current = episodes[address], current.since == episode else { return nil }
         return current.result
     }
@@ -102,7 +96,7 @@ final class WaitingPreviewTracker {
             guard self.episodes[address]?.since == since else { return }
             if let text, let preview = WaitingPreview.extract(from: text, tool: tool, kind: kind) {
                 if keepPreview { self.episodes[address]?.result.preview = preview }
-                self.episodes[address]?.result.choices = PermissionChoices.extract(from: text, tool: tool, kind: kind)
+                self.episodes[address]?.result.permissionChoices = PermissionChoices.extract(from: text, tool: tool, kind: kind)
                 self.episodes[address]?.result.questionChoices = QuestionChoices.extract(from: text, tool: tool, kind: kind)
             }
             self.onChange()

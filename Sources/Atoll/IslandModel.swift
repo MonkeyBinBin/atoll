@@ -442,7 +442,7 @@ final class IslandModel {
     }
 
     /// ⌘Y / ⌘N on the selected row: answer its permission dialog without opening the panel.
-    func respondToSelected(_ choice: PermissionChoice) {
+    func respondToSelected(_ choice: ListAnswer) {
         let agents = listAgents
         guard mode == .list, agents.indices.contains(selection) else { return }
         let agent = agents[selection]

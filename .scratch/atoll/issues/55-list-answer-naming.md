@@ -4,13 +4,13 @@
 
 **Blocked by:** —
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] 改名：`PermissionChoice` → 涵蓋 Allow／Deny 與提問選項的名稱（例如 `ListAnswer`），連帶 `PermissionResponseState`、`AgentStore.permissionResponses`、`PermissionResponseLabel`；`WaitingPreviewTracker.Result.choices` 改成 `permissionChoices`
-- [ ] 「答案 → 按鍵」的 switch 只留一處：`AgentStore.key(for:of:)` 搬到 `Agent`（它只讀 agent 的資料），`PermissionChoices.key(for:)` 回到不接受提問選項的形狀
-- [ ] 本 episode 讀到的對話框資料（preview、permission 選項、提問選項）以一個型別在 tracker → store → `Agent` 之間傳遞，不再逐欄複製
-- [ ] `QuestionButtons` 與 `PermissionButtons` 共用外框（回覆狀態、送出中停用、尾端狀態標籤）；`chipTitle` 移到兩者都能用的中立位置
-- [ ] header 判斷用的 `"☐☒✔"` 抽成具名常數，與 `freeText` 一致
+- [x] 改名：`PermissionChoice` → 涵蓋 Allow／Deny 與提問選項的名稱（例如 `ListAnswer`），連帶 `PermissionResponseState`、`AgentStore.permissionResponses`、`PermissionResponseLabel`；`WaitingPreviewTracker.Result.choices` 改成 `permissionChoices`
+- [x] 「答案 → 按鍵」的 switch 只留一處：`AgentStore.key(for:of:)` 搬到 `Agent`（它只讀 agent 的資料），`PermissionChoices.key(for:)` 回到不接受提問選項的形狀
+- [x] 本 episode 讀到的對話框資料（preview、permission 選項、提問選項）以一個型別在 tracker → store → `Agent` 之間傳遞，不再逐欄複製
+- [x] `QuestionButtons` 與 `PermissionButtons` 共用外框（回覆狀態、送出中停用、尾端狀態標籤）；`chipTitle` 移到兩者都能用的中立位置
+- [x] header 判斷用的 `"☐☒✔"` 抽成具名常數，與 `freeText` 一致
 
 **Out of scope:** 任何行為變更。
 
@@ -45,16 +45,18 @@ Permission 的 Allow／Deny 與提問選項共用同一條回答路徑，但型�
 - 呼叫端包含 `Notifier`（通知的 Allow／Deny 動作）、`IslandModel.respondToSelected`、`DebugHook` 的 allow／deny 指令、清單列、hover card、面板
 
 **Acceptance criteria:**
-- [ ] `swift test` 全數通過；既有測試只做改名與型別替換，不刪除、不放寬任何斷言
-- [ ] 程式碼中不再有承載提問選項、卻以 `Permission` 命名的型別或屬性
-- [ ] 答案到按鍵的 switch 只出現一處；`PermissionChoices` 的按鍵查詢回傳非 optional
-- [ ] tracker → store → `Agent` 之間沒有逐欄複製對話框資料的程式碼
-- [ ] `QuestionButtons` 與 `PermissionButtons` 共用外框；不再有 view 呼叫另一個 view 的 static helper
-- [ ] `"☐☒✔"` 只定義一次
-- [ ] `./scripts/build-app.sh` 成功
+- [x] `swift test` 全數通過；既有測試只做改名與型別替換，不刪除、不放寬任何斷言
+- [x] 程式碼中不再有承載提問選項、卻以 `Permission` 命名的型別或屬性
+- [x] 答案到按鍵的 switch 只出現一處；`PermissionChoices` 的按鍵查詢回傳非 optional
+- [x] tracker → store → `Agent` 之間沒有逐欄複製對話框資料的程式碼
+- [x] `QuestionButtons` 與 `PermissionButtons` 共用外框；不再有 view 呼叫另一個 view 的 static helper
+- [x] `"☐☒✔"` 只定義一次
+- [x] `./scripts/build-app.sh` 成功
 
 **Out of scope:**
 - 任何行為或 UI 外觀的改變（包括文字、版面、快捷鍵）
 - 新增對話框種類（Codex 提問、multiSelect、多題）
 - 調整讀畫面的時機或條件（`needsScreenRead`）
 - 畫面解析規則本身（`QuestionChoices.extract`、`PermissionChoices.extract`、`OutputFilter`）
+- 2026-11-13（agent）：完成，行為不變。`PermissionChoice`／`PermissionResponseState`／`permissionResponses`／`PermissionResponseLabel` 改名為 `ListAnswer`／`ListAnswerState`／`listAnswers`／`ListAnswerLabel`，移到 `ListAnswer.swift`。答案到按鍵只剩 `Agent.key(for:)`（先寫 `ListAnswerKeyTests` 3 個紅燈測試再實作），`PermissionChoices.key(for:)` 與 `AgentStore` 的 static 版本移除。新增 `WaitingDialog`（preview、permission 選項、提問選項），tracker 直接產出、store 整個交給 `Agent.waitingDialog`；`waitingPreview`／`permissionChoices`／`questionChoices` 保留為由它衍生的計算屬性（含 setter，測試與呼叫端不用改），資料只有一份。`ListAnswerRow` 為兩種按鈕列的共用外框（permission 用 `HStackLayout`、提問用 `FlowLayout`，跟原本相同）；`chipTitle` 移到 `Format`。提問標題的判斷改為 `WaitingPreview.questionHeaderMarks`／`isQuestionHeader`，兩邊共用。既有測試只有改名（`git diff` 刪除的每一行都有對應的改名版本），全套 510 個通過，`build-app.sh` 成功。
+- 2026-11-13（使用者）：安裝後實測 permission 與提問按鈕，外觀與行為都正常。

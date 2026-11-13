@@ -158,7 +158,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
-    private func respond(_ choice: PermissionChoice, _ address: String, _ episode: Date?) {
+    private func respond(_ choice: ListAnswer, _ address: String, _ episode: Date?) {
         store.respond(choice, to: address, episode: episode) { [weak self] state in
             switch state {
             case .noLongerWaiting: self?.postOutcome(address, "No longer waiting · nothing was sent")
