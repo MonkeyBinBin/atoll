@@ -30,6 +30,40 @@ struct AgentCLITests {
         #expect(AgentCLI.matching(app: "claude") == nil)
     }
 
+    @Test func startsFromTheSavedDetection() async {
+        let detector = AgentCLIDetector(clis: clis, saved: ["opencode"], detect: { _ in nil })
+        #expect(await detector.lastKnown?.map(\.command) == ["opencode"])
+    }
+
+    @Test func aSuccessfulDetectionIsSaved() async {
+        let saved = SavedDetections()
+        let detector = AgentCLIDetector(clis: clis, onDetected: saved.record, detect: { clis in [clis[1]] })
+        _ = await detector.refresh()
+        #expect(saved.all == [["opencode"]])
+    }
+
+    @Test func anUnchangedDetectionIsntSavedAgain() async {
+        let saved = SavedDetections()
+        let detector = AgentCLIDetector(clis: clis, saved: ["opencode"], onDetected: saved.record,
+                                        detect: { clis in [clis[1]] })
+        _ = await detector.refresh()
+        _ = await detector.refresh()
+        #expect(saved.all.isEmpty)
+    }
+
+    @Test func aFailedDetectionKeepsTheSavedOneAndSavesNothing() async {
+        let saved = SavedDetections()
+        let detector = AgentCLIDetector(clis: clis, saved: ["droid"], onDetected: saved.record, detect: { _ in nil })
+        #expect(await detector.refresh() == nil)
+        #expect(await detector.lastKnown?.map(\.command) == ["droid"])
+        #expect(saved.all.isEmpty)
+    }
+
+    @Test func savedCommandsNoLongerInTheCatalogAreIgnored() async {
+        let detector = AgentCLIDetector(clis: clis, saved: ["opencode", "aider", "droid"], detect: { _ in nil })
+        #expect(await detector.lastKnown?.map(\.command) == ["droid", "opencode"])
+    }
+
     @Test func taskPassing() {
         #expect(TaskPassing.lastArgument.apply(argv: ["droid"], task: "fix it") == (["droid"], "fix it"))
         #expect(TaskPassing.flag("--prompt").apply(argv: ["opencode"], task: "fix it") == (["opencode", "--prompt"], "fix it"))
@@ -74,5 +108,17 @@ struct AgentCLIProcessTests {
         let broken = AgentCLIDetector(clis: clis, shell: "/nonexistent/shell")
         #expect(await broken.refresh() == nil)
         #expect(await broken.lastKnown == nil)
+    }
+}
+
+/// What a detector handed to `onDetected`, in order.
+final class SavedDetections: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [[String]] = []
+
+    var all: [[String]] { lock.withLock { values } }
+
+    @Sendable func record(_ commands: [String]) {
+        lock.withLock { values.append(commands) }
     }
 }

@@ -122,6 +122,8 @@ final class IslandModel {
 
     let store: AgentStore
     let settings: AppSettings
+    /// Finds installed agent CLIs for the launch form; the app replaces it with one that saves its results.
+    var agentCLIDetector = AgentCLIDetector()
     var mode: Mode = .collapsed {
         didSet {
             guard mode != oldValue else { return }

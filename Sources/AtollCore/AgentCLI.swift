@@ -108,29 +108,39 @@ public struct AgentCLI: Equatable, Sendable {
 
 /// Remembers the last detection so the launch form can show installed CLIs at once, refreshing in the background.
 public actor AgentCLIDetector {
-    public static let shared = AgentCLIDetector()
+    public typealias Detect = @Sendable ([AgentCLI]) async -> [AgentCLI]?
 
     private let clis: [AgentCLI]
-    private let shell: String
-    private let timeout: TimeInterval
+    private let detect: Detect
+    private let onDetected: @Sendable ([String]) -> Void
     private var running: Task<[AgentCLI]?, Never>?
     /// The last successful detection; nil until one succeeds.
     public private(set) var lastKnown: [AgentCLI]?
 
-    public init(clis: [AgentCLI] = AgentCLI.catalog, shell: String? = nil, timeout: TimeInterval = 5) {
+    /// `saved`: the commands a previous launch of the app detected, shown until the first refresh.
+    /// `onDetected` gets the commands whenever a successful detection differs from `lastKnown`, for the app to save.
+    /// `detect` replaces the login-shell detection (tests).
+    public init(clis: [AgentCLI] = AgentCLI.catalog, saved: [String]? = nil,
+                onDetected: @escaping @Sendable ([String]) -> Void = { _ in },
+                shell: String? = nil, timeout: TimeInterval = 5, detect: Detect? = nil) {
         self.clis = clis
-        self.shell = shell ?? CoreRPCAdapter.loginShell()
-        self.timeout = timeout
+        self.onDetected = onDetected
+        let shell = shell ?? CoreRPCAdapter.loginShell()
+        self.detect = detect ?? { clis in await AgentCLI.detect(clis, shell: shell, timeout: timeout) }
+        lastKnown = saved.map { commands in clis.filter { commands.contains($0.command) } }
     }
 
     /// Detects again (joining a detection already running). nil when it failed; `lastKnown` is then kept.
     public func refresh() async -> [AgentCLI]? {
         if let running { return await running.value }
-        let task = Task { [clis, shell, timeout] in await AgentCLI.detect(clis, shell: shell, timeout: timeout) }
+        let task = Task { [clis, detect] in await detect(clis) }
         running = task
         let result = await task.value
         running = nil
-        if let result { lastKnown = result }
+        if let result, result != lastKnown {
+            lastKnown = result
+            onDetected(result.map(\.command))
+        }
         return result
     }
 }

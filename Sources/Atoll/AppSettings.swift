@@ -88,6 +88,8 @@ final class AppSettings {
     var recentFolders: [String] { didSet { defaults.set(recentFolders, forKey: "recentFolders") } }
     /// Folders pinned at the top of the launch form's Folder menu, in the user's order.
     var pinnedFolders: [String] { didSet { defaults.set(pinnedFolders, forKey: "pinnedFolders") } }
+    /// The agent CLI commands last found on this Mac (nil before the first detection), shown at once next launch.
+    var detectedAgentCLIs: [String]? { didSet { defaults.set(detectedAgentCLIs, forKey: "detectedAgentCLIs") } }
     /// The last spaces read from the Herdr app, for launches while it isn't running.
     var herdrSpaceCache: [HerdrSpace] { didSet { save(herdrSpaceCache, "herdrSpaceCache") } }
     /// Names waiting for spaces that launches without the Herdr app made (space id → name).
@@ -165,6 +167,7 @@ final class AppSettings {
         islandSpace = defaults.string(forKey: "islandSpace") ?? ""
         recentFolders = defaults.stringArray(forKey: "recentFolders") ?? []
         pinnedFolders = defaults.stringArray(forKey: "pinnedFolders") ?? []
+        detectedAgentCLIs = defaults.stringArray(forKey: "detectedAgentCLIs")
         herdrSpaceCache = Self.load("herdrSpaceCache", defaults) ?? []
         pendingSpaceNames = defaults.dictionary(forKey: "pendingSpaceNames") as? [String: String] ?? [:]
         recentLaunches = Self.load("recentLaunches", defaults) ?? []

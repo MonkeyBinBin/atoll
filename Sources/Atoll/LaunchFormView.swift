@@ -389,7 +389,7 @@ struct LaunchFormView: View {
         spacesLoaded = true
         // Installed CLIs: the last detection shows at once and is refreshed in the background; only the first
         // detection is waited for (alongside the templates).
-        let detector = AgentCLIDetector.shared
+        let detector = model.agentCLIDetector
         let refresh = Task { await detector.refresh() }
         let cached = await detector.lastKnown
         let templates = try? await client?.templates()
