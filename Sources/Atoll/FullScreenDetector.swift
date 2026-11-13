@@ -1,11 +1,10 @@
 import AppKit
+import AtollCore
 
 /// Tells whether a screen is showing a full-screen app, without Screen Recording or Accessibility:
 /// only window bounds, layer and owner pid from CGWindowList are read (never titles).
 ///
-/// A full-screen space has a normal-layer window whose bounds equal the screen frame exactly;
-/// windowed, zoomed or tiled windows stop at the menu bar / Dock / tiling gaps. Verified on
-/// macOS 26 with a native full-screen window (ticket 25).
+/// The rule itself lives in `FullScreenWindows` (AtollCore); see there and tickets 25 / 53.
 @MainActor
 final class FullScreenDetector {
     /// Re-checks after a space or app switch: the full-screen animation takes about a second
@@ -42,18 +41,17 @@ final class FullScreenDetector {
         guard let primary = NSScreen.screens.first,
               let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
         else { return false }
-        // CGWindowList uses top-left origin on the primary display.
-        let frame = screen.frame
-        let target = CGRect(x: frame.minX, y: primary.frame.height - frame.maxY, width: frame.width, height: frame.height)
-        let ownPID = Int(ProcessInfo.processInfo.processIdentifier)
-        for window in list {
-            guard (window[kCGWindowLayer as String] as? Int) == 0,
-                  (window[kCGWindowOwnerPID as String] as? Int) != ownPID,
+        let windows = list.compactMap { window -> WindowSnapshot? in
+            guard let layer = window[kCGWindowLayer as String] as? Int,
+                  let pid = window[kCGWindowOwnerPID as String] as? Int,
                   let dict = window[kCGWindowBounds as String] as? NSDictionary,
                   let bounds = CGRect(dictionaryRepresentation: dict)
-            else { continue }
-            if bounds.integral == target.integral { return true }
+            else { return nil }
+            return WindowSnapshot(layer: layer, pid: pid, bounds: bounds)
         }
-        return false
+        return FullScreenWindows.isFullScreen(
+            windows, screen: screen.frame, primaryHeight: primary.frame.height,
+            ownPID: Int(ProcessInfo.processInfo.processIdentifier)
+        )
     }
 }
