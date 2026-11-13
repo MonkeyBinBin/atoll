@@ -40,17 +40,31 @@ public struct QuestionChoices: Equatable, Sendable {
         guard let header = lines.lastIndex(where: { WaitingPreview.trimmed($0).first.map { "☐☒✔".contains($0) } ?? false })
         else { return nil }
         var options: [Option] = []
+        var lastNumber = 0
         for line in lines[(header + 1)...] {
             let text = WaitingPreview.trimmed(line)
             if text.isEmpty { continue }
             if WaitingPreview.isRule(line, "─") { break }
-            if let label = WaitingPreview.numberedOption(text, marker: "❯") {
+            if let (number, label) = numbered(text) {
+                // The key is the number on screen; anything but 1, 2, 3… means the layout isn't what it seems.
+                guard number == lastNumber + 1 else { return nil }
+                lastNumber = number
                 if freeText.contains(label) { continue }
-                options.append(Option(label: label, key: String(options.count + 1)))
+                options.append(Option(label: label, key: String(number)))
             } else if let last = options.indices.last, options[last].detail == nil {
                 options[last].detail = text
             }
         }
         return options.isEmpty ? nil : QuestionChoices(options: options)
+    }
+
+    /// "❯ 1. Label" / "2. Label" → (number, label).
+    static func numbered(_ text: String) -> (Int, String)? {
+        var rest = Substring(text)
+        if rest.first == "❯" { rest = rest.dropFirst().drop { $0 == " " } }
+        let digits = rest.prefix { $0.isNumber }
+        guard let number = Int(digits), rest.dropFirst(digits.count).hasPrefix(". ") else { return nil }
+        let label = rest.dropFirst(digits.count + 2).trimmingCharacters(in: .whitespaces)
+        return label.isEmpty ? nil : (number, label)
     }
 }

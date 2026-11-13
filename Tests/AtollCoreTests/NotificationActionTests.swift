@@ -128,11 +128,11 @@ struct NotificationActionStoreTests {
         #expect(seen?.waitingPreview?.title == "Bash: touch hello.txt")
     }
 
-    @Test("no read needed (question with a status msg): not reading")
+    @Test("no read needed (an unknown tool with a status msg): not reading")
     func noRead() {
         let h = Harness()
         h.connect([term("t1", "working")])
-        h.client.emit(.event(seq: 11, .status(terminal: "t1", status: CoreStatus(state: "blocked", app: "claude-code", kind: "question", msg: "answer: x?"), reported: true)))
+        h.client.emit(.event(seq: 11, .status(terminal: "t1", status: CoreStatus(state: "blocked", app: "some-agent", kind: "question", msg: "answer: x?"), reported: true)))
         #expect(!h.store.isReadingWaitingScreen("t1"))
     }
 

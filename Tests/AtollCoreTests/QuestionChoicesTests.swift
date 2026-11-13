@@ -91,6 +91,15 @@ struct QuestionChoicesExtractionTests {
         #expect(choices?.options.first?.detail == "湯麵或乾麵都行，出餐快，吃起來方便。")
     }
 
+    @Test("numbers that don't run 1, 2, 3… aren't trusted: a key could select a different option than its label")
+    func nonConsecutive() {
+        let gap = QuestionScreens.single.replacingOccurrences(of: "  2. 飯", with: "  3. 飯")
+        #expect(QuestionChoices.extract(from: gap, tool: .claudeCode, kind: .question) == nil)
+        // A detail line that itself reads like a numbered option.
+        let lookalike = QuestionScreens.single.replacingOccurrences(of: "     便當或燴飯，份量足，比較耐餓。", with: "     1. 先點湯再點飯")
+        #expect(QuestionChoices.extract(from: lookalike, tool: .claudeCode, kind: .question) == nil)
+    }
+
     @Test("multiSelect and several questions (the ← tabs → header) aren't offered: a number key wouldn't answer them")
     func notSingle() {
         #expect(QuestionChoices.extract(from: QuestionScreens.multiSelect, tool: .claudeCode, kind: .question) == nil)
@@ -126,6 +135,17 @@ struct QuestionResponseTests {
         #expect(keys(h) == [["2"]])
         #expect(h.store.permissionResponses["t1"] == .sent(.option(rice)))
         #expect(h.store.permissionResponses["t1"]?.label == "飯 sent")
+    }
+
+    @Test("the source says why (herdr-core status msg): the screen is still read for the options")
+    func statusMessage() async throws {
+        let h = Harness()
+        h.client.readResult = .success(ReadOutput(text: QuestionScreens.single, how: "screen"))
+        h.connect([term("t1", "working")])
+        h.client.emit(.event(seq: 11, .status(terminal: "t1", status: CoreStatus(state: "blocked", app: "claude-code", kind: "question", msg: "午餐要吃什麼？"), reported: true)))
+        h.scheduler.advance(by: h.store.timing.previewDelay)
+        await settle()
+        #expect(h.store.agent("t1")?.questionChoices?.options.map(\.label) == ["麵", "飯", "粥"])
     }
 
     @Test("a new question since the user looked: nothing sent, \"No longer waiting\"")

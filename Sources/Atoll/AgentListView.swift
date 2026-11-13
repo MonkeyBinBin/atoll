@@ -381,7 +381,8 @@ struct QuestionButtons: View {
     var body: some View {
         let response = store.permissionResponses[agent.address]
         let sending: Bool = if case .sending = response { true } else { false }
-        HStack(spacing: 6) {
+        // Wraps instead of widening the row when the labels are long.
+        FlowLayout(spacing: 6, lineSpacing: 4) {
             ForEach(Array(choices.options.enumerated()), id: \.offset) { _, option in
                 Button {
                     store.respond(.option(option), to: agent.address, episode: agent.waitingSince)

@@ -1,7 +1,7 @@
 import Foundation
 
 /// One screen read per Needs-you episode: for the preview when the source didn't say why (`statusMessage`),
-/// and for a permission dialog's answer keys even when it did. Leaving Needs you (or a new episode) drops
+/// and for a permission dialog's answer keys or a question's options even when it did. Leaving Needs you (or a new episode) drops
 /// both: the only screen text kept with the panel closed. The store feeds it the agents on every rebuild and
 /// copies the result onto the waiting ones.
 @MainActor
@@ -80,10 +80,12 @@ final class WaitingPreviewTracker {
         episodes.removeValue(forKey: address)?.timer?.cancel()
     }
 
+    /// Without a source message the screen gives the preview; with one, it's still read for what can be
+    /// answered from the list: a permission dialog's keys or a question's options.
     private static func needsScreenRead(_ agent: Agent) -> Bool {
         if agent.statusMessage == nil { return true }
         guard agent.tool != .generic, let kind = agent.state.blockedKind else { return false }
-        return kind == .permission || kind == .unspecified
+        return kind == .permission || kind == .question || kind == .unspecified
     }
 
     private func readScreen(_ address: String, episode since: Date) {

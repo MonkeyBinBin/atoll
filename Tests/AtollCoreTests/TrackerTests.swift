@@ -98,10 +98,10 @@ struct WaitingPreviewTrackerTests {
         #expect(!tracker.isReading("a"))
     }
 
-    @Test("with a status message only a known tool's permission dialog is read, for its keys only")
+    @Test("with a status message only a known tool's dialog is read (permission keys, question options); the preview stays the message")
     func withMessage() async {
         tracker.sync([waiting("q", .question, message: "Pick a color"), waiting("g", message: "x", tool: .generic)])
-        #expect(!tracker.isReading("q"))
+        #expect(tracker.isReading("q"))
         #expect(!tracker.isReading("g"))
         tracker.sync([waiting(message: "Bash: touch hello.txt")])
         scheduler.advance(by: 0.6)
