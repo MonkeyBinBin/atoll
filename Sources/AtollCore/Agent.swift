@@ -160,12 +160,14 @@ public struct Agent: Identifiable, Equatable, Sendable {
     public var spaceName: String?
     /// What its last finished turn changed in git; cleared when the next turn starts.
     public var changeSummary: ChangeSummary?
-    /// What this Needs-you episode's one screen read found; nil until it lands, and outside Needs you.
-    public var waitingDialog: WaitingDialog?
+    /// What this Needs-you episode's one screen read found; nil until it finds something, and outside Needs you.
+    public var waitingDialog: WaitingDialog? {
+        didSet { if waitingDialog?.isEmpty == true { waitingDialog = nil } }
+    }
     /// Why it waits, read once from its screen when the source gave no `statusMessage`; Needs you only.
     public var waitingPreview: WaitingPreview? {
         get { waitingDialog?.preview }
-        set { waitingDialog = (waitingDialog ?? WaitingDialog()).with { $0.preview = newValue } }
+        set { editDialog { $0.preview = newValue } }
     }
     /// The last lines the agent wrote, read from its screen once when a turn ended without a `statusMessage`.
     /// Dropped when the next turn starts.
@@ -178,16 +180,23 @@ public struct Agent: Identifiable, Equatable, Sendable {
     /// What the agent last said, for the list, hover card and bubble: the source's own summary
     /// (`statusMessage`), else the lines read off its screen when the turn ended.
     public var lastWords: String? { statusMessage ?? finalMessage?.text }
+
     /// Keys for answering its permission dialog straight from the list; only when the dialog's layout was
     /// recognized on screen in this Needs-you episode.
     public var permissionChoices: PermissionChoices? {
         get { waitingDialog?.permissionChoices }
-        set { waitingDialog = (waitingDialog ?? WaitingDialog()).with { $0.permissionChoices = newValue } }
+        set { editDialog { $0.permissionChoices = newValue } }
     }
     /// Options for answering its question straight from the list or panel; same rules as `permissionChoices`.
     public var questionChoices: QuestionChoices? {
         get { waitingDialog?.questionChoices }
-        set { waitingDialog = (waitingDialog ?? WaitingDialog()).with { $0.questionChoices = newValue } }
+        set { editDialog { $0.questionChoices = newValue } }
+    }
+    /// Sets one field of the dialog; an all-empty dialog goes back to nil (see `waitingDialog`).
+    private mutating func editDialog(_ change: (inout WaitingDialog) -> Void) {
+        var dialog = waitingDialog ?? WaitingDialog()
+        change(&dialog)
+        waitingDialog = dialog
     }
     /// Other active agents in the same git working tree (addresses); empty unless this one is active too.
     public var sharedTreeWith: [String] = []

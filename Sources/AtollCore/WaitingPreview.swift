@@ -120,12 +120,17 @@ public struct WaitingPreview: Equatable, Sendable {
 
     /// "❯ 1. Red" / "2. Blue" → the label; nil for anything else.
     static func numberedOption(_ text: String, marker: Character) -> String? {
+        numbered(text, marker: marker)?.label
+    }
+
+    /// "❯ 1. Label" / "2. Label" → its number and label; `marker` is the selection cursor before the number.
+    static func numbered(_ text: String, marker: Character) -> (number: Int, label: String)? {
         var rest = Substring(text)
         if rest.first == marker { rest = rest.dropFirst().drop { $0 == " " } }
         let digits = rest.prefix { $0.isNumber }
-        guard !digits.isEmpty, rest.dropFirst(digits.count).hasPrefix(". ") else { return nil }
+        guard let number = Int(digits), rest.dropFirst(digits.count).hasPrefix(". ") else { return nil }
         let label = rest.dropFirst(digits.count + 2).trimmingCharacters(in: .whitespaces)
-        return label.isEmpty ? nil : label
+        return label.isEmpty ? nil : (number, label)
     }
 
     /// The checkbox Claude Code puts before a question's header (unanswered / answered / done).

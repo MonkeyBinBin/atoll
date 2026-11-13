@@ -516,7 +516,6 @@ struct AgentPanelView: View {
         }
     }
 
-
     /// Same path as the reply box, but leaves the draft alone.
     private func sendQuickReply(_ text: String) {
         guard store.sendStates[agent.address]?.isInFlight != true else { return }

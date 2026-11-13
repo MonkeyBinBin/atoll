@@ -14,9 +14,6 @@ public struct WaitingDialog: Equatable, Sendable {
         self.questionChoices = questionChoices
     }
 
-    func with(_ change: (inout WaitingDialog) -> Void) -> WaitingDialog {
-        var copy = self
-        change(&copy)
-        return copy
-    }
+    /// Nothing found (yet): the agent carries nil instead.
+    var isEmpty: Bool { preview == nil && permissionChoices == nil && questionChoices == nil }
 }

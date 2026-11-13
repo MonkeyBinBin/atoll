@@ -1,9 +1,9 @@
 import Foundation
 
-/// One screen read per Needs-you episode: for the preview when the source didn't say why (`statusMessage`),
-/// and for a permission dialog's answer keys or a question's options even when it did. Leaving Needs you (or a new episode) drops
-/// both: the only screen text kept with the panel closed. The store feeds it the agents on every rebuild and
-/// copies the result onto the waiting ones.
+/// One screen read per Needs-you episode, kept as a `WaitingDialog`: the preview when the source didn't say
+/// why (`statusMessage`), and a permission dialog's answer keys or a question's options even when it did.
+/// Leaving Needs you (or a new episode) drops it: the only screen text kept with the panel closed. The store
+/// feeds it the agents on every rebuild and hands the result to the waiting ones.
 @MainActor
 final class WaitingPreviewTracker {
     private struct Episode {

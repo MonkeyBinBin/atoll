@@ -44,7 +44,7 @@ public struct QuestionChoices: Equatable, Sendable {
             let text = WaitingPreview.trimmed(line)
             if text.isEmpty { continue }
             if WaitingPreview.isRule(line, "─") { break }
-            if let (number, label) = numbered(text) {
+            if let (number, label) = WaitingPreview.numbered(text, marker: "❯") {
                 // The key is the number on screen; anything but 1, 2, 3… means the layout isn't what it seems.
                 guard number == lastNumber + 1 else { return nil }
                 lastNumber = number
@@ -55,15 +55,5 @@ public struct QuestionChoices: Equatable, Sendable {
             }
         }
         return options.isEmpty ? nil : QuestionChoices(options: options)
-    }
-
-    /// "❯ 1. Label" / "2. Label" → (number, label).
-    static func numbered(_ text: String) -> (Int, String)? {
-        var rest = Substring(text)
-        if rest.first == "❯" { rest = rest.dropFirst().drop { $0 == " " } }
-        let digits = rest.prefix { $0.isNumber }
-        guard let number = Int(digits), rest.dropFirst(digits.count).hasPrefix(". ") else { return nil }
-        let label = rest.dropFirst(digits.count + 2).trimmingCharacters(in: .whitespaces)
-        return label.isEmpty ? nil : (number, label)
     }
 }

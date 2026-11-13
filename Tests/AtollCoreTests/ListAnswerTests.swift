@@ -33,3 +33,19 @@ struct ListAnswerKeyTests {
         #expect(agent.key(for: .option(rice)) == nil)
     }
 }
+
+@Suite("Waiting dialog on the agent")
+struct WaitingDialogOnAgentTests {
+    @Test("nothing found means no dialog: an empty read or clearing every field leaves it nil")
+    func emptyIsNil() {
+        var agent = Agent(address: "t1", tool: .claudeCode)
+        agent.waitingDialog = WaitingDialog()
+        #expect(agent.waitingDialog == nil)
+        agent.waitingPreview = nil
+        #expect(agent.waitingDialog == nil)
+        agent.permissionChoices = PermissionChoices(allowKey: "1", denyKey: "4")
+        #expect(agent.waitingDialog?.permissionChoices?.allowKey == "1")
+        agent.permissionChoices = nil
+        #expect(agent.waitingDialog == nil)
+    }
+}

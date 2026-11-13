@@ -156,7 +156,7 @@ public final class AgentStore {
     public private(set) var panel: PanelState?
     public private(set) var sendStates: [String: SendState] = [:]
     public private(set) var keyStates: [String: KeyPressState] = [:]
-    /// Allow / Deny pressed from the list, for the current Needs-you episode.
+    /// Answers given from the list or panel (Allow / Deny, a question option), for the current Needs-you episode.
     public private(set) var listAnswers: [String: ListAnswerState] = [:]
     public private(set) var interruptStates: [String: InterruptButtonState] = [:]
     public private(set) var launchState: LaunchState = .idle {
@@ -299,7 +299,7 @@ public final class AgentStore {
         /// Done and opened here; local only, never written back to Herdr.
         var acknowledged = false
         var interruptFeedback: InterruptOutcome?
-        /// Episode the list's Allow / Deny belongs to; a "No longer waiting" note outlives it on its own timer.
+        /// Episode the list answer belongs to; a "No longer waiting" note outlives it on its own timer.
         var responseEpisode: Date?
 
         @MainActor func tearDown() {
@@ -989,7 +989,7 @@ public final class AgentStore {
 
     // MARK: Permission from the list
 
-    /// Allow / Deny a permission dialog without opening the panel. `episode` is the `waitingSince` the user
+    /// Answer a permission dialog (Allow / Deny) or a question (one of its options) without typing in the panel. `episode` is the `waitingSince` the user
     /// saw; if the agent has left that dialog since, nothing is sent so the key can't land in the next one.
     public func respond(
         _ choice: ListAnswer, to address: String, episode: Date?,
