@@ -8,15 +8,16 @@ public enum OutputFilter {
         trimTrailingBlankLines(lines(text)).joined(separator: "\n")
     }
 
-    /// Only the messages, for tools whose layout is known; others are returned cleaned.
+    /// Only the messages, for tools whose layout is known; others are returned cleaned. `app` is the agent's
+    /// OSC 7501 word, which tells generic agents with a known layout (OpenCode) apart.
     /// Falls back to the cleaned full screen if filtering would leave nothing.
-    public static func messages(_ text: String, tool: AgentTool) -> String {
+    public static func messages(_ text: String, tool: AgentTool, app: String? = nil) -> String {
         let all = lines(text)
         var kept: [String]
         switch tool {
         case .claudeCode: kept = claudeMessages(all)
         case .codex: kept = codexMessages(all)
-        case .generic: kept = all
+        case .generic: kept = app.flatMap(AgentCLI.matching(app:))?.command == "opencode" ? openCodeMessages(all) : all
         }
         kept = kept.filter { !isDecorationRow($0) }
         kept = trimTrailingBlankLines(kept)
@@ -199,7 +200,12 @@ public enum OutputFilter {
             }
         }
         guard let (border, hits) = counts.max(by: { $0.value < $1.value }), hits * 3 >= rowsWithText else { return lines }
-        return lines.map { line in
+        return cut(lines, at: border)
+    }
+
+    /// Every row cut at a display column, trailing blanks dropped.
+    static func cut(_ lines: [String], at border: Int) -> [String] {
+        lines.map { line in
             var column = 0
             var kept = ""
             for ch in line {
@@ -240,6 +246,66 @@ public enum OutputFilter {
     }
 
     // MARK: Helpers
+
+    // MARK: OpenCode
+
+    /// OpenCode: an input box of `┃` rows closed by `╹▀▀…` with the status line below it, a sidebar starting at
+    /// the column where the status line repeats its first item (`~/repo:branch`), a session tab row on top
+    /// ("Title … +") and a "Build · model · 2.4s · 66.7 tok/s" row under each reply.
+    static func openCodeMessages(_ lines: [String]) -> [String] {
+        guard let boxEnd = lines.lastIndex(where: { trimmed($0).hasPrefix("╹") }) else { return lines }
+        let status = lines[(boxEnd + 1)...].first { !trimmed($0).isEmpty }
+        var rows = Array(lines[..<boxEnd])
+        while let last = rows.last, trimmed(last).hasPrefix("┃") { rows.removeLast() }
+        if let status, let column = openCodeSidebarColumn(status) { rows = cut(rows, at: column) }
+        if let first = rows.first, first.hasSuffix(" +") { rows.removeFirst() }
+        rows = rows.filter { trimmed($0) != "┃" && !isOpenCodeReplyFooter($0) }
+        while let first = rows.first, trimmed(first).isEmpty { rows.removeFirst() }
+        return rows
+    }
+
+    /// The display column of the status line's last item when it repeats the first one; nil when the sidebar is
+    /// hidden (narrow window) and the status line doesn't repeat.
+    static func openCodeSidebarColumn(_ status: String) -> Int? {
+        var items: [(column: Int, text: String)] = []
+        var column = 0
+        var current = ""
+        var start = 0
+        var spaces = 0
+        for ch in status {
+            if ch == " " {
+                spaces += 1
+            } else {
+                if !current.isEmpty, spaces >= 2 {
+                    items.append((start, current))
+                    current = ""
+                }
+                if current.isEmpty {
+                    start = column
+                } else {
+                    current += String(repeating: " ", count: spaces)
+                }
+                current.append(ch)
+                spaces = 0
+            }
+            column += cellWidth(ch)
+        }
+        if !current.isEmpty { items.append((start, current)) }
+        guard items.count >= 2, let first = items.first, let last = items.last, first.text == last.text else { return nil }
+        return last.column
+    }
+
+    /// "Build · Laguna S 2.1 · 722ms · 4.4 tok/s": the agent, model and timing under a reply.
+    static func isOpenCodeReplyFooter(_ line: String) -> Bool {
+        let parts = trimmed(line).components(separatedBy: " · ")
+        guard parts.count >= 3, let last = parts.last else { return false }
+        if last.hasSuffix(" tok/s") { return true }
+        return last.range(of: #"^\d+(\.\d+)?(ms|s)$"#, options: .regularExpression) != nil
+    }
+
+    private static func trimmed(_ line: String) -> String {
+        line.trimmingCharacters(in: .whitespaces)
+    }
 
     static func lines(_ text: String) -> [String] {
         text.split(separator: "\n", omittingEmptySubsequences: false).map { line in

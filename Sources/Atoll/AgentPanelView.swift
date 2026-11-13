@@ -308,7 +308,7 @@ struct AgentPanelView: View {
     private func outputText(_ panel: PanelState?) -> String {
         guard let output = panel?.output else { return panel?.isLoading == true ? "Loading…" : "" }
         let text = settings.messagesOnly
-            ? OutputFilter.messages(output.text, tool: agent.tool)
+            ? OutputFilter.messages(output.text, tool: agent.tool, app: agent.app)
             : OutputFilter.clean(output.text)
         return text.split(separator: "\n", omittingEmptySubsequences: false).suffix(200).joined(separator: "\n")
     }

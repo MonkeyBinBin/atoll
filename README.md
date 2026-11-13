@@ -46,7 +46,7 @@ macOS 瀏海上的像素風「動態島」，即時顯示本機所有 AI coding 
 
 ### 互動面板
 
-- 看近期終端機輸出（可切 Messages only、大面板、調整字型），`⌘F` 搜尋並高亮
+- 看近期終端機輸出（可切 Messages only：認得 Claude Code、Codex、OpenCode 的版面；大面板、調整字型），`⌘F` 搜尋並高亮
 - 傳送訊息、回答問題、用按鍵回應 permission prompt、中斷任務（1.5 秒內二次確認）、一鍵切回原終端機
 - 送出狀態區分 Delivered／Agent started／Sent · unconfirmed／Failed，永不自動重送
 - 快速回覆按鈕（最多 5 個、可編輯），`⌘⇧1`–`⌘⇧5` 直接送出，⌥-點擊先放進輸入框
