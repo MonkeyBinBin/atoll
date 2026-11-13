@@ -3,12 +3,12 @@ import Testing
 
 @Suite("Folder list: pinned and recent folders")
 struct FolderListTests {
-    @Test("using a folder moves it first; at most 10 unpinned")
+    @Test("using a folder moves it first; at most `limit` unpinned")
     func remember() {
         var list = FolderList(pinned: [], recent: [])
-        for i in 0..<12 { list = list.remembering("/f\(i)") }
+        for i in 0..<(FolderList.limit + 2) { list = list.remembering("/f\(i)") }
         list = list.remembering("/f5")
-        #expect(list.recent.count == 10)
+        #expect(list.recent.count == FolderList.limit)
         #expect(list.recent.first == "/f5")
         #expect(!list.recent.contains("/f0"))
     }
@@ -16,9 +16,9 @@ struct FolderListTests {
     @Test("pinned folders don't count toward the limit and are never pushed out")
     func pinnedKept() {
         var list = FolderList(pinned: [], recent: []).remembering("/keep").pinning("/keep")
-        for i in 0..<15 { list = list.remembering("/f\(i)") }
+        for i in 0..<(FolderList.limit + 5) { list = list.remembering("/f\(i)") }
         #expect(list.recent.contains("/keep"))
-        #expect(list.unpinnedRecent.count == 10)
+        #expect(list.unpinnedRecent.count == FolderList.limit)
         #expect(!list.unpinnedRecent.contains("/keep"))
     }
 
@@ -32,10 +32,10 @@ struct FolderListTests {
     @Test("unpinning trims back to the limit")
     func unpin() {
         var list = FolderList(pinned: [], recent: []).remembering("/p").pinning("/p")
-        for i in 0..<10 { list = list.remembering("/f\(i)") }
+        for i in 0..<FolderList.limit { list = list.remembering("/f\(i)") }
         list = list.unpinning("/p")
         #expect(list.pinned.isEmpty)
-        #expect(list.recent.count == 10)
+        #expect(list.recent.count == FolderList.limit)
         #expect(!list.recent.contains("/p")) // the oldest unpinned
     }
 

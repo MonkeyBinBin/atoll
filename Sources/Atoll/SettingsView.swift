@@ -109,7 +109,7 @@ struct SettingsView: View {
                 }
                 HStack {
                     Button("Add folder…", action: addFolder)
-                    Button("Clear") { settings.folders = settings.folders.clearingRecent() }
+                    Button("Clear") { settings.clearRecentFolders() }
                         .disabled(recent.isEmpty)
                     Spacer()
                     Text("Keeps the last \(FolderList.limit); launching moves a folder to the top.")
@@ -215,11 +215,11 @@ struct SettingsView: View {
             }
 
             Section("Launch") {
-                Picker("Default space", selection: $settings.defaultSpace) {
-                    Text("Selected space").tag("")
-                    ForEach(launchSpaces) { Text($0.name).tag($0.id) }
-                    if !settings.defaultSpace.isEmpty, !launchSpaces.contains(where: { $0.id == settings.defaultSpace }) {
-                        Text("Unknown space (\(settings.defaultSpace))").tag(settings.defaultSpace)
+                Picker("Default space", selection: $settings.defaultSpaceChoice) {
+                    Text("Selected space").tag(LaunchSpaceChoice.selected)
+                    ForEach(launchSpaces) { Text($0.name).tag(LaunchSpaceChoice.existing($0.id)) }
+                    if settings.defaultSpaceChoice.isMissing(from: launchSpaces) {
+                        Text("Unknown space (\(settings.defaultSpace))").tag(settings.defaultSpaceChoice)
                     }
                 }
                 .help("The launch form's starting space when it isn't opened from an agent and the island shows "
@@ -350,15 +350,15 @@ private struct FolderRow: View {
             }
             Spacer()
             if pinned {
-                Button { settings.folders = settings.folders.movingPinned(path, by: -1) } label: { Image(systemName: "chevron.up") }
+                Button { settings.movePinnedFolder(path, by: -1) } label: { Image(systemName: "chevron.up") }
                     .buttonStyle(.borderless)
                     .disabled(isFirst)
-                Button { settings.folders = settings.folders.movingPinned(path, by: 1) } label: { Image(systemName: "chevron.down") }
+                Button { settings.movePinnedFolder(path, by: 1) } label: { Image(systemName: "chevron.down") }
                     .buttonStyle(.borderless)
                     .disabled(isLast)
             }
             Button {
-                settings.folders = pinned ? settings.folders.unpinning(path) : settings.folders.pinning(path)
+                pinned ? settings.unpinFolder(path) : settings.pinFolder(path)
             } label: {
                 Image(systemName: pinned ? "pin.slash" : "pin")
             }
@@ -370,7 +370,7 @@ private struct FolderRow: View {
             .buttonStyle(.borderless)
             .disabled(!exists)
             .help("Reveal in Finder")
-            Button { settings.folders = settings.folders.forgetting(path) } label: { Image(systemName: "trash") }
+            Button { settings.forgetFolder(path) } label: { Image(systemName: "trash") }
                 .buttonStyle(.borderless)
                 .help(pinned ? "Remove from pinned and recent folders" : "Remove from recent folders")
         }

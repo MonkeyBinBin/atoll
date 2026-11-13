@@ -283,6 +283,12 @@ public enum LaunchSpaceChoice: Hashable, Sendable {
     public var stored: String {
         if case .existing(let id) = self { id } else { "" }
     }
+
+    /// Names a space that isn't among `spaces` (gone, or not read yet).
+    public func isMissing(from spaces: [HerdrSpace]) -> Bool {
+        guard case .existing(let id) = self else { return false }
+        return !spaces.contains { $0.id == id }
+    }
 }
 
 extension LaunchRequest {

@@ -187,4 +187,13 @@ struct OfflineLaunchTests {
         #expect(LaunchSpaceChoice(stored: "sp1").stored == "sp1")
         #expect(LaunchSpaceChoice.new.stored == "")
     }
+
+    @Test("a chosen space is missing when it isn't among the spaces; Selected and New never are")
+    func missingSpace() {
+        let spaces = [HerdrSpace(id: "sp1", name: "a")]
+        #expect(!LaunchSpaceChoice.existing("sp1").isMissing(from: spaces))
+        #expect(LaunchSpaceChoice.existing("gone").isMissing(from: spaces))
+        #expect(!LaunchSpaceChoice.selected.isMissing(from: []))
+        #expect(!LaunchSpaceChoice.new.isMissing(from: []))
+    }
 }

@@ -360,7 +360,7 @@ struct LaunchFormView: View {
         // Spaces first: Launch waits for them (a stale starting space must fall back first), not for templates.
         let list = await store.launchSpaces()
         spaces = list
-        if case .existing(let id) = space, !list.contains(where: { $0.id == id }) { space = .selected }
+        if space.isMissing(from: list) { space = .selected }
         spacesLoaded = true
         if let templates = try? await client?.templates() {
             options = LaunchOption.builtIns + templates.filter { $0.error == nil }.map(LaunchOption.template)

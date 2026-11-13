@@ -17,8 +17,6 @@ public struct FolderList: Equatable, Sendable {
     /// Recent folders that aren't pinned, as the Folder menu lists them under the pinned ones.
     public var unpinnedRecent: [String] { recent.filter { !pinned.contains($0) } }
 
-    public func isPinned(_ path: String) -> Bool { pinned.contains(path) }
-
     /// The folder was just used: it goes first in `recent`.
     public func remembering(_ path: String) -> FolderList {
         var list = self

@@ -181,7 +181,7 @@ final class AppSettings {
                              showWaitingReason: notifyShowsWaitingReason)
     }
 
-    var folders: FolderList {
+    private(set) var folders: FolderList {
         get { FolderList(pinned: pinnedFolders, recent: recentFolders) }
         set {
             if pinnedFolders != newValue.pinned { pinnedFolders = newValue.pinned }
@@ -189,8 +189,17 @@ final class AppSettings {
         }
     }
 
-    func rememberFolder(_ path: String) {
-        folders = folders.remembering(path)
+    func rememberFolder(_ path: String) { folders = folders.remembering(path) }
+    func pinFolder(_ path: String) { folders = folders.pinning(path) }
+    func unpinFolder(_ path: String) { folders = folders.unpinning(path) }
+    func movePinnedFolder(_ path: String, by offset: Int) { folders = folders.movingPinned(path, by: offset) }
+    func forgetFolder(_ path: String) { folders = folders.forgetting(path) }
+    func clearRecentFolders() { folders = folders.clearingRecent() }
+
+    /// `defaultSpace` as the launch form's space choice ("" = Selected space).
+    var defaultSpaceChoice: LaunchSpaceChoice {
+        get { LaunchSpaceChoice(stored: defaultSpace) }
+        set { defaultSpace = newValue.stored }
     }
 
     func recordLaunch(_ recipe: LaunchRecipe) {
