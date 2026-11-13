@@ -67,6 +67,22 @@ struct OutputFilterTests {
         #expect(OutputFilter.messages(screen, tool: .claudeCode) == "● Reading the schema.")
     }
 
+    /// Kitty graphics placeholders (U+10EEEE plus row/column diacritics) that a statusline mod draws its sprite
+    /// with; cmux's read-screen returns them as text (ticket 54).
+    static let sprite = "\u{10EEEE}\u{0305}\u{0305}\u{10EEEE}\u{0305}\u{030D}\u{10EEEE}\u{0305}\u{030E}"
+
+    @Test("image placeholders are removed, so a spinner row drawn after a sprite is still dropped")
+    func imagePlaceholders() {
+        let screen = [
+            "● 你選了飯，那午餐就吃飯。\(Self.sprite)",
+            "",
+            "\(Self.sprite) ✳ 🏹 Loosing arrows… (running Stop hooks… 8/9 · 8s · ↓ 249 tokens · thinking)",
+            rule, "❯ ", rule,
+        ].joined(separator: "\n")
+        #expect(OutputFilter.messages(screen, tool: .claudeCode) == "● 你選了飯，那午餐就吃飯。")
+        #expect(!OutputFilter.clean(screen).unicodeScalars.contains { $0.value == 0x10EEEE })
+    }
+
     @Test("Claude Code: hint-like text inside the conversation is kept")
     func claudeKeepsMidConversationText() {
         let screen = [

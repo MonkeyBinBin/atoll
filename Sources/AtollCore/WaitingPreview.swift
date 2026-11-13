@@ -19,7 +19,7 @@ public struct WaitingPreview: Equatable, Sendable {
     public var help: String { [title, detail].compactMap { $0 }.joined(separator: "\n") }
 
     public static func extract(from screen: String, tool: AgentTool, kind: BlockedKind) -> WaitingPreview? {
-        let lines = OutputFilter.clean(screen).components(separatedBy: "\n")
+        let lines = OutputFilter.dialogLines(screen)
         switch (tool, kind) {
         case (.claudeCode, .permission): return claudePermission(lines)
         case (.claudeCode, .question): return claudeQuestion(lines)

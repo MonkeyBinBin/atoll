@@ -13,13 +13,18 @@ public struct PermissionChoices: Equatable, Sendable {
         self.denyKey = denyKey
     }
 
-    public func key(for choice: PermissionChoice) -> String {
-        choice == .allow ? allowKey : denyKey
+    /// Nil for a question option, which a permission dialog never has.
+    public func key(for choice: PermissionChoice) -> String? {
+        switch choice {
+        case .allow: allowKey
+        case .deny: denyKey
+        case .option: nil
+        }
     }
 
     public static func extract(from screen: String, tool: AgentTool, kind: BlockedKind) -> PermissionChoices? {
         guard kind == .permission || kind == .unspecified else { return nil }
-        let lines = OutputFilter.clean(screen).components(separatedBy: "\n")
+        let lines = OutputFilter.dialogLines(screen)
         let anchor: Array<String>.Index?
         switch tool {
         case .claudeCode:
@@ -102,13 +107,22 @@ public struct PermissionChoices: Equatable, Sendable {
     }
 }
 
-public enum PermissionChoice: String, Equatable, Sendable {
+/// An answer given from the list without opening the panel: a permission dialog's Allow / Deny, or one
+/// option of a question (`QuestionChoices`).
+public enum PermissionChoice: Equatable, Sendable {
     case allow, deny
+    case option(QuestionChoices.Option)
 
-    public var label: String { self == .allow ? "Allow" : "Deny" }
+    public var label: String {
+        switch self {
+        case .allow: "Allow"
+        case .deny: "Deny"
+        case .option(let option): option.label
+        }
+    }
 }
 
-/// Answering a permission dialog from the list; per agent, for the episode it was pressed in.
+/// Answering a permission dialog or question from the list; per agent, for the episode it was pressed in.
 public enum PermissionResponseState: Equatable, Sendable {
     case sending(PermissionChoice)
     case sent(PermissionChoice)

@@ -95,6 +95,10 @@ struct HoverCardView: View {
                 Text("Allow / Deny from the list: ⌘Y / ⌘N")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
+            } else if agent.questionChoices != nil {
+                Text("Pick an answer from the list or panel")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
             }
             if let queued = store.queuedMessages[agent.address] {
                 QueuedBadge(queued: queued)

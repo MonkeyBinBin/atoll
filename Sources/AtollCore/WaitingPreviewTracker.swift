@@ -9,6 +9,7 @@ final class WaitingPreviewTracker {
     struct Result: Equatable {
         var preview: WaitingPreview?
         var choices: PermissionChoices?
+        var questionChoices: QuestionChoices?
     }
 
     private struct Episode {
@@ -100,6 +101,7 @@ final class WaitingPreviewTracker {
             if let text, let preview = WaitingPreview.extract(from: text, tool: tool, kind: kind) {
                 if keepPreview { self.episodes[address]?.result.preview = preview }
                 self.episodes[address]?.result.choices = PermissionChoices.extract(from: text, tool: tool, kind: kind)
+                self.episodes[address]?.result.questionChoices = QuestionChoices.extract(from: text, tool: tool, kind: kind)
             }
             self.onChange()
             self.resolve(address, episode: since)

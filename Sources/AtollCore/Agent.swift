@@ -176,6 +176,8 @@ public struct Agent: Identifiable, Equatable, Sendable {
     /// Keys for answering its permission dialog straight from the list; only when the dialog's layout was
     /// recognized on screen in this Needs-you episode.
     public var permissionChoices: PermissionChoices?
+    /// Options for answering its question straight from the list or panel; same rules as `permissionChoices`.
+    public var questionChoices: QuestionChoices?
     /// Other active agents in the same git working tree (addresses); empty unless this one is active too.
     public var sharedTreeWith: [String] = []
 

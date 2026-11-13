@@ -230,6 +230,8 @@ struct AgentCard: View {
                 }
                 if agent.permissionChoices != nil {
                     PermissionButtons(agent: agent, store: store, selected: selected)
+                } else if let choices = agent.questionChoices {
+                    QuestionButtons(agent: agent, choices: choices, store: store)
                 } else if let response = store.permissionResponses[agent.address] {
                     PermissionResponseLabel(state: response)
                 }
@@ -364,6 +366,50 @@ struct PermissionButtons: View {
         .tint(choice == .allow ? PixelPalette.done.color : PixelPalette.error.color)
         .disabled(disabled)
         .help(choice == .allow ? "Approve this once (the dialog's plain \"Yes\")" : "Reject (the dialog's \"No\")")
+    }
+}
+
+/// A recognized single-select question's options as buttons (list row and panel); the number goes to the
+/// agent like a keypress, guarded by the episode the way Allow / Deny is.
+struct QuestionButtons: View {
+    let agent: Agent
+    let choices: QuestionChoices
+    let store: AgentStore
+
+    private var tint: Color { agent.state.color }
+
+    var body: some View {
+        let response = store.permissionResponses[agent.address]
+        let sending: Bool = if case .sending = response { true } else { false }
+        HStack(spacing: 6) {
+            ForEach(Array(choices.options.enumerated()), id: \.offset) { _, option in
+                Button {
+                    store.respond(.option(option), to: agent.address, episode: agent.waitingSince)
+                } label: {
+                    HStack(spacing: 5) {
+                        Text(option.key)
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(tint)
+                        Text(AgentPanelView.chipTitle(option.label))
+                            .font(.system(size: 11, weight: .medium))
+                            .lineLimit(1)
+                    }
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(tint.opacity(0.16)))
+                    .overlay(Capsule().strokeBorder(tint.opacity(0.35), lineWidth: 1))
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(sending)
+                .opacity(sending ? 0.5 : 1)
+                .help([option.label, option.detail].compactMap { $0 }.joined(separator: "\n"))
+            }
+            if let response {
+                PermissionResponseLabel(state: response)
+            }
+        }
+        .padding(.top, 1)
     }
 }
 

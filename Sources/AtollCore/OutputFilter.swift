@@ -8,6 +8,12 @@ public enum OutputFilter {
         trimTrailingBlankLines(lines(text)).joined(separator: "\n")
     }
 
+    /// Cleaned rows with any side panel cut off: what dialog parsers (`WaitingPreview`, `PermissionChoices`,
+    /// `QuestionChoices`) read, so a panel's text never ends up in a label and rules still look like rules.
+    static func dialogLines(_ text: String) -> [String] {
+        stripSidePanel(trimTrailingBlankLines(lines(text)))
+    }
+
     /// Only the messages, for tools whose layout is known; others are returned cleaned. `app` is the agent's
     /// OSC 7501 word, which tells generic agents with a known layout (OpenCode) apart.
     /// Falls back to the cleaned full screen if filtering would leave nothing.
@@ -199,7 +205,9 @@ public enum OutputFilter {
                 column += cellWidth(ch)
             }
         }
-        guard let (border, hits) = counts.max(by: { $0.value < $1.value }), hits * 3 >= rowsWithText else { return lines }
+        // The panel may draw its own right edge on every row too: on a tie the leftmost border wins.
+        guard let (border, hits) = counts.max(by: { ($0.value, -$0.key) < ($1.value, -$1.key) }),
+              hits * 3 >= rowsWithText else { return lines }
         return cut(lines, at: border)
     }
 
@@ -307,9 +315,15 @@ public enum OutputFilter {
         line.trimmingCharacters(in: .whitespaces)
     }
 
+    /// Kitty graphics' Unicode placeholder: an image cell, with its row / column as combining diacritics.
+    static let imagePlaceholder: Unicode.Scalar = "\u{10EEEE}"
+
     static func lines(_ text: String) -> [String] {
         text.split(separator: "\n", omittingEmptySubsequences: false).map { line in
-            var s = Substring(line)
+            // A placeholder and its diacritics form one Character; images aren't text, so drop them.
+            var s = line.contains(where: { $0.unicodeScalars.first == imagePlaceholder })
+                ? Substring(line.filter { $0.unicodeScalars.first != imagePlaceholder })
+                : Substring(line)
             while let last = s.last, last.isWhitespace { s.removeLast() }
             return String(s)
         }

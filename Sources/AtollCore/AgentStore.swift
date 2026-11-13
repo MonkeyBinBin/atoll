@@ -839,6 +839,7 @@ public final class AgentStore {
                let found = previews.result(for: info.address, episode: since) {
                 agent.waitingPreview = found.preview
                 agent.permissionChoices = found.choices
+                agent.questionChoices = found.questionChoices
             }
             list.append((agent, record.order))
         }
@@ -998,7 +999,7 @@ public final class AgentStore {
     ) {
         if case .sending = permissionResponses[address] { return }
         guard let agent = agent(address), agent.state.isNeedsYou, let episode, agent.waitingSince == episode,
-              let key = agent.permissionChoices?.key(for: choice) else {
+              let key = Self.key(for: choice, of: agent) else {
             showNoLongerWaiting(address)
             completion?(.noLongerWaiting)
             return
@@ -1022,6 +1023,14 @@ public final class AgentStore {
             // Never retried. Only shown while the agent is still in the episode it was sent for.
             guard self.runtimes[address]?.responseEpisode == episode else { return }
             self.permissionResponses[address] = result
+        }
+    }
+
+    /// The key an answer sends, only while the agent still offers it (the option read off this episode's screen).
+    private static func key(for choice: PermissionChoice, of agent: Agent) -> String? {
+        switch choice {
+        case .allow, .deny: agent.permissionChoices?.key(for: choice)
+        case .option(let option): agent.questionChoices?.options.contains(option) == true ? option.key : nil
         }
     }
 

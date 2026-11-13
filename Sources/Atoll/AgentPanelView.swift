@@ -375,6 +375,9 @@ struct AgentPanelView: View {
                 model: model, draft: $draft, focused: inputFocused,
                 tool: agent.tool, cwd: agent.projectPath, onSubmit: submit
             )
+            if let choices = agent.questionChoices {
+                QuestionButtons(agent: agent, choices: choices, store: store)
+            }
             quickReplyRow(disabled: inFlight)
             sendStatus(state)
         }
