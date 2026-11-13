@@ -136,7 +136,8 @@ struct TerminalOutputView: NSViewRepresentable {
     private func setText(scroll: NSScrollView, textView: NSTextView, coordinator: Coordinator) {
         guard let storage = textView.textStorage else { return }
         // No bottom pin while searching: the current match decides where the view sits.
-        let wasAtBottom = !searching && (coordinator.text.isEmpty || Self.isAtBottom(scroll))
+        let firstText = coordinator.text.isEmpty
+        let wasAtBottom = !searching && (firstText || Self.isAtBottom(scroll))
         coordinator.text = text
         coordinator.font = font
         coordinator.wrap = wrap
@@ -149,11 +150,19 @@ struct TerminalOutputView: NSViewRepresentable {
             .paragraphStyle: paragraph,
         ]))
         textView.sizeToFit()
-        if wasAtBottom {
-            textView.scrollToEndOfDocument(nil)
-            scroll.contentView.scroll(to: NSPoint(x: 0, y: scroll.contentView.bounds.origin.y))
-            scroll.reflectScrolledClipView(scroll.contentView)
+        guard wasAtBottom else { return }
+        Self.scrollToBottom(scroll, textView: textView)
+        // A view just created (e.g. back from the changes view) gets its text before its first layout, which
+        // undoes the scroll: pin it again once laid out.
+        if firstText {
+            DispatchQueue.main.async { Self.scrollToBottom(scroll, textView: textView) }
         }
+    }
+
+    static func scrollToBottom(_ scroll: NSScrollView, textView: NSTextView) {
+        textView.scrollToEndOfDocument(nil)
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: scroll.contentView.bounds.origin.y))
+        scroll.reflectScrolledClipView(scroll.contentView)
     }
 
     static func applyWrap(_ wrap: Bool, scroll: NSScrollView, textView: NSTextView) {
