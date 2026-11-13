@@ -15,6 +15,7 @@ struct SettingsView: View {
     }
 
     @State private var replyRows: [ReplyRow] = []
+    @State private var launchSpaces: [HerdrSpace] = []
 
     var body: some View {
         Form {
@@ -214,8 +215,16 @@ struct SettingsView: View {
             }
 
             Section("Launch") {
-                TextField("Default space id (empty = selected space)", text: $settings.defaultSpace)
-                    .help("Empty: the space Herdr shows; while the Herdr app is closed, the one it showed last")
+                Picker("Default space", selection: $settings.defaultSpace) {
+                    Text("Selected space").tag("")
+                    ForEach(launchSpaces) { Text($0.name).tag($0.id) }
+                    if !settings.defaultSpace.isEmpty, !launchSpaces.contains(where: { $0.id == settings.defaultSpace }) {
+                        Text("Unknown space (\(settings.defaultSpace))").tag(settings.defaultSpace)
+                    }
+                }
+                .help("The launch form's starting space when it isn't opened from an agent and the island shows "
+                    + "all agents. Selected space: the one Herdr shows; while the Herdr app is closed, the one it showed last")
+                .task { launchSpaces = await store.launchSpaces() }
             }
         }
         .formStyle(.grouped)
