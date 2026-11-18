@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// Agents managed by the herdr CLI/TUI (`herdr`, socket `~/.config/herdr/herdr.sock`).
 ///
@@ -7,23 +8,26 @@ import Foundation
 /// transitions (and notifications) work like herdr-core's. Addresses are
 /// `herdr:<terminal_id>` (stable); commands resolve them to the current pane id.
 /// Every request uses its own short connection; the event subscription keeps one open.
-public final class HerdrCLIAdapter: HerdrClient, @unchecked Sendable {
+public final class HerdrCLIAdapter: HerdrClient, Sendable {
     public static let addressPrefix = "herdr:"
     public let socketPath: String
     private let pollInterval: TimeInterval
 
-    private let lock = NSLock()
-    private var running = false
-    private var generation = 0
-    private var handler: (@MainActor (ClientUpdate) -> Void)?
-    private var paneByAddress: [String: String] = [:]
-    private var lastAgents: [String: TerminalInfo] = [:]
-    private var seq: UInt64 = 0
-    private var wake = DispatchSemaphore(value: 0)
-    private var subscription: LineSocket?
-    private var subscribedPanes: Set<String> = []
-    /// Set by reconnect(): report offline again if herdr still isn't running.
-    private var announceOffline = false
+    private let wake = DispatchSemaphore(value: 0)
+
+    private struct State {
+        var running = false
+        var generation = 0
+        var handler: (@MainActor (ClientUpdate) -> Void)?
+        var paneByAddress: [String: String] = [:]
+        var lastAgents: [String: TerminalInfo] = [:]
+        var seq: UInt64 = 0
+        var subscription: LineSocket?
+        var subscribedPanes: Set<String> = []
+        /// Set by reconnect(): report offline again if herdr still isn't running.
+        var announceOffline = false
+    }
+    private let shared = Mutex(State())
 
     public init(socketPath: String = HerdrCLIAdapter.defaultSocketPath(), pollInterval: TimeInterval = 2) {
         self.socketPath = socketPath
@@ -39,13 +43,13 @@ public final class HerdrCLIAdapter: HerdrClient, @unchecked Sendable {
 
     @MainActor
     public func start(onUpdate: @escaping @MainActor (ClientUpdate) -> Void) {
-        lock.lock()
-        handler = onUpdate
-        let already = running
-        running = true
-        generation += 1
-        let gen = generation
-        lock.unlock()
+        let (already, gen) = shared.withLock { state in
+            state.handler = onUpdate
+            let already = state.running
+            state.running = true
+            state.generation += 1
+            return (already, state.generation)
+        }
         guard !already else { return }
         let thread = Thread { [weak self] in self?.pollLoop(generation: gen) }
         thread.name = "herdr CLI poll"
@@ -54,43 +58,36 @@ public final class HerdrCLIAdapter: HerdrClient, @unchecked Sendable {
 
     @MainActor
     public func reconnect() {
-        lock.lock()
-        announceOffline = true
-        lock.unlock()
+        shared.withLock { $0.announceOffline = true }
         wake.signal()
     }
 
     @MainActor
     public func stop() {
-        lock.lock()
-        running = false
-        generation += 1
-        let sub = subscription
-        subscription = nil
-        lock.unlock()
+        let sub = shared.withLock { state in
+            state.running = false
+            state.generation += 1
+            defer { state.subscription = nil }
+            return state.subscription
+        }
         sub?.shutdown()
         wake.signal()
     }
 
     private func isCurrent(_ gen: Int) -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return running && generation == gen
+        shared.withLock { $0.running && $0.generation == gen }
     }
 
     private func emit(_ update: ClientUpdate) {
-        lock.lock()
-        let handler = handler
-        lock.unlock()
-        guard let handler else { return }
+        guard let handler = shared.withLock({ $0.handler }) else { return }
         DispatchQueue.main.async { MainActor.assumeIsolated { handler(update) } }
     }
 
     private func nextSeq() -> UInt64 {
-        lock.lock()
-        defer { lock.unlock() }
-        seq += 1
-        return seq
+        shared.withLock { state in
+            state.seq += 1
+            return state.seq
+        }
     }
 
     private func pollLoop(generation gen: Int) {
@@ -102,19 +99,16 @@ public final class HerdrCLIAdapter: HerdrClient, @unchecked Sendable {
                     let version = ((pong as? [String: Any])?["version"] as? String) ?? "?"
                     emit(.connected(CoreHello(generation: 1, version: version, methods: [])))
                     connected = true
-                    lock.lock()
-                    lastAgents = [:]
-                    lock.unlock()
+                    shared.withLock { $0.lastAgents = [:] }
                     let agents = try listAgents()
-                    lock.lock()
-                    lastAgents = Dictionary(uniqueKeysWithValues: agents.map { ($0.address, $0) })
-                    lock.unlock()
+                    shared.withLock { $0.lastAgents = Dictionary(uniqueKeysWithValues: agents.map { ($0.address, $0) }) }
                     emit(.snapshot(seq: nextSeq(), terminals: agents))
                 } else {
                     let updates = Self.diff(old: currentAgents(), new: try listAgents())
-                    lock.lock()
-                    lastAgents = updates.next
-                    lock.unlock()
+                    let seq = shared.withLock { state in
+                        state.lastAgents = updates.next
+                        return state.seq
+                    }
                     if updates.events.isEmpty {
                         emit(.heartbeat(seq: seq))
                     } else {
@@ -122,17 +116,18 @@ public final class HerdrCLIAdapter: HerdrClient, @unchecked Sendable {
                     }
                 }
                 ensureSubscription(generation: gen)
-                lock.lock()
-                announceOffline = false
-                lock.unlock()
+                shared.withLock { $0.announceOffline = false }
             } catch {
-                lock.lock()
-                let again = announceOffline
-                announceOffline = false
-                lock.unlock()
-                if connected || seq == 0 || again {
+                // Offline is reported once per outage: on losing the connection, before anything was ever
+                // published (seq 0, then bumped to 1), or when reconnect() asks again.
+                let announce = shared.withLock { state in
+                    let announce = connected || state.seq == 0 || state.announceOffline
+                    state.announceOffline = false
+                    if announce { state.seq = max(state.seq, 1) }
+                    return announce
+                }
+                if announce {
                     emit(.disconnected(reason: (error as? HerdrError)?.message ?? "herdr isn't running"))
-                    seq = max(seq, 1)
                 }
                 connected = false
                 dropSubscription()
@@ -142,32 +137,28 @@ public final class HerdrCLIAdapter: HerdrClient, @unchecked Sendable {
     }
 
     private func currentAgents() -> [String: TerminalInfo] {
-        lock.lock()
-        defer { lock.unlock() }
-        return lastAgents
+        shared.withLock { $0.lastAgents }
     }
 
     private func listAgents() throws -> [TerminalInfo] {
         let result = try Self.request(socketPath, "agent.list", [:])
         let agents = ((result as? [String: Any])?["agents"] as? [[String: Any]]) ?? []
         let infos = agents.compactMap(Self.terminalInfo)
-        lock.lock()
-        paneByAddress = Dictionary(uniqueKeysWithValues: agents.compactMap { a -> (String, String)? in
+        let panes = Dictionary(uniqueKeysWithValues: agents.compactMap { a -> (String, String)? in
             guard let term = a["terminal_id"] as? String, let pane = a["pane_id"] as? String else { return nil }
             return (Self.addressPrefix + term, pane)
         })
-        lock.unlock()
+        shared.withLock { $0.paneByAddress = panes }
         return infos
     }
 
     // MARK: Event subscription (wakes the poll loop on pane activity)
 
     private func ensureSubscription(generation gen: Int) {
-        lock.lock()
-        let panes = Set(paneByAddress.values)
-        let current = subscription
-        let same = panes == subscribedPanes
-        lock.unlock()
+        let (panes, current, same) = shared.withLock { state in
+            let panes = Set(state.paneByAddress.values)
+            return (panes, state.subscription, panes == state.subscribedPanes)
+        }
         if current != nil, same { return }
         current?.shutdown()
         guard let socket = try? LineSocket(path: socketPath) else { return }
@@ -177,10 +168,10 @@ public final class HerdrCLIAdapter: HerdrClient, @unchecked Sendable {
             socket.close()
             return
         }
-        lock.lock()
-        subscription = socket
-        subscribedPanes = panes
-        lock.unlock()
+        shared.withLock { state in
+            state.subscription = socket
+            state.subscribedPanes = panes
+        }
         let thread = Thread { [weak self] in
             while let line = socket.readLine() {
                 guard let self, self.isCurrent(gen) else { break }
@@ -195,11 +186,11 @@ public final class HerdrCLIAdapter: HerdrClient, @unchecked Sendable {
     }
 
     private func dropSubscription() {
-        lock.lock()
-        let sub = subscription
-        subscription = nil
-        subscribedPanes = []
-        lock.unlock()
+        let sub = shared.withLock { state in
+            state.subscribedPanes = []
+            defer { state.subscription = nil }
+            return state.subscription
+        }
         sub?.shutdown()
     }
 
@@ -308,9 +299,7 @@ public final class HerdrCLIAdapter: HerdrClient, @unchecked Sendable {
     }
 
     private func pane(_ address: String) throws -> String {
-        lock.lock()
-        defer { lock.unlock() }
-        guard let pane = paneByAddress[address] else {
+        guard let pane = shared.withLock({ $0.paneByAddress[address] }) else {
             throw HerdrError(kind: "not_found", message: "This agent is no longer in herdr")
         }
         return pane

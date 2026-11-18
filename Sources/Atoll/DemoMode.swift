@@ -18,7 +18,7 @@ enum DemoMode {
     ]
 }
 
-final class DemoClient: HerdrClient, @unchecked Sendable {
+final class DemoClient: HerdrClient, Sendable {
     @MainActor private var onUpdate: (@MainActor (ClientUpdate) -> Void)?
     @MainActor private var seq: UInt64 = 1
 
