@@ -160,6 +160,8 @@ public struct Agent: Identifiable, Equatable, Sendable {
     public var spaceName: String?
     /// What its last finished turn changed in git; cleared when the next turn starts.
     public var changeSummary: ChangeSummary?
+    /// What the source knows about the agent's session, to find its transcript (ticket 61).
+    public var session = SessionHint()
     /// What this Needs-you episode's one screen read found; nil until it finds something, and outside Needs you.
     public var waitingDialog: WaitingDialog? {
         didSet { if waitingDialog?.isEmpty == true { waitingDialog = nil } }

@@ -229,7 +229,12 @@ struct AgentPanelView: View {
                 if let fetched = panel?.fetchedAt {
                     Text("Fetched at \(Format.clockSeconds.string(from: fetched))")
                 }
-                if panel?.output?.isScreenOnly == true || agent.state == .working || agent.state.isNeedsYou {
+                if rendered.fromTranscript {
+                    Text("Transcript")
+                        .padding(.horizontal, 5)
+                        .background(Capsule().strokeBorder(Color.secondary.opacity(0.6)))
+                        .help("The conversation from the agent's session file; turn off Messages only for the terminal screen")
+                } else if panel?.output?.isScreenOnly == true || agent.state == .working || agent.state.isNeedsYou {
                     Text("Screen only")
                         .padding(.horizontal, 5)
                         .background(Capsule().strokeBorder(Color.secondary.opacity(0.6)))
@@ -313,8 +318,10 @@ struct AgentPanelView: View {
     }
 
     private func renderedOutput(_ panel: PanelState?) -> RenderedOutputCache.Value {
-        outputCache.value(output: panel?.output, isLoading: panel?.isLoading == true, messagesOnly: settings.messagesOnly,
-                          tool: agent.tool, app: agent.app)
+        // A dialog waiting for an answer is only on the screen, never in the transcript.
+        let transcript = settings.messagesOnly && !agent.state.isNeedsYou ? panel?.transcript : nil
+        return outputCache.value(output: panel?.output, transcript: transcript, isLoading: panel?.isLoading == true,
+                                 messagesOnly: settings.messagesOnly, tool: agent.tool, app: agent.app)
     }
 
     // MARK: Reply
@@ -678,10 +685,12 @@ struct OpenTarget {
 /// The shown output and its colors, worked out again only when the read or the Messages setting changes: the panel
 /// re-renders on every keystroke in the reply box and every store update. Not observed; read and filled in `body`.
 final class RenderedOutputCache {
-    typealias Value = (text: String, styles: [StyledRun])
+    typealias Value = (text: String, styles: [StyledRun], fromTranscript: Bool)
 
     private struct Key: Equatable {
         var output: ReadOutput?
+        /// The transcript's path, bytes read and entry count: it changes whenever the entries can have.
+        var transcript: String?
         var isLoading: Bool
         var messagesOnly: Bool
         var tool: AgentTool
@@ -689,22 +698,33 @@ final class RenderedOutputCache {
     }
 
     private var key: Key?
-    private var cached: Value = ("", [])
+    private var cached: Value = ("", [], false)
 
-    func value(output: ReadOutput?, isLoading: Bool, messagesOnly: Bool, tool: AgentTool, app: String?) -> Value {
+    /// The transcript wins when given and not empty; otherwise the terminal output, as before.
+    func value(output: ReadOutput?, transcript: TranscriptSnapshot? = nil, isLoading: Bool, messagesOnly: Bool,
+               tool: AgentTool, app: String?) -> Value {
+        let transcript = transcript.flatMap { $0.entries.isEmpty ? nil : $0 }
         // Loading only changes what is shown while there is no output yet.
-        let key = Key(output: output, isLoading: output == nil && isLoading, messagesOnly: messagesOnly, tool: tool, app: app)
+        let key = Key(output: transcript == nil ? output : nil,
+                      transcript: transcript.map { "\($0.path)|\($0.version)|\($0.entries.count)" },
+                      isLoading: output == nil && transcript == nil && isLoading,
+                      messagesOnly: messagesOnly, tool: tool, app: app)
         if key == self.key { return cached }
         self.key = key
+        if let transcript {
+            let rendered = TranscriptRendering.render(transcript)
+            cached = (rendered.text, rendered.runs, true)
+            return cached
+        }
         guard let output else {
-            cached = (isLoading ? "Loading…" : "", [])
+            cached = (isLoading ? "Loading…" : "", [], false)
             return cached
         }
         let filtered = messagesOnly
             ? OutputFilter.messages(output.text, tool: tool, app: app)
             : OutputFilter.clean(output.text)
         let text = filtered.split(separator: "\n", omittingEmptySubsequences: false).suffix(200).joined(separator: "\n")
-        cached = (text, OutputStyling.runs(shown: text, source: output))
+        cached = (text, OutputStyling.runs(shown: text, source: output), false)
         return cached
     }
 }

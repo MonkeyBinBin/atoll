@@ -160,9 +160,9 @@ public enum OutputStyling {
     private static let diffRow = try! NSRegularExpression(pattern: #"^\s+\d+ +([+-])"#)
     private static let toolCall = try! NSRegularExpression(pattern: #"^[⏺●•] ([A-Z][A-Za-z0-9_]*)\("#)
     private static let inlineCode = try! NSRegularExpression(pattern: #"`[^`\n]+`"#)
-    private static let url = try! NSRegularExpression(pattern: #"https?://[^\s<>()\[\]"'`]+(?<![.,;:!?])"#)
+    static let url = try! NSRegularExpression(pattern: #"https?://[^\s<>()\[\]"'`]+(?<![.,;:!?])"#)
     /// "Sources/App.swift", "~/x/y.md", "./a/b.ts:12:3", or a bare file with a line: "App.swift:12".
-    private static let filePath = try! NSRegularExpression(
+    static let filePath = try! NSRegularExpression(
         pattern: #"(?<![\w/.~-])(?:(?:~|\.{1,2})?/?(?:[\w.-]+/)+[\w.-]+\.[A-Za-z][A-Za-z0-9]*|[\w-]+\.[A-Za-z][A-Za-z0-9]*(?=:\d))(?::\d+(?::\d+)?)?"#)
     private static let boxDrawing = try! NSRegularExpression(pattern: #"[\u2500-\u257F]+"#)
 

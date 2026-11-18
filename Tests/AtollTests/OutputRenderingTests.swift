@@ -25,4 +25,18 @@ struct OutputRenderingTests {
         let changed = ReadOutput(text: "next", how: "history")
         #expect(cache.value(output: changed, isLoading: false, messagesOnly: false, tool: .generic, app: nil).text == "next")
     }
+
+    @Test("a transcript with entries is shown instead of the screen, and says so; an empty one falls back")
+    func transcriptWins() {
+        let cache = RenderedOutputCache()
+        let output = ReadOutput(text: "screen", how: "history")
+        let transcript = TranscriptSnapshot(path: "/t", entries: [TranscriptEntry(.user, "hi")], version: 3)
+        let shown = cache.value(output: output, transcript: transcript, isLoading: false, messagesOnly: true, tool: .claudeCode, app: nil)
+        #expect(shown.text == "❯ hi")
+        #expect(shown.fromTranscript)
+        let empty = TranscriptSnapshot(path: "/t", entries: [], version: 4)
+        let fallback = cache.value(output: output, transcript: empty, isLoading: false, messagesOnly: true, tool: .claudeCode, app: nil)
+        #expect(fallback.text == "screen")
+        #expect(!fallback.fromTranscript)
+    }
 }
