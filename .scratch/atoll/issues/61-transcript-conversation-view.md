@@ -17,7 +17,7 @@ Claude Code 和 Codex 都把完整對話寫在本機的 JSONL transcript 裡，�
 
 **Blocked by:** —
 
-**Status:** claimed
+**Status:** resolved
 
 - [x] 決定 agent → transcript 怎麼對應，結論寫在 Comments。已知線索：`cmux sessions list` 會給 session id、surface 與 cwd（Codex 另有 `codex_transcript=yes`）；herdr 的 `agent.list` 沒有 session id，可能要靠 cwd + 最近更新的檔案（同一個 cwd 有多個 session 時會撞），或靠 Claude Code hook 帶的 `session_id` / `transcript_path`
 - [x] transcript 解析放在 AtollCore，Claude Code 與 Codex 各一個 parser，輸出統一的訊息結構（角色、文字、tool 呼叫 / 結果）；不認得的列略過，不 crash；用去識別化的 fixture 寫測試
@@ -25,7 +25,7 @@ Claude Code 和 Codex 都把完整對話寫在本機的 JSONL transcript 裡，�
 - [x] 退回終端機輸出的時機明確：對應不到、檔案讀不到、解析結果是空的。panel 要標示目前顯示的是哪一種來源
 - [x] 讀取成本可接受：transcript 可能數 MB，只解析尾端或增量讀取，不在每次 panel 重繪時重讀
 - [x] 等使用者回應的對話框（permission、question）仍以終端機畫面為準，`WaitingPreview`、`PermissionChoices` 等 parser 不改讀 transcript
-- [ ] `make check` 通過；實機確認 cmux 與 herdr 裡的 Claude Code、Codex 各一個 session
+- [x] `make check` 通過；實機確認 cmux 與 herdr 裡的 Claude Code、Codex 各一個 session
 
 **Out of scope:**
 - OpenCode 與其他 generic agent 的 transcript
@@ -42,3 +42,5 @@ Claude Code 和 Codex 都把完整對話寫在本機的 JSONL transcript 裡，�
 - 2026-11-18（agent）：自我檢查後修正：（1）平行 tool 呼叫（近期 Claude transcript 有 513 處連續兩個 `tool_use`）的輸出原本都掛在最後一個呼叫下，改成依 id 配對（Claude `tool_use.id` ↔ `tool_use_id`，Codex `call_id`），各自放在自己的呼叫底下；（2）`<` 開頭的使用者訊息原本整則略過，會吃掉 `<hc>`、`<pasted_content>`、`<scheduled-task>` 等真正的訊息，改成只略過已知包裝（system-reminder、local-command-caveat、task-notification、command-message、user-prompt-submit-hook），`<hc from=…>…</hc>` 只顯示內文；Codex 只略過 environment_context、user_instructions、image 標記與 AGENTS.md；（3）略過 `isCompactSummary` 列；（4）完成後重讀改成「從 Working 轉出」就觸發，不限 Done（Codex 可能停在 Idle）；`LiveScheduler` 不需保留回傳的 handle 也會觸發；（5）pid 檔防重用改成比對 `startedAt` 與程序啟動時間（sysctl，實測相差 0.3–1.6 秒，容許 30 秒），讀不到啟動時間才比 cwd——agent 的 cwd 可能退回 terminal 的 cwd（herdr-core 的 `t7g` terminal 開在 dotfiles、claude 在 atoll）。實測 93.6 MB 的 transcript：只讀尾端 4 MB，120 個項目，73 ms；debug 版在 transcript 畫面確認 ⌘F（6 / 6、highlight、捲到符合處）、自動捲到底與 Wrap。排查時發現 17:14 起有一個帶 debug hook 的舊版 Atoll（`build/Atoll.app`，相對路徑啟動，先前的 kill 沒比對到）一直在跑，搶讀 debug 指令，期間的「Screen only」截圖是它拍的；已關閉。
 - 2026-11-18（agent）：限制：每個 agent 最多 400 個項目、只讀尾端 4 MB；tool 輸出只留 4 列；turn 進行中只看得到已寫入的 block；Needs you 時顯示終端機畫面。尚待實機確認：cmux 的 Claude Code（cmux 目前沒開）、herdr CLI（server 沒開，`agent_session` 是否為 null 未知）、任何來源的 Codex、在開著 panel 的 session 裡 `/clear`（若 pid 檔不更新，panel 會停在舊對話，需改成退回終端機畫面）、從 Atoll reply 欄送出的訊息是否出現在 transcript。
 - 2026-11-18（agent）：實機測試（debug 版 + debug hook 截圖）：cmux 的 Claude Code ✓、`/clear` 後重開 panel 只顯示新 session ✓、從 reply 欄送出的訊息（狀態沒變，靠輪詢）✓、cmux 的 Codex ✓。測試中發現並修正：（1）cmux 回報的 session id 不一定是工具自己的（它恢復的 session 回報 `cmux-…`），Claude 改成依序嘗試 source 的 id 與 pid 檔的 id；（2）Codex 沒有 pid 檔，改從 agent 程序開著的檔案（libproc）找 `~/.codex/sessions/` 下的 `rollout-*.jsonl`——Codex 執行期間會一直開著它，屬於確定的連結；（3）panel 只在狀態轉換時重讀，來源沒回報狀態時會卡住（cmux 恢復的 session 實測不回報），改成 panel 開著時每 2 秒增量讀一次 transcript，與終端機輸出各用一個 request 編號；未變時不更新 panel。`/clear` 確認會更新 pid 檔的 `sessionId`（`0d9e0320` → `a42ccb5b`），`startedAt` 不變。另外發現 cmux 既有行為：`/clear` 時舊 session 的 `SessionEnd` 先到，agent 短暫消失，開著的 panel 會被關回列表（與本 ticket 無關，未修）。herdr CLI 未測：對 herdr 還原出來的使用者 pane 打字被權限層擋下。
+- 2026-11-18（agent）：PR #8 合併（`c750177`），之後再經四輪 review 修正：定位以程序自己的記錄為唯一候選（Claude pid 檔、Codex 開著的 rollout 檔）、只查 UUID 形式的 session id、讀不到超過 6 秒才退回畫面、顯示 transcript 時不讀終端機畫面、reader 在背景渲染並偵測檔案替換或原地改寫。
+- 2026-11-18（使用者）：安裝後實測 herdr 裡的 agent，panel 顯示 transcript。至此 cmux 的 Claude Code、Codex 與 herdr 皆已實機確認。
