@@ -188,12 +188,15 @@ public struct ReadOutput: Equatable, Sendable {
     public var complete: Bool
     /// Why only the screen: "working", "blocked" or "error".
     public var why: String?
+    /// The terminal's own colors over `text`, when the read asked for them and the backend has them.
+    public var runs: [StyledRun]?
 
-    public init(text: String, how: String, complete: Bool = true, why: String? = nil) {
+    public init(text: String, how: String, complete: Bool = true, why: String? = nil, runs: [StyledRun]? = nil) {
         self.text = text
         self.how = how
         self.complete = complete
         self.why = why
+        self.runs = runs
     }
 
     public var isScreenOnly: Bool { how == "screen" }

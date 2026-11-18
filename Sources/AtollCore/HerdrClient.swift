@@ -12,6 +12,8 @@ public protocol HerdrClient: AnyObject, Sendable {
     @MainActor func stop()
 
     func read(terminal: String, lines: Int) async throws -> ReadOutput
+    /// Like `read`, with the terminal's colors in `runs` when the backend can give them (display only).
+    func readStyled(terminal: String, lines: Int) async throws -> ReadOutput
     func send(terminal: String, text: String, force: Bool) async throws -> SendOutput
     func keys(terminal: String, keys: [String]) async throws
     func interrupt(terminal: String) async throws -> InterruptOutcome
@@ -26,6 +28,10 @@ public protocol HerdrClient: AnyObject, Sendable {
 }
 
 extension HerdrClient {
+    public func readStyled(terminal: String, lines: Int) async throws -> ReadOutput {
+        try await read(terminal: terminal, lines: lines)
+    }
+
     public func renameSpace(id: String, name: String) async throws {
         throw HerdrError(kind: "unsupported", message: "Renaming spaces goes through the Herdr app")
     }

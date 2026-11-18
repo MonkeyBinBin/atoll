@@ -1,4 +1,5 @@
 import AppKit
+import AtollCore
 import SwiftUI
 
 /// Monospace font with a fallback chain for terminal output: Nerd Font private-use icons,
@@ -61,6 +62,8 @@ enum TerminalFont {
 struct TerminalOutputView: NSViewRepresentable {
     let text: String
     let font: NSFont
+    /// Colors over `text` (UTF-16 ranges): the terminal's own, or the tool layout's.
+    var styles: [StyledRun] = []
     /// Wrap long lines to the view width (conversation text) instead of scrolling sideways (TUI screens).
     var wrap: Bool = false
     /// Ranges in `text` to highlight, and which of them is current.
@@ -95,6 +98,7 @@ struct TerminalOutputView: NSViewRepresentable {
         guard let textView = scroll.documentView as? NSTextView else { return }
         let coordinator = context.coordinator
         let textChanged = coordinator.text != text || coordinator.font != font || coordinator.wrap != wrap
+            || coordinator.styles != styles
         if textChanged {
             // The highlights for the new text arrive on a later pass; remember whether to follow them.
             if searching, let shown = coordinator.currentRange, Self.isVisible(shown, in: textView) {
@@ -141,14 +145,17 @@ struct TerminalOutputView: NSViewRepresentable {
         coordinator.text = text
         coordinator.font = font
         coordinator.wrap = wrap
+        coordinator.styles = styles
         Self.applyWrap(wrap, scroll: scroll, textView: textView)
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = wrap ? .byWordWrapping : .byClipping
-        storage.setAttributedString(NSAttributedString(string: text, attributes: [
+        let attributed = NSMutableAttributedString(string: text, attributes: [
             .font: font,
-            .foregroundColor: NSColor(white: 0.86, alpha: 1),
+            .foregroundColor: TerminalPalette.defaultForeground,
             .paragraphStyle: paragraph,
-        ]))
+        ])
+        TerminalPalette.apply(styles, to: attributed, font: font)
+        storage.setAttributedString(attributed)
         textView.sizeToFit()
         guard wasAtBottom else { return }
         Self.scrollToBottom(scroll, textView: textView)
@@ -192,11 +199,67 @@ struct TerminalOutputView: NSViewRepresentable {
         var text = ""
         var font: NSFont?
         var wrap: Bool?
+        var styles: [StyledRun] = []
         var highlights: [NSRange] = []
         var current: Int?
         /// The current match as last highlighted, to tell whether it was in view before a refresh.
         var currentRange: NSRange?
         var scrollRequest = 0
         var followNextMatch = false
+    }
+}
+
+/// Maps terminal colors to the dark panel: the 16 base colors are tuned to read on it, the rest follow xterm.
+enum TerminalPalette {
+    static let defaultForeground = NSColor(white: 0.86, alpha: 1)
+    /// What inverse text uses as its color: the panel's background.
+    static let defaultBackground = NSColor(white: 0.1, alpha: 1)
+
+    static let base: [UInt32] = [
+        0x3B3F46, 0xE06C75, 0x98C379, 0xE5C07B, 0x61AFEF, 0xC678DD, 0x56B6C2, 0xC8CCD4,
+        0x7F848E, 0xFF7B86, 0xB5E890, 0xF0D197, 0x82C4FF, 0xDC9BF0, 0x7FD3DF, 0xFFFFFF,
+    ]
+
+    static func color(_ color: TermColor) -> NSColor {
+        switch color {
+        case .rgb(let r, let g, let b):
+            return NSColor(srgbRed: CGFloat(r) / 255, green: CGFloat(g) / 255, blue: CGFloat(b) / 255, alpha: 1)
+        case .palette(let index):
+            let i = Int(index)
+            if i < 16 { return hex(base[i]) }
+            if i < 232 {
+                let levels: [CGFloat] = [0, 95, 135, 175, 215, 255]
+                let n = i - 16
+                return NSColor(srgbRed: levels[n / 36] / 255, green: levels[n / 6 % 6] / 255, blue: levels[n % 6] / 255, alpha: 1)
+            }
+            let gray = CGFloat(8 + (i - 232) * 10) / 255
+            return NSColor(srgbRed: gray, green: gray, blue: gray, alpha: 1)
+        }
+    }
+
+    private static func hex(_ value: UInt32) -> NSColor {
+        NSColor(srgbRed: CGFloat(value >> 16 & 0xFF) / 255, green: CGFloat(value >> 8 & 0xFF) / 255,
+                blue: CGFloat(value & 0xFF) / 255, alpha: 1)
+    }
+
+    static func apply(_ runs: [StyledRun], to text: NSMutableAttributedString, font: NSFont) {
+        guard !runs.isEmpty else { return }
+        let length = text.length
+        let bold = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)
+        for run in runs where NSMaxRange(run.range) <= length {
+            let style = run.style
+            var foreground = style.foreground.map(color) ?? defaultForeground
+            var background = style.background.map(color)
+            if style.inverse {
+                (foreground, background) = (background ?? defaultBackground, foreground)
+            }
+            if style.dim { foreground = foreground.withAlphaComponent(0.55) }
+            var attributes: [NSAttributedString.Key: Any] = [.foregroundColor: foreground]
+            if let background { attributes[.backgroundColor] = background }
+            if style.bold { attributes[.font] = bold }
+            if style.italic { attributes[.obliqueness] = 0.15 }
+            if style.underline { attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue }
+            text.addAttributes(attributes, range: run.range)
+        }
     }
 }

@@ -313,6 +313,17 @@ public final class HerdrCLIAdapter: HerdrClient, Sendable {
         return ReadOutput(text: (read["text"] as? String) ?? "", how: "history", complete: !((read["truncated"] as? Bool) ?? false))
     }
 
+    public func readStyled(terminal: String, lines: Int) async throws -> ReadOutput {
+        let result = try await call("pane.read", [
+            "pane_id": try pane(terminal), "source": "recent_unwrapped", "lines": lines, "format": "ansi", "strip_ansi": false,
+        ])
+        let read = ((result as? [String: Any])?["read"] as? [String: Any]) ?? [:]
+        // A herdr without ANSI reads: plain text, colored by layout instead.
+        guard let raw = read["text"] as? String else { return try await self.read(terminal: terminal, lines: lines) }
+        let parsed = ANSIParser.parse(raw)
+        return ReadOutput(text: parsed.text, how: "history", complete: !((read["truncated"] as? Bool) ?? false), runs: parsed.runs)
+    }
+
     public func send(terminal: String, text: String, force: Bool) async throws -> SendOutput {
         let pane = try pane(terminal)
         if force {

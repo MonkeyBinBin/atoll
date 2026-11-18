@@ -1345,7 +1345,7 @@ public final class AgentStore {
         Task { [client = client(for: address)] in
             let result: Result<ReadOutput, HerdrError>
             do {
-                result = .success(try await client.read(terminal: address, lines: lines))
+                result = .success(try await client.readStyled(terminal: address, lines: lines))
             } catch let error as HerdrError {
                 result = .failure(error)
             } catch {

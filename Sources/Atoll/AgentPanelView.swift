@@ -211,6 +211,7 @@ struct AgentPanelView: View {
             TerminalOutputView(
                 text: text,
                 font: TerminalFont.font(family: settings.outputFontFamily, size: settings.outputFontSize),
+                styles: panel?.output.map { OutputStyling.runs(shown: text, source: $0) } ?? [],
                 wrap: settings.wrapOutput,
                 highlights: search?.matches ?? [],
                 current: search?.current,
