@@ -21,7 +21,10 @@ final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
 
 /// Borderless, non-activating panel above the menu bar that can still take keys when expanded.
 final class IslandPanel: NSPanel {
-    override var canBecomeKey: Bool { true }
+    /// Only while expanded. A non-activating panel that can become key turns key whenever it is ordered front,
+    /// without our app activating: collapsed, it would take the keyboard from the frontmost app (keys beep).
+    var acceptsKey = false
+    override var canBecomeKey: Bool { acceptsKey }
     override var canBecomeMain: Bool { false }
 }
 
@@ -165,7 +168,8 @@ final class IslandController {
             panel.orderOut(nil)
         } else if model.hiddenByFullScreen {
             panel.orderOut(nil)
-        } else {
+        } else if !panel.isVisible {
+            // Re-run on every agent change (hiddenByFullScreen reads the agents): only order it in when it isn't.
             panel.orderFrontRegardless()
         }
     }
@@ -205,12 +209,15 @@ final class IslandController {
         if mode == .collapsed {
             removeKeyMonitor()
             removeOutsideClickMonitors()
-            if panel.isKeyWindow {
+            let wasKey = panel.isKeyWindow
+            panel.acceptsKey = false
+            if wasKey {
                 panel.resignKey()
                 // We never activated: hand keyboard focus back to the app that had it.
                 previousApp?.activate()
             }
         } else {
+            panel.acceptsKey = true
             if !panel.isKeyWindow {
                 previousApp = NSWorkspace.shared.frontmostApplication
                 panel.makeKeyAndOrderFront(nil)

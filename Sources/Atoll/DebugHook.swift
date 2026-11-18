@@ -24,6 +24,39 @@ final class DebugHook {
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.poll() }
         }
+        watchKeyWindows()
+    }
+
+    /// Appends to `<dir>/keys.log` whenever one of our windows becomes / stops being key, or the app (de)activates:
+    /// a non-activating panel can take the keyboard while another app stays frontmost.
+    private func watchKeyWindows() {
+        let names: [(Notification.Name, String)] = [
+            (NSWindow.didBecomeKeyNotification, "becameKey"), (NSWindow.didResignKeyNotification, "resignedKey"),
+            (NSApplication.didBecomeActiveNotification, "appActive"), (NSApplication.didResignActiveNotification, "appInactive"),
+        ]
+        for (name, label) in names {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                nonisolated(unsafe) let object = note.object
+                MainActor.assumeIsolated {
+                    let window = object as? NSWindow
+                    let what = window.map { "\(type(of: $0)) content=\($0.contentView.map { String(describing: type(of: $0)) } ?? "-") frame=\($0.frame)" } ?? ""
+                    self?.logKey("\(label) \(what) mode=\(String(describing: self?.model.mode ?? .collapsed))")
+                }
+            }
+        }
+    }
+
+    private func logKey(_ line: String) {
+        let url = dir.appendingPathComponent("keys.log")
+        let stamp = Date().formatted(.dateTime.hour().minute().second().secondFraction(.fractional(3)))
+        let data = Data("\(stamp) \(line)\n".utf8)
+        if let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile()
+            handle.write(data)
+            try? handle.close()
+        } else {
+            try? data.write(to: url)
+        }
     }
 
     private func poll() {
