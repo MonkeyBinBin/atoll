@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// HerdrClient over herdr-core's Unix socket (JSON-RPC 2.0, one message per line),
 /// plus `herdr-app do …` for the GUI-owned commands (launch, focus). Without the app, launches go through
@@ -7,18 +8,20 @@ import Foundation
 /// The event subscription has its own connection (a subscribed plain connection only
 /// carries notifications). Every command opens a short-lived connection of its own, so
 /// slow calls (`terminal.send` waits for the user to stop typing) never block others.
-public final class CoreRPCAdapter: HerdrClient, @unchecked Sendable {
+public final class CoreRPCAdapter: HerdrClient, Sendable {
     public let socketPath: String
     public let herdrAppPath: String?
     public let hcPath: String?
     private let appRunning: @Sendable () -> Bool
     private let activateApp: @Sendable () -> Void
 
-    private let lock = NSLock()
-    private var running = false
-    private var generation = 0
-    private var currentSocket: LineSocket?
-    private var handler: (@MainActor (ClientUpdate) -> Void)?
+    private struct State {
+        var running = false
+        var generation = 0
+        var currentSocket: LineSocket?
+        var handler: (@MainActor (ClientUpdate) -> Void)?
+    }
+    private let shared = Mutex(State())
 
     public init(
         socketPath: String = CoreRPCAdapter.defaultSocketPath(),
@@ -67,55 +70,48 @@ public final class CoreRPCAdapter: HerdrClient, @unchecked Sendable {
 
     @MainActor
     public func start(onUpdate: @escaping @MainActor (ClientUpdate) -> Void) {
-        lock.lock()
-        handler = onUpdate
-        let alreadyRunning = running
-        running = true
-        lock.unlock()
+        let alreadyRunning = shared.withLock { state in
+            state.handler = onUpdate
+            defer { state.running = true }
+            return state.running
+        }
         if !alreadyRunning { spawnLoop() }
     }
 
     @MainActor
     public func reconnect() {
-        lock.lock()
-        let socket = currentSocket
-        lock.unlock()
+        let socket = shared.withLock { $0.currentSocket }
         // Closing ends the blocking read; the loop reconnects at once.
         socket?.shutdown()
     }
 
     @MainActor
     public func stop() {
-        lock.lock()
-        running = false
-        generation += 1
-        let socket = currentSocket
-        currentSocket = nil
-        lock.unlock()
+        let socket = shared.withLock { state in
+            state.running = false
+            state.generation += 1
+            defer { state.currentSocket = nil }
+            return state.currentSocket
+        }
         socket?.shutdown()
     }
 
     private func spawnLoop() {
-        lock.lock()
-        generation += 1
-        let gen = generation
-        lock.unlock()
+        let gen = shared.withLock { state in
+            state.generation += 1
+            return state.generation
+        }
         let thread = Thread { [weak self] in self?.subscriptionLoop(generation: gen) }
         thread.name = "herdr-core events"
         thread.start()
     }
 
     private func isCurrent(_ gen: Int) -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return running && generation == gen
+        shared.withLock { $0.running && $0.generation == gen }
     }
 
     private func emit(_ update: ClientUpdate) {
-        lock.lock()
-        let handler = handler
-        lock.unlock()
-        guard let handler else { return }
+        guard let handler = shared.withLock({ $0.handler }) else { return }
         DispatchQueue.main.async {
             MainActor.assumeIsolated { handler(update) }
         }
@@ -128,14 +124,12 @@ public final class CoreRPCAdapter: HerdrClient, @unchecked Sendable {
             var reason = "connection closed"
             do {
                 let socket = try LineSocket(path: socketPath)
-                lock.lock()
-                currentSocket = socket
-                lock.unlock()
+                shared.withLock { $0.currentSocket = socket }
                 defer {
                     socket.close()
-                    lock.lock()
-                    if currentSocket === socket { currentSocket = nil }
-                    lock.unlock()
+                    shared.withLock { state in
+                        if state.currentSocket === socket { state.currentSocket = nil }
+                    }
                 }
                 try socket.writeLine(Self.request(id: 1, method: "hello", params: ["generation": AgentStore.supportedGeneration]))
                 let helloResult = try Self.result(of: try Self.readResponse(socket, id: 1))
@@ -528,11 +522,11 @@ private struct UncheckedBox: @unchecked Sendable {
 }
 
 /// Minimal blocking line-oriented Unix socket.
-final class LineSocket: @unchecked Sendable {
+final class LineSocket: Sendable {
     private let fd: Int32
-    private var buffer = Data()
-    private let lock = NSLock()
-    private var closed = false
+    /// Read-ahead past the last line returned. Locked only around buffer edits, never across `read()`.
+    private let buffer = Mutex(Data())
+    private let closed = Mutex(false)
 
     init(path: String) throws {
         fd = socket(AF_UNIX, SOCK_STREAM, 0)
@@ -577,30 +571,32 @@ final class LineSocket: @unchecked Sendable {
     func readLine() -> Data? {
         var chunk = [UInt8](repeating: 0, count: 65536)
         while true {
-            if let index = buffer.firstIndex(of: 0x0A) {
-                let line = buffer[buffer.startIndex..<index]
+            let line: Data? = buffer.withLock { buffer in
+                guard let index = buffer.firstIndex(of: 0x0A) else { return nil }
+                let line = Data(buffer[buffer.startIndex..<index])
                 buffer.removeSubrange(buffer.startIndex...index)
-                return Data(line)
+                return line
             }
+            if let line { return line }
             let n = read(fd, &chunk, chunk.count)
             if n <= 0 { return nil }
-            buffer.append(contentsOf: chunk[0..<n])
+            buffer.withLock { $0.append(contentsOf: chunk[0..<n]) }
         }
     }
 
     /// Unblocks a pending read from another thread.
     func shutdown() {
-        lock.lock()
-        defer { lock.unlock() }
-        guard !closed else { return }
-        Darwin.shutdown(fd, SHUT_RDWR)
+        closed.withLock { closed in
+            guard !closed else { return }
+            Darwin.shutdown(fd, SHUT_RDWR)
+        }
     }
 
     func close() {
-        lock.lock()
-        defer { lock.unlock() }
-        guard !closed else { return }
-        closed = true
-        Darwin.close(fd)
+        closed.withLock { closed in
+            guard !closed else { return }
+            closed = true
+            Darwin.close(fd)
+        }
     }
 }

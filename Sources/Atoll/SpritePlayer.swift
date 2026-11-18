@@ -1,9 +1,10 @@
 import AppKit
 import AtollCore
 import SwiftUI
+import Synchronization
 
 /// A sprite sheet in the app's asset format: transparent PNG + Aseprite-style JSON.
-final class SpriteSheet: @unchecked Sendable {
+final class SpriteSheet: Sendable {
     struct Frame {
         let rect: CGRect
         let duration: TimeInterval
@@ -26,9 +27,12 @@ final class SpriteSheet: @unchecked Sendable {
     private let image: CGImage
     private let accessoryKey: (UInt8, UInt8, UInt8)?
     private let accessoryKeyDark: (UInt8, UInt8, UInt8)?
-    private var recolored: [Int: CGImage] = [:]
-    private var frameCache: [String: CGImage] = [:]
-    private let lock = NSLock()
+    private struct Caches {
+        var recolored: [Int: CGImage] = [:]
+        var frames: [String: CGImage] = [:]
+    }
+    /// Held across a first recolor too, so two threads never recolor the same sheet twice.
+    private let caches = Mutex(Caches())
 
     init?(name: String) {
         guard let jsonURL = Self.resource(name, "json"),
@@ -87,17 +91,18 @@ final class SpriteSheet: @unchecked Sendable {
     func frame(_ index: Int, colorIndex: Int) -> CGImage? {
         guard frames.indices.contains(index) else { return nil }
         let cacheKey = "\(index)-\(colorIndex)"
-        lock.lock()
-        defer { lock.unlock() }
-        if let cached = frameCache[cacheKey] { return cached }
-        let sheet = recoloredSheet(colorIndex)
-        guard let cropped = sheet.cropping(to: frames[index].rect) else { return nil }
-        frameCache[cacheKey] = cropped
-        return cropped
+        let rect = frames[index].rect
+        return caches.withLock { caches in
+            if let cached = caches.frames[cacheKey] { return cached }
+            let sheet = recoloredSheet(colorIndex, &caches)
+            guard let cropped = sheet.cropping(to: rect) else { return nil }
+            caches.frames[cacheKey] = cropped
+            return cropped
+        }
     }
 
-    private func recoloredSheet(_ colorIndex: Int) -> CGImage {
-        if let cached = recolored[colorIndex] { return cached }
+    private func recoloredSheet(_ colorIndex: Int, _ caches: inout Caches) -> CGImage {
+        if let cached = caches.recolored[colorIndex] { return cached }
         guard let key = accessoryKey else { return image }
         let target = PixelPalette.individual(colorIndex).rgb
         let targetDark = PixelPalette.individualDark(colorIndex).rgb
@@ -122,7 +127,7 @@ final class SpriteSheet: @unchecked Sendable {
             }
         }
         let result = context.makeImage() ?? image
-        recolored[colorIndex] = result
+        caches.recolored[colorIndex] = result
         return result
     }
 }

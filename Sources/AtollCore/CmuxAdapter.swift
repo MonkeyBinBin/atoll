@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// Claude Code / Codex sessions that cmux integrates itself, read through the `cmux` CLI.
 ///
@@ -6,23 +7,25 @@ import Foundation
 /// history is replayed into `CmuxSessions` and published as one snapshot (no notifications
 /// for history); later changes are diffed into events. Nothing runs while cmux isn't open,
 /// so the CLI never launches cmux.
-public final class CmuxAdapter: HerdrClient, @unchecked Sendable {
+public final class CmuxAdapter: HerdrClient, Sendable {
     public let cmuxPath: String?
     private let appRunning: @Sendable () -> Bool
     private let activateApp: @Sendable () -> Void
     private let refreshInterval: TimeInterval
 
-    private let lock = NSLock()
-    private var running = false
-    private var generation = 0
-    private var handler: (@MainActor (ClientUpdate) -> Void)?
-    private var state = CmuxSessions()
-    private var published: [String: TerminalInfo] = [:]
-    private var seq: UInt64 = 0
-    private var child: Process?
-    private var ownership: [Int32: Bool] = [:]
-    /// Set by reconnect(): report offline again if cmux still isn't running.
-    private var announceOffline = false
+    private struct State {
+        var running = false
+        var generation = 0
+        var handler: (@MainActor (ClientUpdate) -> Void)?
+        var sessions = CmuxSessions()
+        var published: [String: TerminalInfo] = [:]
+        var seq: UInt64 = 0
+        var child: Process?
+        var ownership: [Int32: Bool] = [:]
+        /// Set by reconnect(): report offline again if cmux still isn't running.
+        var announceOffline = false
+    }
+    private let shared = Mutex(State())
 
     public init(
         cmuxPath: String? = CmuxAdapter.findCmux(),
@@ -48,13 +51,13 @@ public final class CmuxAdapter: HerdrClient, @unchecked Sendable {
 
     @MainActor
     public func start(onUpdate: @escaping @MainActor (ClientUpdate) -> Void) {
-        lock.lock()
-        handler = onUpdate
-        let already = running
-        running = true
-        generation += 1
-        let gen = generation
-        lock.unlock()
+        let (already, gen) = shared.withLock { state in
+            state.handler = onUpdate
+            let already = state.running
+            state.running = true
+            state.generation += 1
+            return (already, state.generation)
+        }
         guard !already else { return }
         let thread = Thread { [weak self] in self?.supervise(generation: gen) }
         thread.name = "cmux events"
@@ -63,56 +66,52 @@ public final class CmuxAdapter: HerdrClient, @unchecked Sendable {
 
     @MainActor
     public func reconnect() {
-        lock.lock()
-        let process = child
-        announceOffline = true
-        lock.unlock()
+        let process = shared.withLock { state in
+            state.announceOffline = true
+            return state.child
+        }
         process?.terminate()
     }
 
     @MainActor
     public func stop() {
-        lock.lock()
-        running = false
-        generation += 1
-        let process = child
-        child = nil
-        lock.unlock()
+        let process = shared.withLock { state in
+            state.running = false
+            state.generation += 1
+            defer { state.child = nil }
+            return state.child
+        }
         process?.terminate()
     }
 
     private func isCurrent(_ gen: Int) -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return running && generation == gen
+        shared.withLock { $0.running && $0.generation == gen }
     }
 
     private func emit(_ update: ClientUpdate) {
-        lock.lock()
-        let handler = handler
-        lock.unlock()
-        guard let handler else { return }
+        guard let handler = shared.withLock({ $0.handler }) else { return }
         DispatchQueue.main.async { MainActor.assumeIsolated { handler(update) } }
     }
 
     private func nextSeq() -> UInt64 {
-        lock.lock()
-        defer { lock.unlock() }
-        seq += 1
-        return seq
+        shared.withLock { state in
+            state.seq += 1
+            return state.seq
+        }
     }
+
+    private var currentSeq: UInt64 { shared.withLock { $0.seq } }
 
     /// Keeps one `cmux events` child running while cmux is open.
     private func supervise(generation gen: Int) {
         var announcedOffline = false
         while isCurrent(gen) {
             guard let path = cmuxPath, appRunning() else {
-                lock.lock()
-                if announceOffline {
-                    announcedOffline = false
-                    announceOffline = false
+                let again = shared.withLock { state in
+                    defer { state.announceOffline = false }
+                    return state.announceOffline
                 }
-                lock.unlock()
+                if again { announcedOffline = false }
                 if !announcedOffline {
                     emit(.disconnected(reason: cmuxPath == nil ? "cmux isn't installed" : "cmux isn't running"))
                     announcedOffline = true
@@ -146,11 +145,11 @@ public final class CmuxAdapter: HerdrClient, @unchecked Sendable {
         process.standardOutput = out
         process.standardError = FileHandle.nullDevice
         do { try process.run() } catch { return }
-        lock.lock()
-        child = process
-        state = CmuxSessions()
-        published = [:]
-        lock.unlock()
+        shared.withLock { state in
+            state.child = process
+            state.sessions = CmuxSessions()
+            state.published = [:]
+        }
 
         let ticker = Thread { [weak self] in
             while let self, self.isCurrent(gen), process.isRunning {
@@ -184,15 +183,13 @@ public final class CmuxAdapter: HerdrClient, @unchecked Sendable {
                         publishSnapshot()
                         ticker.start()
                     } else {
-                        emit(.heartbeat(seq: seq))
+                        emit(.heartbeat(seq: currentSeq))
                     }
                     continue
                 }
                 guard type == "event" else { continue }
-                lock.lock()
-                state.apply(frame)
-                lock.unlock()
                 let frameSeq = (frame["seq"] as? NSNumber)?.uint64Value ?? 0
+                shared.withLock { $0.sessions.apply(frame) }
                 if replaying {
                     if frameSeq >= latest {
                         replaying = false
@@ -205,17 +202,15 @@ public final class CmuxAdapter: HerdrClient, @unchecked Sendable {
             }
         }
         process.terminate()
-        lock.lock()
-        if child === process { child = nil }
-        lock.unlock()
+        shared.withLock { state in
+            if state.child === process { state.child = nil }
+        }
     }
 
     // MARK: Publishing
 
     private func currentTerminals() -> [TerminalInfo] {
-        lock.lock()
-        let snapshot = state
-        lock.unlock()
+        let snapshot = shared.withLock { $0.sessions }
         return snapshot.terminals { [weak self] session in
             guard let pid = session.pid else { return true }
             guard ProcessInspector.isAlive(pid) else { return false }
@@ -225,42 +220,31 @@ public final class CmuxAdapter: HerdrClient, @unchecked Sendable {
 
     /// Cached: a process doesn't move between backends.
     private func ownedByHerdr(_ pid: Int32) -> Bool {
-        lock.lock()
-        if let known = ownership[pid] {
-            lock.unlock()
-            return known
-        }
-        lock.unlock()
+        if let known = shared.withLock({ $0.ownership[pid] }) { return known }
         let owned = ProcessInspector.belongsToHerdr(pid)
-        lock.lock()
-        ownership[pid] = owned
-        lock.unlock()
+        shared.withLock { $0.ownership[pid] = owned }
         return owned
     }
 
     private func publishSnapshot() {
         let terminals = currentTerminals()
-        lock.lock()
-        published = Dictionary(uniqueKeysWithValues: terminals.map { ($0.address, $0) })
-        lock.unlock()
+        shared.withLock { $0.published = Dictionary(uniqueKeysWithValues: terminals.map { ($0.address, $0) }) }
         emit(.connected(CoreHello(generation: 1, version: "cmux", methods: [])))
         emit(.snapshot(seq: nextSeq(), terminals: terminals))
     }
 
     private func publishChanges() {
         let terminals = currentTerminals()
-        lock.lock()
-        let old = published
-        let result = HerdrCLIAdapter.diff(old: old, new: terminals)
-        published = result.next
-        lock.unlock()
+        let result = shared.withLock { state in
+            let result = HerdrCLIAdapter.diff(old: state.published, new: terminals)
+            state.published = result.next
+            return result
+        }
         for event in result.events { emit(.event(seq: nextSeq(), event)) }
     }
 
     private func surface(_ address: String) throws -> String {
-        lock.lock()
-        defer { lock.unlock() }
-        guard let surface = published[address]?.labels["atoll.cmux.surface"] else {
+        guard let surface = shared.withLock({ $0.published[address]?.labels["atoll.cmux.surface"] }) else {
             throw HerdrError(kind: "not_found", message: "This session is no longer in cmux")
         }
         return surface
