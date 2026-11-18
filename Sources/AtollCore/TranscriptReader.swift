@@ -31,16 +31,19 @@ public actor TranscriptReader {
     }
 
     private var states: [String: State] = [:]
-    /// Transcript files found per session id ("tool|id"), so folders are scanned once.
-    private var located: [String: URL] = [:]
+    /// Session id lookups ("tool|id"): found files are kept while they exist; misses for `missTTL`, so an id that
+    /// leads nowhere (cmux's own ids) isn't searched for on every poll, yet a session file created later is found.
+    private var located: [String: (url: URL?, at: Date)] = [:]
+    let missTTL: TimeInterval
     /// How much of a file's end is read the first time (and after a jump larger than this).
     let window: UInt64
     /// Entries kept per agent, newest last.
     let maxEntries: Int
 
-    public init(window: UInt64 = 4 << 20, maxEntries: Int = 400) {
+    public init(window: UInt64 = 4 << 20, maxEntries: Int = 400, missTTL: TimeInterval = 30) {
         self.window = window
         self.maxEntries = maxEntries
+        self.missTTL = missTTL
     }
 
     public func read(address: String, url: URL, format: TranscriptFormat) -> TranscriptSnapshot? {
@@ -54,9 +57,11 @@ public actor TranscriptReader {
             ?? State(path: url.path, format: format, offset: 0)
         var dropFirstLine = false
         if size - state.offset > window {
-            // First read of a long file, or it grew by more than the window since: only its tail.
+            // First read of a long file, or it grew by more than the window since: only its tail. Unless the window
+            // starts right after a newline, its first line is a fragment.
             state = State(path: url.path, format: format, offset: size - window, startsMidway: true)
-            dropFirstLine = true
+            try? handle.seek(toOffset: state.offset - 1)
+            dropFirstLine = (try? handle.read(upToCount: 1)) != Data([UInt8(ascii: "\n")])
         }
         if size > state.offset {
             try? handle.seek(toOffset: state.offset)
@@ -88,34 +93,34 @@ public actor TranscriptReader {
         return snapshot(state)
     }
 
-    /// Finds the agent's transcript and reads it; nil when there is none to show (no certain link, or unreadable).
+    /// Finds the agent's transcript and reads it; nil when there is none to show (no certain link, or unreadable). A
+    /// miss keeps what was read, so a passing failure doesn't mean parsing the whole window again.
     public func load(address: String, tool: AgentTool, hint: SessionHint, cwd: String,
                      locator: TranscriptLocator) -> TranscriptSnapshot? {
-        guard let url = locate(tool: tool, hint: hint, cwd: cwd, locator: locator) else {
-            states[address] = nil
-            return nil
-        }
+        let found = locator.locate(tool: tool, hint: hint, cwd: cwd) { [self] id in self.lookUp(tool: tool, id: id, cwd: cwd, locator: locator) }
+        guard let url = found else { return nil }
         return read(address: address, url: url, format: tool == .codex ? .codex : .claudeCode)
     }
 
-    private func locate(tool: AgentTool, hint: SessionHint, cwd: String, locator: TranscriptLocator) -> URL? {
-        if let path = locator.explicitPath(hint) { return path }
-        for id in locator.sessionIDs(tool: tool, hint: hint, cwd: cwd) {
-            let key = "\(tool)|\(id)"
-            if let url = located[key], FileManager.default.fileExists(atPath: url.path) { return url }
-            if let url = locator.transcript(tool: tool, id: id, cwd: cwd) {
-                located[key] = url
-                return url
-            }
+    private func lookUp(tool: AgentTool, id: String, cwd: String, locator: TranscriptLocator) -> URL? {
+        let key = "\(tool)|\(id)"
+        if let cached = located[key] {
+            if let url = cached.url, FileManager.default.fileExists(atPath: url.path) { return url }
+            if cached.url == nil, Date().timeIntervalSince(cached.at) < missTTL { return nil }
         }
-        return locator.openTranscript(tool: tool, hint: hint)
+        let url = locator.transcript(tool: tool, id: id, cwd: cwd)
+        located[key] = (url, Date())
+        return url
     }
 
+    /// Drops what was read for an agent (its panel closed).
     public func forget(address: String) {
         states[address] = nil
     }
 
+    /// Bytes of complete lines read: an unfinished line being written doesn't change it, as it adds no entry yet.
     private func snapshot(_ state: State) -> TranscriptSnapshot {
-        TranscriptSnapshot(path: state.path, entries: state.entries, version: state.offset, startsMidway: state.startsMidway)
+        TranscriptSnapshot(path: state.path, entries: state.entries, version: state.offset - UInt64(state.pending.count),
+                           startsMidway: state.startsMidway)
     }
 }

@@ -100,9 +100,14 @@ final class DebugHook {
                 // tlocate: how the open panel's agent maps to a transcript (ids shortened, file name only).
                 if let address = model.store.panel?.address, let agent = model.store.agent(address) {
                     let locator = model.store.transcriptLocator
-                    let ids = locator.sessionIDs(tool: agent.tool, hint: agent.session, cwd: agent.projectPath)
+                    let candidates = locator.candidates(tool: agent.tool, hint: agent.session, cwd: agent.projectPath).map { candidate in
+                        switch candidate {
+                        case .file(let url): "file:\(url.lastPathComponent)"
+                        case .id(let id): "id:\(id.prefix(8))"
+                        }
+                    }
                     let url = locator.locate(tool: agent.tool, hint: agent.session, cwd: agent.projectPath)
-                    let line = "tool=\(agent.tool) ids=\(ids.map { String($0.prefix(8)) }) file=\(url?.lastPathComponent ?? "none") panelTranscript=\(model.store.panel?.transcript.map { "\($0.entries.count)" } ?? "none")"
+                    let line = "tool=\(agent.tool) candidates=\(candidates) file=\(url?.lastPathComponent ?? "none") panelTranscript=\(model.store.panel?.transcript.map { "\($0.entries.count)" } ?? "none")"
                     try? line.write(to: dir.appendingPathComponent("tlocate.txt"), atomically: true, encoding: .utf8)
                 }
             case "hour":

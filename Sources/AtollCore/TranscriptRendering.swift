@@ -3,13 +3,15 @@ import Foundation
 /// Lays a transcript out as panel text with colors, in the shape of Claude Code's own screen: `❯` prompts, `⏺` replies
 /// and tool calls, `⎿` tool output; reply markdown is styled and its markers dropped (headings, bold, backticks).
 public enum TranscriptRendering {
-    public static func render(_ snapshot: TranscriptSnapshot) -> (text: String, runs: [StyledRun]) {
+    /// Only the newest entries that fit in about `maxRows` rows are laid out: the panel is built on the main actor.
+    public static func render(_ snapshot: TranscriptSnapshot, maxRows: Int = 2000) -> (text: String, runs: [StyledRun]) {
         var out = Builder()
-        if snapshot.startsMidway {
+        let start = firstShown(snapshot.entries, maxRows: maxRows)
+        if snapshot.startsMidway || start > 0 {
             out.line("… earlier messages not shown", OutputStyling.muted)
         }
         // Several calls can run before their results arrive: each result goes under its own call.
-        let entries = snapshot.entries
+        let entries = snapshot.entries[start...]
         let callIDs = Set(entries.compactMap { entry -> String? in
             if case .toolCall = entry.kind { return entry.id }
             return nil
@@ -42,6 +44,19 @@ public enum TranscriptRendering {
             previous = entry.kind
         }
         return (out.result, out.runs)
+    }
+
+    /// The first entry kept so the rows (each entry's lines plus its blank line) stay within `maxRows`; the newest
+    /// entry is always kept.
+    static func firstShown(_ entries: [TranscriptEntry], maxRows: Int) -> Int {
+        var rows = 0
+        var index = entries.count
+        while index > 0 {
+            rows += entries[index - 1].text.reduce(1) { $1 == "\n" ? $0 + 1 : $0 } + 1
+            if rows > maxRows, index < entries.count { break }
+            index -= 1
+        }
+        return index
     }
 
     private static func resultRows(_ text: String, into out: inout Builder) {

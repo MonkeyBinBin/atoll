@@ -127,6 +127,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         store.autoAdvance = settings.autoAdvance
         store.timelineEnabled = settings.todayTimeline
+        if store.wantsTranscript != settings.messagesOnly { store.wantsTranscript = settings.messagesOnly }
         if (store.changeProbe != nil) != settings.changeSummary {
             store.changeProbe = settings.changeSummary ? (DemoMode.isOn ? DemoGit() as any ChangeProbing : GitProbe()) : nil
             store.changeInspector = settings.changeSummary ? (DemoMode.isOn ? DemoGit() as any ChangeInspecting : GitProbe()) : nil

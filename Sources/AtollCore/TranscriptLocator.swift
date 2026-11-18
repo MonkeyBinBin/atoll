@@ -23,9 +23,10 @@ public struct SessionHint: Equatable, Sendable {
     }
 }
 
-/// Finds an agent's transcript file from its `SessionHint`. Only certain links are followed: a path, a session id,
-/// or (Claude Code) the pid's own session file. Nothing is guessed from the working directory or file times, since
-/// two agents can share a working tree and showing another agent's conversation is worse than showing none.
+/// Finds an agent's transcript file from its `SessionHint`. Only certain links are followed: what the agent process
+/// itself says (Claude Code's pid session file, the rollout file Codex has open), then what the source was told (a
+/// path or session id). Nothing is guessed from the working directory or file times, since two agents can share a
+/// working tree and showing another agent's conversation is worse than showing none.
 public struct TranscriptLocator: Sendable {
     public let home: URL
     /// When a process started, and the files it has open (tests fake them).
@@ -40,13 +41,45 @@ public struct TranscriptLocator: Sendable {
         self.openFiles = openFiles
     }
 
-    public func locate(tool: AgentTool, hint: SessionHint, cwd: String) -> URL? {
-        if let path = explicitPath(hint) { return path }
-        return sessionIDs(tool: tool, hint: hint, cwd: cwd).lazy.compactMap { transcript(tool: tool, id: $0, cwd: cwd) }.first
-            ?? openTranscript(tool: tool, hint: hint)
+    /// Where a transcript may be: a file, or a session id to look up.
+    public enum Candidate: Equatable, Sendable {
+        case file(URL)
+        case id(String)
     }
 
-    /// Codex keeps its rollout file open while it runs: the agent process's own open file, when ids lead nowhere.
+    /// The first candidate that leads to a file. `byID` looks a session id up (default: `transcript(tool:id:cwd:)`,
+    /// which may scan folders; the reader passes a cached one).
+    public func locate(tool: AgentTool, hint: SessionHint, cwd: String, byID: ((String) -> URL?)? = nil) -> URL? {
+        let lookup = byID ?? { transcript(tool: tool, id: $0, cwd: cwd) }
+        for candidate in candidates(tool: tool, hint: hint, cwd: cwd) {
+            switch candidate {
+            case .file(let url): return url
+            case .id(let id): if let url = lookup(id) { return url }
+            }
+        }
+        return nil
+    }
+
+    /// Candidates in order of how current they are. The process's own record comes first: Claude Code rewrites its pid
+    /// session file on `/clear`, Codex has its current rollout open. What the source was told can be stale (reported
+    /// once, at start) or not the tool's own (cmux reports `cmux-…` ids for sessions it restored). Cheap; re-read on
+    /// every refresh.
+    public func candidates(tool: AgentTool, hint: SessionHint, cwd: String) -> [Candidate] {
+        var list: [Candidate] = []
+        switch tool {
+        case .claudeCode:
+            if let pid = hint.pid, let id = claudeSessionID(pid: pid, cwd: cwd) { list.append(.id(id)) }
+        case .codex:
+            if let url = openTranscript(tool: tool, hint: hint) { list.append(.file(url)) }
+        case .generic:
+            return []
+        }
+        if let url = explicitPath(hint) { list.append(.file(url)) }
+        if let id = hint.sessionID, !list.contains(.id(id)) { list.append(.id(id)) }
+        return list
+    }
+
+    /// Codex keeps its rollout file open while it runs: the agent process's own open file.
     func openTranscript(tool: AgentTool, hint: SessionHint) -> URL? {
         guard tool == .codex, let pid = hint.pid else { return nil }
         let root = (home.appendingPathComponent(".codex/sessions").path as NSString).standardizingPath + "/"
@@ -62,18 +95,6 @@ public struct TranscriptLocator: Sendable {
     func explicitPath(_ hint: SessionHint) -> URL? {
         guard let path = hint.transcriptPath, path.hasSuffix(".jsonl"), FileManager.default.fileExists(atPath: path) else { return nil }
         return URL(fileURLWithPath: path)
-    }
-
-    /// Session ids to try, in order: the one the source told (not always the tool's own: cmux reports `cmux-…` ids
-    /// for sessions it restored), then (Claude Code) the one in the pid's session file. Cheap; re-read on every
-    /// refresh, since `/clear` moves the same process to a new session.
-    public func sessionIDs(tool: AgentTool, hint: SessionHint, cwd: String) -> [String] {
-        var ids: [String] = []
-        if tool != .generic, let id = hint.sessionID { ids.append(id) }
-        if tool == .claudeCode, let pid = hint.pid, let id = claudeSessionID(pid: pid, cwd: cwd), !ids.contains(id) {
-            ids.append(id)
-        }
-        return ids
     }
 
     /// The transcript of a session id; may scan folders, so callers cache it.

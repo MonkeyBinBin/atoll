@@ -69,6 +69,24 @@ struct TranscriptParserTests {
         #expect(parse(Rows.claudeUser("summary", extra: ["isCompactSummary": true]), .claudeCode).isEmpty)
     }
 
+    @Test("malformed <hc> text never traps; it shows as typed")
+    func malformedHC() {
+        #expect(parse(Rows.claudeUser("<hcx</hc>"), .claudeCode) == [TranscriptEntry(.user, "<hcx</hc>")])
+        #expect(parse(Rows.claudeUser("<hcx>abc</hc>"), .claudeCode) == [TranscriptEntry(.user, "<hcx>abc</hc>")])
+        #expect(parse(Rows.claudeUser("<hc></hc>"), .claudeCode).isEmpty)
+        #expect(parse(Rows.claudeUser("<hc>"), .claudeCode) == [TranscriptEntry(.user, "<hc>")])
+    }
+
+    @Test("Codex: only its own image markers are dropped, not the user's text starting with <image")
+    func codexImageMarkers() {
+        let message = { (text: String) in
+            Rows.codex(["type": "message", "role": "user", "content": [["type": "input_text", "text": text]]])
+        }
+        #expect(parse(message("<image name=[Image #1]>"), .codex).isEmpty)
+        #expect(parse(message("</image>"), .codex).isEmpty)
+        #expect(parse(message("<image> tags break the parser"), .codex) == [TranscriptEntry(.user, "<image> tags break the parser")])
+    }
+
     @Test("tool calls and results carry the ids that pair them")
     func ids() {
         let call = Rows.claudeAssistant([["type": "tool_use", "id": "tu1", "name": "Read", "input": ["file_path": "/a"]]])
@@ -221,6 +239,23 @@ struct TranscriptLocatorTests {
         #expect(paths.contains { $0.hasSuffix("/open.jsonl") })
     }
 
+    @Test("the process's own record wins over a stale id from the source")
+    func currentFirst() {
+        let home = FakeHome()
+        defer { home.remove() }
+        home.write(".claude/sessions/7.json", Rows.json(["sessionId": "after-clear", "cwd": "/w", "startedAt": 1_000_000_000]))
+        let current = home.write(".claude/projects/-w/after-clear.jsonl", "")
+        home.write(".claude/projects/-w/before-clear.jsonl", "")
+        let claude = TranscriptLocator(home: home.url, processStart: { _ in Date(timeIntervalSince1970: 1_000_000) }, openFiles: { _ in [] })
+        #expect(claude.locate(tool: .claudeCode, hint: SessionHint(pid: 7, sessionID: "before-clear"), cwd: "/w") == current)
+        #expect(claude.candidates(tool: .claudeCode, hint: SessionHint(pid: 7, sessionID: "before-clear"), cwd: "/w")
+            == [.id("after-clear"), .id("before-clear")])
+        let rollout = home.write(".codex/sessions/2026/11/18/rollout-now-new.jsonl", "")
+        home.write(".codex/sessions/2026/11/17/rollout-old-stale.jsonl", "")
+        let codex = TranscriptLocator(home: home.url, processStart: { _ in nil }, openFiles: { _ in [rollout.path] })
+        #expect(codex.locate(tool: .codex, hint: SessionHint(pid: 9, sessionID: "stale"), cwd: "/w")?.path == rollout.path)
+    }
+
     @Test("session labels from cmux / herdr become the hint")
     func labels() {
         let hint = SessionHint(labels: [SessionHint.idLabel: "s", "other": "x"], pid: 7)
@@ -249,6 +284,46 @@ struct TranscriptReaderTests {
         try (Rows.claudeUser("new") + "\n").write(to: file, atomically: false, encoding: .utf8)
         let third = try #require(await reader.read(address: "a", url: file, format: .claudeCode))
         #expect(third.entries.map(\.text) == ["new"])
+    }
+
+    @Test("an unfinished line being written doesn't change the version")
+    func versionCountsCompleteLines() async throws {
+        let home = FakeHome()
+        defer { home.remove() }
+        let one = Rows.claudeUser("one") + "\n"
+        let file = home.write("t.jsonl", one)
+        let reader = TranscriptReader()
+        let first = try #require(await reader.read(address: "a", url: file, format: .claudeCode))
+        try (one + "{\"type\":\"us").write(to: file, atomically: false, encoding: .utf8)
+        let second = try #require(await reader.read(address: "a", url: file, format: .claudeCode))
+        #expect(second.version == first.version)
+        #expect(second.entries == first.entries)
+    }
+
+    @Test("a tail window that starts right at a line keeps that line")
+    func windowAtLineStart() async throws {
+        let home = FakeHome()
+        defer { home.remove() }
+        let lines = (0..<4).map { Rows.claudeUser("m\($0)") + "\n" }
+        let file = home.write("t.jsonl", lines.joined())
+        let window = UInt64(lines[2].utf8.count + lines[3].utf8.count)
+        let snapshot = try #require(await TranscriptReader(window: window).read(address: "a", url: file, format: .claudeCode))
+        #expect(snapshot.entries.map(\.text) == ["m2", "m3"])
+    }
+
+    @Test("a session id that leads nowhere isn't searched again until the miss expires")
+    func missCache() async throws {
+        let home = FakeHome()
+        defer { home.remove() }
+        let locator = TranscriptLocator(home: home.url, processStart: { _ in nil }, openFiles: { _ in [] })
+        let hint = SessionHint(sessionID: "later")
+        let cached = TranscriptReader(missTTL: 60)
+        let fresh = TranscriptReader(missTTL: 0)
+        #expect(await cached.load(address: "a", tool: .claudeCode, hint: hint, cwd: "/w", locator: locator) == nil)
+        #expect(await fresh.load(address: "a", tool: .claudeCode, hint: hint, cwd: "/w", locator: locator) == nil)
+        home.write(".claude/projects/-w/later.jsonl", Rows.claudeUser("hi") + "\n")
+        #expect(await cached.load(address: "a", tool: .claudeCode, hint: hint, cwd: "/w", locator: locator) == nil)
+        #expect(await fresh.load(address: "a", tool: .claudeCode, hint: hint, cwd: "/w", locator: locator)?.entries.count == 1)
     }
 
     @Test("a long file is read from its tail, skipping the line the window starts in; old entries are dropped")
@@ -315,6 +390,16 @@ struct TranscriptRenderingTests {
           ⎿  B
           ⎿  orphan
         """)
+    }
+
+    @Test("only the newest entries that fit the row budget are laid out")
+    func rowBudget() {
+        let entries = (0..<10).map { TranscriptEntry(.user, "line \($0)\nmore") }
+        let rendered = TranscriptRendering.render(TranscriptSnapshot(path: "/t", entries: entries, version: 1), maxRows: 9)
+        #expect(rendered.text.hasPrefix("… earlier messages not shown\n❯ line 7"))
+        #expect(rendered.text.hasSuffix("❯ line 9\n  more"))
+        let one = TranscriptRendering.render(TranscriptSnapshot(path: "/t", entries: [TranscriptEntry(.user, "a\nb\nc")], version: 1), maxRows: 1)
+        #expect(one.text == "❯ a\n  b\n  c")
     }
 
     @Test("reply markdown: markers dropped, styles kept; fences, lists, quotes and tables")
@@ -396,6 +481,54 @@ struct TranscriptPanelTests {
         #expect(h.store.panel == nil)
     }
 
+    fileprivate func transcriptHarness(_ home: FakeHome, state: String = "idle") -> Harness {
+        home.write(".claude/projects/-x/s-1.jsonl", Rows.claudeUser("hello") + "\n")
+        let h = Harness()
+        h.store.transcriptLocator = TranscriptLocator(home: home.url, processStart: { _ in nil }, openFiles: { _ in [] })
+        var info = term("t1", state, kind: state == "blocked" ? "permission" : nil)
+        info.labels[SessionHint.idLabel] = "s-1"
+        h.connect([info])
+        return h
+    }
+
+    @Test("a missing transcript is let pass a few times before the panel falls back to the screen")
+    func missesAllowed() async throws {
+        let home = FakeHome()
+        defer { home.remove() }
+        let h = transcriptHarness(home)
+        h.store.openPanel("t1")
+        _ = try #require(await waitForTranscript(h))
+        try FileManager.default.removeItem(at: home.url.appendingPathComponent(".claude/projects/-x/s-1.jsonl"))
+        for _ in 0..<2 {
+            h.scheduler.advance(by: 2)
+            try? await Task.sleep(for: .milliseconds(30))
+        }
+        #expect(h.store.panel?.transcript != nil)
+        h.scheduler.advance(by: 2)
+        for _ in 0..<100 where h.store.panel?.transcript != nil { try? await Task.sleep(for: .milliseconds(5)) }
+        #expect(h.store.panel?.transcript == nil)
+    }
+
+    @Test("not read while it wouldn't be shown: Messages only off, or the agent needs you; read again once it would")
+    func readOnlyWhenShown() async throws {
+        let home = FakeHome()
+        defer { home.remove() }
+        let h = transcriptHarness(home)
+        h.store.wantsTranscript = false
+        h.store.openPanel("t1")
+        #expect(await waitForTranscript(h, tries: 20) == nil)
+        h.store.wantsTranscript = true
+        _ = try #require(await waitForTranscript(h))
+
+        let waiting = transcriptHarness(home, state: "blocked")
+        waiting.store.openPanel("t1")
+        waiting.scheduler.advance(by: 2)
+        #expect(await waitForTranscript(waiting, tries: 20) == nil)
+        waiting.status("t1", "working", seq: 11)
+        waiting.scheduler.advance(by: 2)
+        _ = try #require(await waitForTranscript(waiting))
+    }
+
     @Test("no certain link: no transcript, the terminal output stays")
     func noLink() async {
         let h = Harness()
@@ -404,41 +537,5 @@ struct TranscriptPanelTests {
         await settle()
         #expect(await waitForTranscript(h, tries: 20) == nil)
         #expect(h.store.panel?.output?.text == "hello")
-    }
-
-    @Test("a turn ending in Idle (tools that report it) also reads once more; leaving another state doesn't")
-    func settleOnIdle() async {
-        let h = Harness()
-        h.connect([term("t1", "working"), term("t2", "idle")])
-        h.store.openPanel("t1")
-        await settle()
-        func panelReads() -> Int { h.client.commands.filter { $0 == .read("t1", 200) }.count }
-        h.status("t1", "idle", seq: 11)
-        h.scheduler.advance(by: 1.5)
-        await settle()
-        #expect(panelReads() == 3)
-        h.status("t1", "blocked", kind: "permission", seq: 12)
-        h.scheduler.advance(by: 1.5)
-        await settle()
-        #expect(panelReads() == 4)
-    }
-
-    @Test("a turn ending in the open panel reads once more after the settle delay")
-    func settleReread() async {
-        let h = Harness()
-        h.connect([term("t1", "working")])
-        h.store.openPanel("t1")
-        await settle()
-        // Panel reads only (the turn's final message is read on its own, with fewer lines).
-        func panelReads() -> Int { h.client.commands.filter { $0 == .read("t1", 200) }.count }
-        h.status("t1", "done", seq: 11)
-        await settle()
-        #expect(panelReads() == 2)
-        h.scheduler.advance(by: 1.4)
-        await settle()
-        #expect(panelReads() == 2)
-        h.scheduler.advance(by: 0.1)
-        await settle()
-        #expect(panelReads() == 3)
     }
 }

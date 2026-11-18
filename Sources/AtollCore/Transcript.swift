@@ -111,11 +111,17 @@ public enum TranscriptParser {
         }
         if claudeSkippedTags.contains(where: { text.hasPrefix("<\($0)") }) { return [] }
         // A message typed in through herdr-core (`hc send`, Atoll's reply box): `<hc from="t7">text</hc>`.
-        if text.hasPrefix("<hc"), text.hasSuffix("</hc>"), let open = text.firstIndex(of: ">") {
-            let inner = text[text.index(after: open)..<text.index(text.endIndex, offsetBy: -5)]
-            return [TranscriptEntry(.user, capped(inner.trimmingCharacters(in: .whitespacesAndNewlines)))]
-        }
+        if let inner = hcInner(text) { return inner.isEmpty ? [] : [TranscriptEntry(.user, capped(inner))] }
         return [TranscriptEntry(.user, capped(text))]
+    }
+
+    /// The text of `<hc from="t7">text</hc>`; nil unless the opening tag closes before the closing one.
+    static func hcInner(_ text: String) -> String? {
+        guard text.hasPrefix("<hc"), let close = text.range(of: "</hc>", options: .backwards), close.upperBound == text.endIndex,
+              let open = text[..<close.lowerBound].firstIndex(of: ">") else { return nil }
+        let name = text[text.index(text.startIndex, offsetBy: 3)..<open]
+        guard name.isEmpty || name.first == " " else { return nil }
+        return String(text[text.index(after: open)..<close.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// The text inside `<name>…</name>`, trimmed; nil when the tag is missing.
@@ -165,9 +171,13 @@ public enum TranscriptParser {
         }
     }
 
-    /// Context Codex adds as user text: the environment, AGENTS.md, and the markers around an attached image.
+    /// Context Codex adds as user text: the environment, AGENTS.md, and the markers around an attached image
+    /// (`<image name=[Image #1]>` … `</image>`, each a text item of its own).
     static func codexInjected(_ text: String) -> Bool {
-        ["<environment_context", "<user_instructions", "<image", "</image", "# AGENTS.md"].contains { text.hasPrefix($0) }
+        if ["<environment_context>", "<user_instructions>", "# AGENTS.md instructions"].contains(where: { text.hasPrefix($0) }) {
+            return true
+        }
+        return text == "</image>" || (text.hasPrefix("<image name=") && text.hasSuffix(">") && !text.contains("\n"))
     }
 
     // MARK: Helpers
