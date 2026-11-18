@@ -75,6 +75,8 @@ public final class AgentStore {
         /// While a panel is open its transcript is read again this often (only appended bytes are parsed), so the
         /// conversation follows along even when the source reports no status change.
         public var transcriptPollInterval: TimeInterval = 2
+        /// How long reads may find no transcript before the panel falls back to the screen.
+        public var transcriptMissGrace: TimeInterval = 6
         public init() {}
     }
 
@@ -331,10 +333,10 @@ public final class AgentStore {
     private var outputRequest = 0
     private var transcriptRequest = 0
     private var transcriptPoll: ScheduledAction?
-    /// Reads in a row that found no transcript while one is shown: a few are let pass (a session file being
-    /// rewritten, a new one not created yet) before the panel falls back to the screen.
-    private var transcriptMisses = 0
-    static let transcriptMissesAllowed = 3
+    /// Since when reads have found no transcript while one is shown (nil: the last one found it).
+    private var transcriptMissSince: Date?
+    private var transcriptLoading = false
+    private var transcriptAgain = false
     /// Reader calls (loads and forgets) run one after another, in the order they were made.
     private var transcriptChain: Task<Void, Never>?
     /// The app shows the transcript only with Messages only on: off, it isn't read and the panel drops it.
@@ -1359,6 +1361,15 @@ public final class AgentStore {
     }
 
     public func refreshPanelOutput() {
+        guard panel != nil else { return }
+        let hadTranscript = panel?.transcript != nil
+        refreshTranscript()
+        // While a transcript is shown the screen isn't, so it isn't read; dropping the transcript reads it at once.
+        if panel?.transcript?.entries.isEmpty == false || (hadTranscript && panel?.transcript == nil) { return }
+        readScreen()
+    }
+
+    private func readScreen() {
         guard var current = panel else { return }
         outputRequest += 1
         let request = outputRequest
@@ -1377,26 +1388,44 @@ public final class AgentStore {
             }
             self.finishOutput(request: request, address: address, result: result)
         }
-        refreshTranscript()
     }
 
     /// The conversation from the open agent's transcript, when its session can be found for certain (ticket 61); then
     /// again every `transcriptPollInterval` while the panel stays open. This is the one place that decides when the
-    /// panel has a transcript: never with Messages only off or while the agent needs you (its dialog is only on the
-    /// screen), so the panel drops it then. While the changes view is up it is kept but not read. Whenever it isn't
-    /// read the timer stops; what ends each case restarts it: turning Messages only on, the status change out of Needs
-    /// you (it refreshes the panel), hiding the changes.
+    /// panel has a transcript: never for an agent without one, with Messages only off, or while the agent needs you
+    /// (its dialog is only on the screen), so the panel drops it then. While the changes view is up it is kept but not
+    /// read. Whenever it isn't read the timer stops; what ends each case restarts it: turning Messages only on, the
+    /// status change out of Needs you (it refreshes the panel), hiding the changes.
     private func refreshTranscript() {
         transcriptPoll?.cancel()
         transcriptPoll = nil
-        guard let address = panel?.address, let agent = agent(address), agent.tool != .generic else { return }
-        guard wantsTranscript, !agent.state.isNeedsYou else {
+        guard let address = panel?.address else { return }
+        guard transcriptTarget() != nil else {
             transcriptRequest += 1
-            transcriptMisses = 0
-            if panel?.transcript != nil { panel?.transcript = nil }
+            transcriptMissSince = nil
+            dropTranscript()
             return
         }
         guard panel?.changes == nil else { return }
+        // One read at a time: asked again while one runs, one more follows it (only the newest result counts).
+        if transcriptLoading { transcriptAgain = true } else { startTranscriptLoad() }
+        transcriptPoll = scheduler.schedule(after: timing.transcriptPollInterval) { [weak self] in
+            guard let self, self.panel?.address == address else { return }
+            self.refreshTranscript()
+        }
+    }
+
+    /// The open panel's agent, when its transcript would be shown.
+    private func transcriptTarget() -> Agent? {
+        guard let address = panel?.address, let agent = agent(address), agent.tool != .generic,
+              wantsTranscript, !agent.state.isNeedsYou else { return nil }
+        return agent
+    }
+
+    private func startTranscriptLoad() {
+        guard let agent = transcriptTarget(), panel?.changes == nil else { return }
+        let address = agent.address
+        transcriptLoading = true
         transcriptRequest += 1
         let request = transcriptRequest
         let previous = transcriptChain
@@ -1405,31 +1434,46 @@ public final class AgentStore {
             let snapshot = await transcripts.load(address: address, tool: tool, hint: hint, cwd: cwd, locator: locator)
             self.finishTranscript(request: request, address: address, snapshot: snapshot)
         }
-        transcriptPoll = scheduler.schedule(after: timing.transcriptPollInterval) { [weak self] in
-            guard let self, self.panel?.address == address else { return }
-            self.refreshTranscript()
-        }
     }
 
     private func finishTranscript(request: Int, address: String, snapshot: TranscriptSnapshot?) {
+        transcriptLoading = false
+        defer {
+            if transcriptAgain {
+                transcriptAgain = false
+                startTranscriptLoad()
+            }
+        }
         guard request == transcriptRequest, var current = panel, current.address == address else { return }
         if snapshot == nil, current.transcript != nil {
-            transcriptMisses += 1
-            if transcriptMisses < Self.transcriptMissesAllowed { return }
-        } else {
-            transcriptMisses = 0
+            // Let a passing miss go (a session file being rewritten, a new one not written yet) for a while.
+            let since = transcriptMissSince ?? scheduler.now
+            transcriptMissSince = since
+            if scheduler.now.timeIntervalSince(since) < timing.transcriptMissGrace { return }
+            transcriptMissSince = nil
+            dropTranscript()
+            return
         }
+        transcriptMissSince = nil
         // Unchanged (the usual poll): leave the panel alone, so nothing re-renders.
         guard current.transcript?.identity != snapshot?.identity else { return }
         current.transcript = snapshot
         panel = current
     }
 
+    /// The panel no longer shows a transcript: back to the screen, read now (it wasn't while the transcript was up).
+    private func dropTranscript() {
+        guard panel?.transcript != nil else { return }
+        panel?.transcript = nil
+        readScreen()
+    }
+
     /// Stops polling and drops what was read for the open panel's agent.
     private func forgetTranscript() {
         transcriptPoll?.cancel()
         transcriptPoll = nil
-        transcriptMisses = 0
+        transcriptMissSince = nil
+        transcriptAgain = false
         transcriptRequest += 1
         if let address = panel?.address {
             let previous = transcriptChain

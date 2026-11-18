@@ -41,6 +41,8 @@ public actor TranscriptReader {
         var startsMidway = false
         /// The file's inode: a file replaced at the same path is read afresh.
         var fileID: Int?
+        /// The last bytes before `offset`: different on the next read means the file was rewritten in place.
+        var tail = Data()
         var rendered: TranscriptRendering.Output?
         var renderedVersion: UInt64?
     }
@@ -62,15 +64,14 @@ public actor TranscriptReader {
     }
 
     public func read(address: String, url: URL, format: TranscriptFormat) -> TranscriptSnapshot? {
-        guard let handle = try? FileHandle(forReadingFrom: url) else {
-            states[address] = nil
-            return nil
-        }
+        // Unreadable for now (being replaced): keep what was read, so the next read doesn't start over.
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
         guard let size = try? handle.seekToEnd() else { return nil }
         let fileID = (try? FileManager.default.attributesOfItem(atPath: url.path)[.systemFileNumber]) as? Int
         var state = states[address].flatMap {
-            $0.path == url.path && $0.format == format && $0.offset <= size && $0.fileID == fileID ? $0 : nil
+            $0.path == url.path && $0.format == format && $0.offset <= size && $0.fileID == fileID
+                && Self.tail(of: handle, before: $0.offset) == $0.tail ? $0 : nil
         } ?? State(path: url.path, format: format, offset: 0, fileID: fileID)
         var dropFirstLine = false
         if size - state.offset > window {
@@ -89,6 +90,7 @@ public actor TranscriptReader {
                 // The window starts inside a line: skip to the next one.
                 guard let newline = data.firstIndex(of: UInt8(ascii: "\n")) else {
                     state.pending = Data()
+                    state.tail = Self.tail(of: handle, before: state.offset)
                     return finish(&state, address: address)
                 }
                 data = data[(newline + 1)...]
@@ -100,12 +102,21 @@ public actor TranscriptReader {
                 start = newline + 1
             }
             state.pending = Data(data[start...])
+            state.tail = Self.tail(of: handle, before: state.offset)
             if state.entries.count > maxEntries {
                 state.entries.removeFirst(state.entries.count - maxEntries)
                 state.startsMidway = true
             }
         }
         return finish(&state, address: address)
+    }
+
+    static let tailLength: UInt64 = 32
+
+    static func tail(of handle: FileHandle, before offset: UInt64) -> Data {
+        let start = offset >= tailLength ? offset - tailLength : 0
+        guard (try? handle.seek(toOffset: start)) != nil else { return Data() }
+        return (try? handle.read(upToCount: Int(offset - start))) ?? Data()
     }
 
     /// Lays the text out again when the entries changed, keeps the state, and returns the snapshot.
@@ -133,7 +144,13 @@ public actor TranscriptReader {
         let key = "\(tool)|\(id)"
         if let cached = located[key] {
             if let url = cached.url, FileManager.default.fileExists(atPath: url.path) { return url }
-            if cached.url == nil, Date().timeIntervalSince(cached.at) < missTTL { return nil }
+            if cached.url == nil, Date().timeIntervalSince(cached.at) < missTTL {
+                // Only the folder scan waits out the miss: the cwd's own folder is checked every time, so a session's
+                // file is found as soon as it is written (a new session, right after `/clear`).
+                guard let url = locator.directTranscript(tool: tool, id: id, cwd: cwd) else { return nil }
+                located[key] = (url, Date())
+                return url
+            }
         }
         let url = locator.transcript(tool: tool, id: id, cwd: cwd)
         located[key] = (url, Date())

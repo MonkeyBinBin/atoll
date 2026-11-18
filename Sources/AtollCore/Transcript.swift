@@ -195,7 +195,8 @@ public enum TranscriptParser {
                 if let parts = object[key] as? [String] { return parts.joined(separator: " ") }
                 return nil
             }.first
-            line = value ?? object.values.lazy.compactMap { $0 as? String }.first ?? ""
+            // No known key: the first string by key name, so the same call always reads the same.
+            line = value ?? object.keys.sorted().lazy.compactMap { object[$0] as? String }.first ?? ""
         } else {
             line = ""
         }

@@ -60,17 +60,18 @@ public struct TranscriptLocator: Sendable {
         return nil
     }
 
-    /// Candidates in order of how current they are. The process's own record comes first: Claude Code rewrites its pid
-    /// session file on `/clear`, Codex has its current rollout open. What the source was told can be stale (reported
-    /// once, at start) or not the tool's own (cmux reports `cmux-…` ids for sessions it restored). Cheap; re-read on
-    /// every refresh.
+    /// Candidates in order of how current they are. The process's own record, when there is one, is the only candidate:
+    /// Claude Code rewrites its pid session file on `/clear` (the new session's file appears with its first message, and
+    /// until then there is nothing to show, not the old one), Codex has its current rollout open. Otherwise what the
+    /// source was told, which can be stale (reported once, at start) or not the tool's own (cmux reports `cmux-…` ids
+    /// for sessions it restored). Cheap; re-read on every refresh.
     public func candidates(tool: AgentTool, hint: SessionHint, cwd: String) -> [Candidate] {
         var list: [Candidate] = []
         switch tool {
         case .claudeCode:
-            if let pid = hint.pid, let id = claudeSessionID(pid: pid) { list.append(.id(id)) }
+            if let pid = hint.pid, let id = claudeSessionID(pid: pid) { return [.id(id)] }
         case .codex:
-            if let url = openTranscript(tool: tool, hint: hint) { list.append(.file(url)) }
+            if let url = openTranscript(tool: tool, hint: hint) { return [.file(url)] }
         case .generic:
             return []
         }
@@ -125,12 +126,18 @@ public struct TranscriptLocator: Sendable {
         return abs(started / 1000 - processStart.timeIntervalSince1970) <= 30 ? id : nil
     }
 
-    /// `~/.claude/projects/<cwd with every non-alphanumeric as "-">/<id>.jsonl`, else any project folder holding it.
+    /// `~/.claude/projects/<cwd with every non-alphanumeric as "-">/<id>.jsonl`: one check, cheap enough for every poll.
+    func directTranscript(tool: AgentTool, id: String, cwd: String) -> URL? {
+        guard tool == .claudeCode, UUID(uuidString: id) != nil else { return nil }
+        let direct = claudeProjects.appendingPathComponent(Self.claudeFolder(cwd)).appendingPathComponent("\(id).jsonl")
+        return FileManager.default.fileExists(atPath: direct.path) ? direct : nil
+    }
+
+    /// The cwd's project folder, else any project folder holding `<id>.jsonl`.
     func claudeTranscript(id: String, cwd: String) -> URL? {
         guard Self.isSafeName(id) else { return nil }
         let fm = FileManager.default
-        let direct = claudeProjects.appendingPathComponent(Self.claudeFolder(cwd)).appendingPathComponent("\(id).jsonl")
-        if fm.fileExists(atPath: direct.path) { return direct }
+        if let direct = directTranscript(tool: .claudeCode, id: id, cwd: cwd) { return direct }
         guard let folders = try? fm.contentsOfDirectory(atPath: claudeProjects.path) else { return nil }
         for folder in folders {
             let candidate = claudeProjects.appendingPathComponent(folder).appendingPathComponent("\(id).jsonl")

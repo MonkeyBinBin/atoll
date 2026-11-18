@@ -47,6 +47,11 @@ struct TranscriptParserTests {
         #expect(parse(blocks, .claudeCode) == [TranscriptEntry(.toolResult, "ok"), TranscriptEntry(.user, "[image]")])
     }
 
+    @Test("a tool input with no known key reads its first string by key name, the same every time")
+    func summaryStable() {
+        #expect(TranscriptParser.summary(["repo": "y", "owner": "x", "count": 3]) == "x")
+    }
+
     @Test("Claude Code wrappers: slash commands and ! commands show as typed, their output as notes, the rest skipped")
     func claudeWrappers() {
         let command = "<command-message>review</command-message>\n<command-name>/review</command-name>\n<command-args>12</command-args>"
@@ -260,7 +265,10 @@ struct TranscriptLocatorTests {
         let claude = TranscriptLocator(home: home.url, processStart: { _ in Date(timeIntervalSince1970: 1_000_000) }, openFiles: { _ in [] })
         #expect(claude.locate(tool: .claudeCode, hint: SessionHint(pid: 7, sessionID: "dddddddd-0000-4000-8000-0000000000b1"), cwd: "/w") == current)
         #expect(claude.candidates(tool: .claudeCode, hint: SessionHint(pid: 7, sessionID: "dddddddd-0000-4000-8000-0000000000b1"), cwd: "/w")
-            == [.id("dddddddd-0000-4000-8000-0000000000a1"), .id("dddddddd-0000-4000-8000-0000000000b1")])
+            == [.id("dddddddd-0000-4000-8000-0000000000a1")])
+        // Right after /clear the new session has no file yet: nothing, not the cleared conversation.
+        try? FileManager.default.removeItem(at: current)
+        #expect(claude.locate(tool: .claudeCode, hint: SessionHint(pid: 7, sessionID: "dddddddd-0000-4000-8000-0000000000b1"), cwd: "/w") == nil)
         let rollout = home.write(".codex/sessions/2026/11/18/rollout-now-new.jsonl", "")
         home.write(".codex/sessions/2026/11/17/rollout-old-stale.jsonl", "")
         let codex = TranscriptLocator(home: home.url, processStart: { _ in nil }, openFiles: { _ in [rollout.path] })
@@ -310,6 +318,36 @@ struct TranscriptReaderTests {
         #expect(snapshot.entries.map(\.text) == ["new one", "new two"])
     }
 
+    @Test("a file rewritten in place (same inode) past the old end is read afresh")
+    func rewrittenInPlace() async throws {
+        let home = FakeHome()
+        defer { home.remove() }
+        let file = home.write("t.jsonl", Rows.claudeUser("old") + "\n")
+        let reader = TranscriptReader()
+        _ = try #require(await reader.read(address: "a", url: file, format: .claudeCode))
+        let handle = try FileHandle(forWritingTo: file)
+        try handle.truncate(atOffset: 0)
+        try handle.write(contentsOf: Data((Rows.claudeUser("new first") + "\n" + Rows.claudeUser("new second") + "\n").utf8))
+        try handle.close()
+        let snapshot = try #require(await reader.read(address: "a", url: file, format: .claudeCode))
+        #expect(snapshot.entries.map(\.text) == ["new first", "new second"])
+    }
+
+    @Test("a file that can't be opened for a moment keeps what was read")
+    func unreadableKeepsState() async throws {
+        let home = FakeHome()
+        defer { home.remove() }
+        let file = home.write("t.jsonl", Rows.claudeUser("one") + "\n")
+        let reader = TranscriptReader()
+        let first = try #require(await reader.read(address: "a", url: file, format: .claudeCode))
+        let moved = home.url.appendingPathComponent("moved.jsonl")
+        try FileManager.default.moveItem(at: file, to: moved)
+        #expect(await reader.read(address: "a", url: file, format: .claudeCode) == nil)
+        try FileManager.default.moveItem(at: moved, to: file)
+        let again = try #require(await reader.read(address: "a", url: file, format: .claudeCode))
+        #expect(again.identity == first.identity)
+    }
+
     @Test("the reader lays the panel text out, again only when the entries change")
     func renderedByReader() async throws {
         let home = FakeHome()
@@ -346,7 +384,7 @@ struct TranscriptReaderTests {
         #expect(snapshot.entries.map(\.text) == ["m2", "m3"])
     }
 
-    @Test("a session id that leads nowhere isn't searched again until the miss expires")
+    @Test("a folder scan that found nothing waits out the miss; the cwd's own folder is checked every time")
     func missCache() async throws {
         let home = FakeHome()
         defer { home.remove() }
@@ -356,9 +394,13 @@ struct TranscriptReaderTests {
         let fresh = TranscriptReader(missTTL: 0)
         #expect(await cached.load(address: "a", tool: .claudeCode, hint: hint, cwd: "/w", locator: locator) == nil)
         #expect(await fresh.load(address: "a", tool: .claudeCode, hint: hint, cwd: "/w", locator: locator) == nil)
-        home.write(".claude/projects/-w/cccccccc-0000-4000-8000-000000000001.jsonl", Rows.claudeUser("hi") + "\n")
+        // Written in another project's folder: only a scan finds it.
+        home.write(".claude/projects/-elsewhere/cccccccc-0000-4000-8000-000000000001.jsonl", Rows.claudeUser("hi") + "\n")
         #expect(await cached.load(address: "a", tool: .claudeCode, hint: hint, cwd: "/w", locator: locator) == nil)
         #expect(await fresh.load(address: "a", tool: .claudeCode, hint: hint, cwd: "/w", locator: locator)?.entries.count == 1)
+        // Written in the cwd's folder: found despite the cached miss.
+        home.write(".claude/projects/-w/cccccccc-0000-4000-8000-000000000001.jsonl", Rows.claudeUser("hi") + "\n")
+        #expect(await cached.load(address: "a", tool: .claudeCode, hint: hint, cwd: "/w", locator: locator)?.entries.count == 1)
     }
 
     @Test("a long file is read from its tail, skipping the line the window starts in; old entries are dropped")
@@ -536,7 +578,7 @@ struct TranscriptPanelTests {
         return h
     }
 
-    @Test("a missing transcript is let pass a few times before the panel falls back to the screen")
+    @Test("a missing transcript is let pass for a while before the panel falls back to the screen, read again then")
     func missesAllowed() async throws {
         let home = FakeHome()
         defer { home.remove() }
@@ -544,7 +586,9 @@ struct TranscriptPanelTests {
         h.store.openPanel("t1")
         _ = try #require(await waitForTranscript(h))
         try FileManager.default.removeItem(at: home.url.appendingPathComponent(".claude/projects/-x/11111111-1111-4111-8111-111111111111.jsonl"))
-        for _ in 0..<2 {
+        let screenReads = h.client.commands.filter { $0 == .read("t1", 200) }.count
+        // The first miss starts the 6 s grace; misses within it keep the transcript.
+        for _ in 0..<3 {
             h.scheduler.advance(by: 2)
             try? await Task.sleep(for: .milliseconds(30))
         }
@@ -552,6 +596,23 @@ struct TranscriptPanelTests {
         h.scheduler.advance(by: 2)
         for _ in 0..<100 where h.store.panel?.transcript != nil { try? await Task.sleep(for: .milliseconds(5)) }
         #expect(h.store.panel?.transcript == nil)
+        await settle()
+        #expect(h.client.commands.filter { $0 == .read("t1", 200) }.count == screenReads + 1)
+    }
+
+    @Test("while a transcript is shown, status changes don't read the screen")
+    func noScreenUnderTranscript() async throws {
+        let home = FakeHome()
+        defer { home.remove() }
+        let h = transcriptHarness(home)
+        h.store.openPanel("t1")
+        _ = try #require(await waitForTranscript(h))
+        await settle()
+        let reads = h.client.commands.filter { $0 == .read("t1", 200) }.count
+        h.status("t1", "working", seq: 11)
+        h.status("t1", "done", seq: 12)
+        await settle()
+        #expect(h.client.commands.filter { $0 == .read("t1", 200) }.count == reads)
     }
 
     @Test("not read while it wouldn't be shown: Messages only off, or the agent needs you; read again once it would")
