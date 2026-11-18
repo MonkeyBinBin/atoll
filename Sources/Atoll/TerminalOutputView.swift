@@ -48,6 +48,14 @@ enum TerminalFont {
         return NSFont(descriptor: descriptor, size: size) ?? base
     }
 
+    /// The bold face of a `font(family:size:)` result, keeping its fallback chain: converting the trait alone picks a
+    /// new font without the cascade list, so icons and CJK cells in bold rows would fall out of the grid.
+    static func bold(_ font: NSFont) -> NSFont {
+        let bold = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)
+        guard let cascade = font.fontDescriptor.object(forKey: .cascadeList) else { return bold }
+        return NSFont(descriptor: bold.fontDescriptor.addingAttributes([.cascadeList: cascade]), size: font.pointSize) ?? bold
+    }
+
     /// The family actually used, for display in Settings.
     static func resolvedName(family: String) -> String {
         font(family: family, size: 12).familyName ?? "SF Mono"
@@ -245,7 +253,7 @@ enum TerminalPalette {
     static func apply(_ runs: [StyledRun], to text: NSMutableAttributedString, font: NSFont) {
         guard !runs.isEmpty else { return }
         let length = text.length
-        let bold = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)
+        let bold = TerminalFont.bold(font)
         for run in runs where NSMaxRange(run.range) <= length {
             let style = run.style
             var foreground = style.foreground.map(color) ?? defaultForeground

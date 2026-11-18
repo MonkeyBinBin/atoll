@@ -125,6 +125,41 @@ struct OutputStylingTests {
         #expect(styled.map(\.0) == ["› add tests", "•", "Ran", "  └ Build complete", "# Summary", "Error: missing file"])
     }
 
+    @Test("an image placeholder in a source row is skipped: the colors after it stay on their characters")
+    func placeholderRow() {
+        let sprite = "\u{10EEEE}\u{0305}\u{0305}\u{10EEEE}\u{0305}\u{030D}"
+        let raw = "\u{1B}[1m⏺\u{1B}[0m hi\(sprite) \u{1B}[32mok\u{1B}[0m"
+        let (text, runs) = ANSIParser.parse(raw)
+        let shown = OutputFilter.messages(text, tool: .generic)
+        #expect(shown == "⏺ hi ok")
+        let mapped = pieces(shown, OutputStyling.runs(shown: shown, source: ReadOutput(text: text, how: "history", runs: runs)))
+        #expect(mapped.map(\.0) == ["⏺", "ok"])
+        #expect(mapped[1].1 == TermStyle(foreground: .palette(2)))
+    }
+
+    @Test("numbered +/- rows are a diff only inside tool output")
+    func diffOnlyInOutput() {
+        let shown = "⏺ The sum:\n  2 + 2 = 4\n  3 - optional step"
+        #expect(pieces(shown, OutputStyling.heuristic(shown)).map(\.0) == ["⏺"])
+    }
+
+    @Test("Codex: a reply bullet starting with a tool verb is not a tool row; an edit with its diff below is")
+    func codexToolRows() {
+        let reply = "• Updated the README to mention `swift test`.\n  It now covers setup."
+        let replyStyled = pieces(reply, OutputStyling.heuristic(reply))
+        #expect(replyStyled.map(\.0) == ["•", "`swift test`"])
+        #expect(replyStyled[0].1 == OutputStyling.bold)
+
+        let edit = "• Edited Sources/App.swift (+1 -1)\n    12  let a = 1\n    13 -let b = 2\n    13 +let b = 3\n\n• Done."
+        let editStyled = pieces(edit, OutputStyling.heuristic(edit))
+        let byText = Dictionary(editStyled.map { ($0.0, $0.1) }, uniquingKeysWith: { a, _ in a })
+        #expect(byText["Edited"] == OutputStyling.bold)
+        #expect(byText["    12  let a = 1"] == OutputStyling.muted)
+        #expect(byText["    13 -let b = 2"] == OutputStyling.red)
+        #expect(byText["    13 +let b = 3"] == OutputStyling.green)
+        #expect(byText["• Done."] == nil)
+    }
+
     @Test("source runs that are present but empty fall back to the layout colors")
     func emptyRunsFallBack() {
         let source = ReadOutput(text: "> hi", how: "history", runs: [])

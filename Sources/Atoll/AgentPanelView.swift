@@ -11,6 +11,7 @@ struct AgentPanelView: View {
     @FocusState private var inputFocused: Bool
     @FocusState private var searchFocused: Bool
     @State private var headerHovered = false
+    @State private var outputCache = RenderedOutputCache()
 
     private var store: AgentStore { model.store }
 
@@ -203,7 +204,8 @@ struct AgentPanelView: View {
 
     private var terminalOutput: some View {
         let panel = store.panel
-        let text = outputText(panel)
+        let rendered = renderedOutput(panel)
+        let text = rendered.text
         // Highlights only once the search has matched this very text (it catches up right after a refresh).
         let search = model.outputSearch.flatMap { $0.text == text ? $0 : nil }
         return VStack(alignment: .leading, spacing: 4) {
@@ -211,7 +213,7 @@ struct AgentPanelView: View {
             TerminalOutputView(
                 text: text,
                 font: TerminalFont.font(family: settings.outputFontFamily, size: settings.outputFontSize),
-                styles: panel?.output.map { OutputStyling.runs(shown: text, source: $0) } ?? [],
+                styles: rendered.styles,
                 wrap: settings.wrapOutput,
                 highlights: search?.matches ?? [],
                 current: search?.current,
@@ -307,11 +309,12 @@ struct AgentPanelView: View {
     }
 
     private func outputText(_ panel: PanelState?) -> String {
-        guard let output = panel?.output else { return panel?.isLoading == true ? "Loading…" : "" }
-        let text = settings.messagesOnly
-            ? OutputFilter.messages(output.text, tool: agent.tool, app: agent.app)
-            : OutputFilter.clean(output.text)
-        return text.split(separator: "\n", omittingEmptySubsequences: false).suffix(200).joined(separator: "\n")
+        renderedOutput(panel).text
+    }
+
+    private func renderedOutput(_ panel: PanelState?) -> RenderedOutputCache.Value {
+        outputCache.value(output: panel?.output, isLoading: panel?.isLoading == true, messagesOnly: settings.messagesOnly,
+                          tool: agent.tool, app: agent.app)
     }
 
     // MARK: Reply
@@ -669,5 +672,38 @@ struct OpenTarget {
             title = "Open in Herdr"
             help = "Show this agent in the Herdr app."
         }
+    }
+}
+
+/// The shown output and its colors, worked out again only when the read or the Messages setting changes: the panel
+/// re-renders on every keystroke in the reply box and every store update. Not observed; read and filled in `body`.
+final class RenderedOutputCache {
+    typealias Value = (text: String, styles: [StyledRun])
+
+    private struct Key: Equatable {
+        var output: ReadOutput?
+        var isLoading: Bool
+        var messagesOnly: Bool
+        var tool: AgentTool
+        var app: String?
+    }
+
+    private var key: Key?
+    private var cached: Value = ("", [])
+
+    func value(output: ReadOutput?, isLoading: Bool, messagesOnly: Bool, tool: AgentTool, app: String?) -> Value {
+        let key = Key(output: output, isLoading: isLoading, messagesOnly: messagesOnly, tool: tool, app: app)
+        if key == self.key { return cached }
+        self.key = key
+        guard let output else {
+            cached = (isLoading ? "Loading…" : "", [])
+            return cached
+        }
+        let filtered = messagesOnly
+            ? OutputFilter.messages(output.text, tool: tool, app: app)
+            : OutputFilter.clean(output.text)
+        let text = filtered.split(separator: "\n", omittingEmptySubsequences: false).suffix(200).joined(separator: "\n")
+        cached = (text, OutputStyling.runs(shown: text, source: output))
+        return cached
     }
 }
