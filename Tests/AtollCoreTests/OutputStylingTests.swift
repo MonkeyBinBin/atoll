@@ -122,7 +122,7 @@ struct OutputStylingTests {
     func heuristicCodex() {
         let shown = "› add tests\n\n• Ran swift test\n  └ Build complete\n# Summary\nError: missing file\n- a list item"
         let styled = pieces(shown, OutputStyling.heuristic(shown))
-        #expect(styled.map(\.0) == ["› add tests", "•", "Ran", "  └ Build complete", "# Summary", "Error: missing file"])
+        #expect(styled.map(\.0) == ["› add tests", "•", "Ran", "  └ Build complete", "# Summary", "Error: missing file", "-"])
     }
 
     @Test("an image placeholder in a source row is skipped: the colors after it stay on their characters")
@@ -158,6 +158,42 @@ struct OutputStylingTests {
         #expect(byText["    13 -let b = 2"] == OutputStyling.red)
         #expect(byText["    13 +let b = 3"] == OutputStyling.green)
         #expect(byText["• Done."] == nil)
+    }
+
+    @Test("list markers, links, file paths and table borders")
+    func inlineRules() {
+        let shown = [
+            "  - see Sources/App.swift:12 and https://herdr.dev/docs.",
+            "    * nested, `src/x.ts` stays code",
+            "  12. App.swift:40, ./a/b.md, ~/x/y.json",
+            "  │ name │ 1/2.5 │ and/or │",
+            "  ├──────┼───────┤",
+        ].joined(separator: "\n")
+        let styled = pieces(shown, OutputStyling.heuristic(shown))
+        let byText = Dictionary(styled.map { ($0.0, $0.1) }, uniquingKeysWith: { a, _ in a })
+        #expect(byText["-"] == OutputStyling.listMarker)
+        #expect(byText["*"] == OutputStyling.listMarker)
+        #expect(byText["12."] == OutputStyling.listMarker)
+        #expect(byText["Sources/App.swift:12"] == OutputStyling.path)
+        #expect(byText["https://herdr.dev/docs"] == OutputStyling.link)
+        #expect(byText["`src/x.ts`"] == OutputStyling.code)
+        #expect(byText["src/x.ts"] == nil)
+        #expect(byText["App.swift:40"] == OutputStyling.path)
+        #expect(byText["./a/b.md"] == OutputStyling.path)
+        #expect(byText["~/x/y.json"] == OutputStyling.path)
+        #expect(byText["│"] == OutputStyling.muted)
+        #expect(byText["├──────┼───────┤"] == OutputStyling.muted)
+        #expect(byText["1/2.5"] == nil)
+        #expect(byText["and/or"] == nil)
+    }
+
+    @Test("not list markers: a rule, a bare number, a sign without a space")
+    func notListMarkers() {
+        #expect(OutputStyling.listMarkerLength("---") == nil)
+        #expect(OutputStyling.listMarkerLength("2026 was") == nil)
+        #expect(OutputStyling.listMarkerLength("-x") == nil)
+        #expect(OutputStyling.listMarkerLength("1234. too long") == nil)
+        #expect(OutputStyling.listMarkerLength("3) third") == 2)
     }
 
     @Test("source runs that are present but empty fall back to the layout colors")

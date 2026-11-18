@@ -106,6 +106,9 @@ public enum OutputStyling {
     static let bold = TermStyle(bold: true)
     static let muted = TermStyle(dim: true)
     static let code = TermStyle(foreground: .palette(6))
+    static let listMarker = TermStyle(foreground: .palette(6))
+    static let path = TermStyle(foreground: .palette(4))
+    static let link = TermStyle(foreground: .palette(4), underline: true)
 
     /// Codex's tool rows: "• Ran git status", "• Explored", "• Edited Sources/App.swift (+3 -1)".
     static let codexToolVerbs: Set<String> = [
@@ -116,6 +119,39 @@ public enum OutputStyling {
     private static let diffRow = try! NSRegularExpression(pattern: #"^\s+\d+ +([+-])"#)
     private static let toolCall = try! NSRegularExpression(pattern: #"^[⏺●•] ([A-Z][A-Za-z0-9_]*)\("#)
     private static let inlineCode = try! NSRegularExpression(pattern: #"`[^`\n]+`"#)
+    private static let url = try! NSRegularExpression(pattern: #"https?://[^\s<>()\[\]"'`]+(?<![.,;:!?])"#)
+    /// "Sources/App.swift", "~/x/y.md", "./a/b.ts:12:3", or a bare file with a line: "App.swift:12".
+    private static let filePath = try! NSRegularExpression(
+        pattern: #"(?<![\w/.~-])(?:(?:~|\.{1,2})?/?(?:[\w.-]+/)+[\w.-]+\.[A-Za-z][A-Za-z0-9]*|[\w-]+\.[A-Za-z][A-Za-z0-9]*(?=:\d))(?::\d+(?::\d+)?)?"#)
+    private static let boxDrawing = try! NSRegularExpression(pattern: #"[\u2500-\u257F]+"#)
+
+    /// "- ", "* ", "12. ", "3) ": the marker's length, without its space.
+    static func listMarkerLength(_ trimmed: Substring) -> Int? {
+        if let first = trimmed.first, first == "-" || first == "*", trimmed.dropFirst().first == " " { return 1 }
+        let digits = trimmed.prefix { $0.isASCII && $0.isNumber }
+        guard (1...3).contains(digits.count) else { return nil }
+        let rest = trimmed.dropFirst(digits.count)
+        guard let mark = rest.first, mark == "." || mark == ")", rest.dropFirst().first == " " else { return nil }
+        return digits.count + 1
+    }
+
+    /// Backtick code, then links and file paths outside it, then table borders.
+    private static func inlineRuns(_ row: String, add: (NSRange, TermStyle) -> Void) {
+        let whole = NSRange(location: 0, length: (row as NSString).length)
+        var taken: [NSRange] = []
+        for match in inlineCode.matches(in: row, range: whole) {
+            add(match.range, code)
+            taken.append(match.range)
+        }
+        for (regex, style) in [(url, link), (filePath, path)] {
+            for match in regex.matches(in: row, range: whole)
+            where !taken.contains(where: { NSIntersectionRange($0, match.range).length > 0 }) {
+                add(match.range, style)
+                taken.append(match.range)
+            }
+        }
+        for match in boxDrawing.matches(in: row, range: whole) { add(match.range, muted) }
+    }
 
     private static func isDiffRow(_ row: String) -> Bool {
         diffRow.firstMatch(in: row, range: NSRange(location: 0, length: (row as NSString).length)) != nil
@@ -135,7 +171,8 @@ public enum OutputStyling {
     }
 
     /// Colors for Claude Code / Codex / plain markdown rows: the user's prompts, reply bullets and tool names,
-    /// tool output (muted) with its numbered diff rows (green / red), errors, headings and backtick code.
+    /// tool output (muted) with its numbered diff rows (green / red), errors, headings, list markers, backtick code,
+    /// links, file paths and table borders.
     static func heuristic(_ text: String) -> [StyledRun] {
         var runs: [StyledRun] = []
         let lines = lineRanges(text)
@@ -197,8 +234,10 @@ public enum OutputStyling {
             } else if trimmed.hasPrefix("Error:") || trimmed.hasPrefix("error:") || trimmed.hasPrefix("✗") {
                 add(whole, red)
                 continue
+            } else if let marker = listMarkerLength(trimmed) {
+                add(NSRange(location: indent, length: marker), listMarker)
             }
-            for match in inlineCode.matches(in: row, range: whole) { add(match.range, code) }
+            inlineRuns(row, add: add)
         }
         return runs.sorted { $0.range.location < $1.range.location }
     }
