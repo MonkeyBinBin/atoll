@@ -24,6 +24,8 @@ public final class HerdrCLIAdapter: HerdrClient, Sendable {
         var seq: UInt64 = 0
         var subscription: LineSocket?
         var subscribedPanes: Set<String> = []
+        /// This herdr refused an ANSI read once (while a plain one worked): skip straight to plain reads.
+        var ansiUnsupported = false
         /// Set by reconnect(): report offline again if herdr still isn't running.
         var announceOffline = false
     }
@@ -315,11 +317,22 @@ public final class HerdrCLIAdapter: HerdrClient, Sendable {
 
     public func readStyled(terminal: String, lines: Int) async throws -> ReadOutput {
         let pane = try pane(terminal)
-        // A herdr without ANSI reads (refusing the parameters, or answering without text): plain text instead,
-        // colored by layout. A real failure (pane gone) fails the plain read the same way.
-        guard let result = try? await call("pane.read", [
-            "pane_id": pane, "source": "recent_unwrapped", "lines": lines, "format": "ansi", "strip_ansi": false,
-        ]), let read = (result as? [String: Any])?["read"] as? [String: Any], let raw = read["text"] as? String else {
+        if shared.withLock({ $0.ansiUnsupported }) { return try await self.read(terminal: terminal, lines: lines) }
+        let result: Any
+        do {
+            result = try await call("pane.read", [
+                "pane_id": pane, "source": "recent_unwrapped", "lines": lines, "format": "ansi", "strip_ansi": false,
+            ])
+        } catch let error as HerdrError where error.kind != "unavailable" {
+            // herdr answered with an error. If a plain read works, it was the ANSI parameters it refused: remember
+            // that. Otherwise the plain read's error (pane gone…) is the real one. Transport failures and timeouts
+            // aren't caught, so they cost one wait, not two.
+            let plain = try await self.read(terminal: terminal, lines: lines)
+            shared.withLock { $0.ansiUnsupported = true }
+            return plain
+        }
+        guard let read = (result as? [String: Any])?["read"] as? [String: Any], let raw = read["text"] as? String else {
+            // Answered without text: plain text instead, colored by layout.
             return try await self.read(terminal: terminal, lines: lines)
         }
         let parsed = ANSIParser.parse(raw)

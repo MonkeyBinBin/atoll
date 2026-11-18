@@ -43,7 +43,7 @@ public struct StyledRun: Equatable, Sendable {
 
 /// Splits terminal output with escape sequences into plain text and its SGR style runs. Every other escape
 /// (cursor moves, OSC titles / hyperlinks, DCS, charset switches) is dropped, except cursor-forward, which
-/// becomes spaces. Carriage returns and other C0 controls are dropped; newlines and tabs are kept.
+/// becomes spaces. Carriage returns and other C0 / C1 controls are dropped; newlines and tabs are kept.
 public enum ANSIParser {
     public static func parse(_ input: String) -> (text: String, runs: [StyledRun]) {
         var out = String.UnicodeScalarView()
@@ -91,7 +91,8 @@ public enum ANSIParser {
                             runStart = offset
                         }
                     } else if final == "C", params.allSatisfy(\.isNumber) {
-                        for _ in 0..<max(1, Int(params) ?? 1) { append(" ") }
+                        // Bounded: a terminal row is never this wide, and a bogus count must not stall the panel.
+                        for _ in 0..<min(max(1, Int(params) ?? 1), 1000) { append(" ") }
                     }
                 case "]", "P", "X", "^", "_":
                     // OSC ends with BEL or ST; DCS / SOS / PM / APC with ST.
@@ -109,7 +110,8 @@ public enum ANSIParser {
                 }
                 continue
             }
-            if s == "\n" || s == "\t" || s.value >= 0x20, s.value != 0x7F {
+            // C0 and C1 controls (U+0080–U+009F, 8-bit CSI / OSC included) are dropped.
+            if s == "\n" || s == "\t" || s.value >= 0x20, s.value != 0x7F, !(0x80...0x9F).contains(s.value) {
                 append(s)
             }
             i += 1

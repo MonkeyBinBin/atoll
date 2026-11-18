@@ -692,7 +692,8 @@ final class RenderedOutputCache {
     private var cached: Value = ("", [])
 
     func value(output: ReadOutput?, isLoading: Bool, messagesOnly: Bool, tool: AgentTool, app: String?) -> Value {
-        let key = Key(output: output, isLoading: isLoading, messagesOnly: messagesOnly, tool: tool, app: app)
+        // Loading only changes what is shown while there is no output yet.
+        let key = Key(output: output, isLoading: output == nil && isLoading, messagesOnly: messagesOnly, tool: tool, app: app)
         if key == self.key { return cached }
         self.key = key
         guard let output else {

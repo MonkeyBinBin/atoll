@@ -40,6 +40,12 @@ struct ANSIParserTests {
         #expect(ANSIParser.parse(input).runs.isEmpty)
     }
 
+    @Test("a huge cursor-forward count is bounded; C1 controls are dropped")
+    func bounds() {
+        #expect(ANSIParser.parse("a\u{1B}[999999999Cb").text.count == 1002)
+        #expect(ANSIParser.parse("\u{9B}x\u{85}y").text == "xy")
+    }
+
     @Test("ranges are UTF-16 offsets, a style carries across newlines, and equal neighbours merge")
     func offsets() {
         let input = "你好\u{1B}[32m🙂 ok\nnext\u{1B}[0m\u{1B}[32m\u{1B}[0m tail"
@@ -194,6 +200,45 @@ struct OutputStylingTests {
         #expect(OutputStyling.listMarkerLength("-x") == nil)
         #expect(OutputStyling.listMarkerLength("1234. too long") == nil)
         #expect(OutputStyling.listMarkerLength("3) third") == 2)
+    }
+
+    @Test("with a side panel cut off, rows still pair with their own source rows, blank ones included")
+    func sidePanelAlignment() {
+        /// `text` in color `sgr` (none when nil), padded to the panel border at column 70.
+        func row(_ text: String, _ sgr: Int?, _ panel: String) -> String {
+            let colored = sgr.map { "\u{1B}[\($0)m\(text)\u{1B}[0m" } ?? text
+            return colored + String(repeating: " ", count: 70 - text.count) + "│ " + panel + String(repeating: " ", count: 12) + "x"
+        }
+        let raw = [
+            row("first", 31, "files"),
+            row("", nil, "a.swift"),
+            row("second", 32, "b.swift"),
+            row("", nil, "c.swift"),
+            row("third", 34, "d.swift"),
+            "",
+            "",
+        ].joined(separator: "\n")
+        let (text, runs) = ANSIParser.parse(raw)
+        let shown = OutputFilter.messages(text, tool: .claudeCode)
+        #expect(shown == "first\n\nsecond\n\nthird")
+        let mapped = pieces(shown, OutputStyling.runs(shown: shown, source: ReadOutput(text: text, how: "history", runs: runs)))
+        #expect(mapped.map(\.0) == ["first", "second", "third"])
+        #expect(mapped.map(\.1.foreground) == [.palette(1), .palette(2), .palette(4)])
+    }
+
+    @Test("a shown tail pairs with the later copy of a repeated row, not an earlier one cut away")
+    func repeatedRowInTail() {
+        let raw = "\u{1B}[31mError: x\u{1B}[0m\nmiddle\nError: x\ntail"
+        let (text, runs) = ANSIParser.parse(raw)
+        let shown = "Error: x\ntail"
+        #expect(OutputStyling.runs(shown: shown, source: ReadOutput(text: text, how: "history", runs: runs)).isEmpty)
+    }
+
+    @Test("a tree listing's └── is part of the reply, not tool output")
+    func treeListing() {
+        let shown = "⏺ Layout:\n  └── src\n      └── App.swift\n         12 + foo"
+        let styled = pieces(shown, OutputStyling.heuristic(shown))
+        #expect(!styled.contains { $0.1 == OutputStyling.green || $0.0 == "      └── App.swift" })
     }
 
     @Test("source runs that are present but empty fall back to the layout colors")

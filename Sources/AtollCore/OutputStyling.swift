@@ -48,20 +48,18 @@ public enum OutputStyling {
     }
 
     /// The filters only drop rows and shorten them (trailing blanks, a side panel cut off), keeping their order,
-    /// so each shown row is matched to the next source row it equals, or failing that, starts with. A row that
-    /// matches nothing (its text was rewritten) stays plain.
+    /// so shown rows and source rows are aligned as a whole: the order-keeping pairing that scores best, where a row
+    /// equal to its source scores more than one its source merely starts with. A row that pairs with nothing (its
+    /// text was rewritten) stays plain.
     static func mapped(shown: String, source: String, runs: [StyledRun]) -> [StyledRun] {
         let rows = lineRanges(source).map { sourceRow($0.text, location: $0.location) }
-        var cursor = 0
+        let lines = lineRanges(shown)
+        let pairs = align(lines.map { String($0.text) }, rows.map(\.text))
         var result: [StyledRun] = []
         var runIndex = 0
-        for line in lineRanges(shown) {
+        for (index, line) in lines.enumerated() {
+            guard let match = pairs[index] else { continue }
             let text = String(line.text)
-            let rest = rows[cursor...]
-            let match = rest.firstIndex { $0.text == text }
-                ?? (text.isEmpty ? nil : rest.firstIndex { $0.text.hasPrefix(text) })
-            guard let match else { continue }
-            cursor = match + 1
             let row = rows[match]
             let shownLength = (text as NSString).length
             // Runs are sorted: skip the ones that end before this source row.
@@ -85,6 +83,49 @@ public enum OutputStyling {
             }
         }
         return result
+    }
+
+    /// How well a shown row fits a source row: equal beats "starts with"; a blank row fits every row (all of them
+    /// start with it, and a cut-off side panel leaves no source row blank), so it scores least even when equal,
+    /// or a run of blank rows would pair with the empty rows at the bottom instead of their own.
+    static func fit(_ shown: String, _ source: String) -> Int {
+        if shown.isEmpty { return 1 }
+        if shown == source { return 4 }
+        return source.hasPrefix(shown) ? 2 : 0
+    }
+
+    /// For each shown row, the source row it pairs with: the order-keeping pairing with the best total fit (a
+    /// weighted longest common subsequence). Ties go to later source rows, since the shown text is the tail.
+    static func align(_ shown: [String], _ source: [String]) -> [Int?] {
+        let n = shown.count, m = source.count
+        guard n > 0, m > 0 else { return Array(repeating: nil, count: n) }
+        var score = [Int](repeating: 0, count: (n + 1) * (m + 1))
+        var fits = [Int](repeating: 0, count: n * m)
+        func at(_ i: Int, _ j: Int) -> Int { i * (m + 1) + j }
+        for i in 1...n {
+            for j in 1...m {
+                let f = fit(shown[i - 1], source[j - 1])
+                fits[(i - 1) * m + j - 1] = f
+                var best = max(score[at(i - 1, j)], score[at(i, j - 1)])
+                if f > 0 { best = max(best, score[at(i - 1, j - 1)] + f) }
+                score[at(i, j)] = best
+            }
+        }
+        var pairs = [Int?](repeating: nil, count: n)
+        var i = n, j = m
+        while i > 0, j > 0 {
+            let f = fits[(i - 1) * m + j - 1]
+            if f > 0, score[at(i, j)] == score[at(i - 1, j - 1)] + f {
+                pairs[i - 1] = j - 1
+                i -= 1
+                j -= 1
+            } else if score[at(i, j - 1)] >= score[at(i - 1, j)] {
+                j -= 1
+            } else {
+                i -= 1
+            }
+        }
+        return pairs
     }
 
     /// Each row with its UTF-16 start offset.
@@ -157,17 +198,21 @@ public enum OutputStyling {
         diffRow.firstMatch(in: row, range: NSRange(location: 0, length: (row as NSString).length)) != nil
     }
 
+    /// Claude Code's `⎿` and Codex's `└ ` (a space after it: a tree listing's `└──` is part of a reply).
     private static func isOutputMark(_ trimmed: Substring) -> Bool {
-        trimmed.hasPrefix("⎿") || trimmed.hasPrefix("└")
+        trimmed.hasPrefix("⎿") || (trimmed.hasPrefix("└") && trimmed.dropFirst().first == " ")
     }
 
     /// The indented block under row `index` starts with a `└` row or holds a numbered diff row.
     private static func hasToolOutput(below index: Int, in lines: [(text: Substring, location: Int)]) -> Bool {
-        let block = lines[(index + 1)...]
-            .filter { !$0.text.allSatisfy { $0 == " " } }
-            .prefix { $0.text.first == " " }
-        guard let first = block.first else { return false }
-        return isOutputMark(first.text.drop { $0 == " " }) || block.contains { isDiffRow(String($0.text)) }
+        var first = true
+        for line in lines[(index + 1)...] where !line.text.allSatisfy({ $0 == " " }) {
+            guard line.text.first == " " else { return false }
+            if first, isOutputMark(line.text.drop { $0 == " " }) { return true }
+            if isDiffRow(String(line.text)) { return true }
+            first = false
+        }
+        return false
     }
 
     /// Colors for Claude Code / Codex / plain markdown rows: the user's prompts, reply bullets and tool names,
