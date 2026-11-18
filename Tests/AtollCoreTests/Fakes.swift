@@ -227,3 +227,16 @@ struct Harness {
 func settle() async {
     for _ in 0..<20 { await Task.yield() }
 }
+
+/// A value shared with `@Sendable` callbacks (Observation's `onChange`, detector hooks), behind a lock.
+final class Locked<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: Value
+
+    init(_ value: Value) { stored = value }
+
+    var value: Value {
+        get { lock.withLock { stored } }
+        set { lock.withLock { stored = newValue } }
+    }
+}

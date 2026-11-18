@@ -171,6 +171,17 @@ struct OfflineLaunchTests {
         #expect(h.store.pendingSpaceNames == ["spWaiting": "b"])
     }
 
+    @Test("a pending name only an ended terminal is labelled for is dropped too")
+    func endedTerminalNameDropped() async {
+        let h = Harness()
+        h.store.pendingSpaceNames = ["spEnded": "a", "spWaiting": "b"]
+        h.client.spacesResult = .success([HerdrSpace(id: "sp1", name: "x")])
+        h.connect([labelled("t1", space: "spWaiting"), labelled("t2", space: "spEnded", live: false)])
+        h.store.herdrAppRunning = true
+        await settle()
+        #expect(h.store.pendingSpaceNames == ["spWaiting": "b"])
+    }
+
     @Test("the form's choices become the request: selected, existing, new (trimmed name), template option ids")
     func requestFromChoices() {
         func make(_ choice: LaunchSpaceChoice, _ optionID: String = "builtin:claude") -> LaunchRequest {

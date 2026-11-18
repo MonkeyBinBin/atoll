@@ -113,42 +113,25 @@ public final class AgentStore {
     public var showUnreportedTerminals = false
     /// Whether the Herdr GUI is running (focus needs it; spaces come from it; launches without it go through core).
     public var herdrAppRunning = false {
-        didSet {
-            guard herdrAppRunning != oldValue else { return }
-            if herdrAppRunning {
-                refreshSpaces()
-            } else {
-                spaceGeneration += 1
-                spaceRefreshing = false
-                spaceRefreshAgain = false
-                spaceTimer?.cancel()
-                spaceTimer = nil
-                if !spaces.isEmpty {
-                    spaces = []
-                    rebuild()
-                }
-            }
-        }
+        didSet { spaceTracker.appRunning = herdrAppRunning }
     }
 
-    /// Herdr GUI spaces (ticket 42), in Herdr's order; empty while the Herdr app isn't running.
+    /// Herdr GUI spaces (ticket 42), in Herdr's order; empty while the Herdr app isn't running. Stored here,
+    /// written by `spaceTracker` only on a change, so viewers observe it.
     public private(set) var spaces: [HerdrSpace] = []
     /// The last spaces read from the Herdr app, kept across its quits (and app restarts, via `onSpacesCached`)
     /// so a launch without the app can still pick one.
-    public var cachedSpaces: [HerdrSpace] = []
+    public var cachedSpaces: [HerdrSpace] {
+        get { spaceTracker.cached }
+        set { spaceTracker.cached = newValue }
+    }
     public var onSpacesCached: (([HerdrSpace]) -> Void)?
     /// Names for spaces made by launches without the app (space id → name), applied once the app shows them.
-    public var pendingSpaceNames: [String: String] = [:] {
-        didSet { if pendingSpaceNames != oldValue { onPendingSpaceNamesChanged?(pendingSpaceNames) } }
+    public var pendingSpaceNames: [String: String] {
+        get { spaceTracker.pendingNames }
+        set { spaceTracker.pendingNames = newValue }
     }
     public var onPendingSpaceNamesChanged: (([String: String]) -> Void)?
-    private var renamingSpaces: Set<String> = []
-    private var spaceTimer: ScheduledAction?
-    private var spaceRefreshing = false
-    private var spaceRefreshAgain = false
-    private var spaceGeneration = 0
-    /// herdr-core agents a refresh already ran for while they had no space (each triggers one).
-    private var spaceMisses: Set<String> = []
 
     /// Visible agents, sorted by priority.
     public private(set) var agents: [Agent] = []
@@ -327,6 +310,12 @@ public final class AgentStore {
     @ObservationIgnored private let finals: FinalMessageTracker
     @ObservationIgnored private let reminders: WaitingReminderTracker
     @ObservationIgnored private let changes = TurnChangeTracker()
+    @ObservationIgnored private lazy var spaceTracker = SpaceTracker(
+        client: client,
+        scheduler: scheduler,
+        refreshInterval: timing.spaceRefreshInterval,
+        launchTimeout: timing.launchSpacesTimeout
+    )
     private var launching: Set<String> = []
     private var snapshotSeq: [AgentSource: UInt64] = [:]
     private var staleTimers: [AgentSource: ScheduledAction] = [:]
@@ -386,6 +375,25 @@ public final class AgentStore {
             // The user is already looking at it.
             guard let self, self.panel?.address != address, let agent = self.agent(address) else { return }
             self.onReminder?(agent, self.scheduler.now.timeIntervalSince(episode))
+        }
+        spaceTracker.onChange = { [weak self] spaces in
+            self?.spaces = spaces
+            self?.rebuild()
+        }
+        spaceTracker.onCached = { [weak self] spaces in self?.onSpacesCached?(spaces) }
+        spaceTracker.onPendingNamesChange = { [weak self] names in self?.onPendingSpaceNamesChanged?(names) }
+        spaceTracker.terminals = { [weak self] in
+            guard let self else { return [] }
+            return self.records.values.filter { $0.source == self.primary }.sorted { $0.order < $1.order }.map(\.info)
+        }
+        spaceTracker.liveSpaceIDs = { [weak self] in
+            guard let self else { return [] }
+            return Set(self.records.values.filter { $0.source == self.primary && $0.info.state == "live" }
+                .compactMap { $0.info.labels[HerdrLabels.space] })
+        }
+        spaceTracker.snapshotArrived = { [weak self] in
+            guard let self else { return false }
+            return self.snapshotSeq[self.primary] != nil
         }
         changes.onChange = { [weak self] in self?.rebuild() }
         changes.sharesTree = { [weak self] address, toplevel in
@@ -763,7 +771,7 @@ public final class AgentStore {
         drop(lastInterruptError.keys) { lastInterruptError[$0] = nil }
         drop(queuedMessages.filter { $0.value.status != .sending }.keys) { queuedMessages[$0] = nil }
         drop(notifyWhenDone) { notifyWhenDone.remove($0) }
-        drop(spaceMisses) { spaceMisses.remove($0) }
+        drop(spaceTracker.addresses) { spaceTracker.remove($0) }
     }
 
     /// Whether the agent is (still) here. Late results check it before writing anything for an agent.
@@ -829,7 +837,7 @@ public final class AgentStore {
                 if let space = spaceByTerminal[info.address] {
                     agent.spaceID = space.id
                     agent.spaceName = space.name
-                } else if herdrAppRunning, spaceMisses.insert(info.address).inserted {
+                } else if spaceTracker.claimMiss(info.address) {
                     unmapped = true
                 }
             }
@@ -878,108 +886,12 @@ public final class AgentStore {
     // MARK: Herdr spaces
 
     /// Re-reads the Herdr app's spaces now (then every `spaceRefreshInterval`). A failed read keeps the last ones.
-    public func refreshSpaces() {
-        guard herdrAppRunning else { return }
-        guard !spaceRefreshing else {
-            spaceRefreshAgain = true
-            return
-        }
-        spaceRefreshing = true
-        spaceTimer?.cancel()
-        spaceTimer = nil
-        let generation = spaceGeneration
-        // Weak like the timer it schedules: neither the read nor the next refresh keeps the store alive.
-        Task { [weak self, client] in
-            let result = try? await client.spaces()
-            guard let self, generation == self.spaceGeneration else { return }
-            self.spaceRefreshing = false
-            if let result, result != self.spaces {
-                self.spaces = result
-                self.rebuild()
-            }
-            if let result, !result.isEmpty, result != self.cachedSpaces {
-                self.cachedSpaces = result
-                self.onSpacesCached?(result)
-            }
-            if let result { self.applyPendingSpaceNames(result) }
-            if self.spaceRefreshAgain {
-                self.spaceRefreshAgain = false
-                self.refreshSpaces()
-            } else {
-                self.spaceTimer = self.scheduler.schedule(after: self.timing.spaceRefreshInterval) { [weak self] in
-                    self?.spaceTimer = nil
-                    self?.refreshSpaces()
-                }
-            }
-        }
-    }
-
-    /// Names the spaces launches without the app made, once the app shows them. A failed rename is tried again
-    /// on the next read. A name whose space the app doesn't show and no live terminal is labelled for (its agent
-    /// ended before the app opened) is dropped: that space will never appear.
-    private func applyPendingSpaceNames(_ shown: [HerdrSpace]) {
-        let labelled = Set(records.values.filter { $0.source == primary && $0.info.state == "live" }
-            .compactMap { $0.info.labels[HerdrLabels.space] })
-        let shownIDs = Set(shown.map(\.id))
-        // Only once core's terminals are known (its snapshot arrived), or every name would look orphaned.
-        for id in pendingSpaceNames.keys where snapshotSeq[primary] != nil && !shownIDs.contains(id) && !labelled.contains(id) {
-            pendingSpaceNames[id] = nil
-        }
-        for space in shown {
-            guard let name = pendingSpaceNames[space.id], !renamingSpaces.contains(space.id) else { continue }
-            renamingSpaces.insert(space.id)
-            Task { [client] in
-                let renamed = (try? await client.renameSpace(id: space.id, name: name)) != nil
-                self.renamingSpaces.remove(space.id)
-                guard renamed else { return }
-                if self.pendingSpaceNames[space.id] == name { self.pendingSpaceNames[space.id] = nil }
-                self.refreshSpaces()
-            }
-        }
-    }
+    public func refreshSpaces() { spaceTracker.refresh() }
 
     /// The spaces a launch can pick: the app's, read now; without the app, the cached ones as herdr-core's
     /// labels have them now (`HerdrLabels.spaces`). A read that fails or takes longer than
     /// `launchSpacesTimeout` gets the cached ones too: the launch form waits on this.
-    public func launchSpaces() async -> [HerdrSpace] {
-        guard herdrAppRunning else { return offlineSpaces }
-        let client = client
-        return await withCheckedContinuation { continuation in
-            let once = Once(continuation)
-            let read = Task { @MainActor [weak self] in
-                let shown = try? await client.spaces()
-                once.resume(shown ?? self?.offlineSpaces ?? [])
-            }
-            let timer = scheduler.schedule(after: timing.launchSpacesTimeout) { [weak self] in
-                read.cancel()
-                once.resume(self?.offlineSpaces ?? [])
-            }
-            once.onResume = { timer.cancel() }
-        }
-    }
-
-    /// Resumes a continuation the first time only (a read racing its timeout).
-    @MainActor
-    private final class Once {
-        private var continuation: CheckedContinuation<[HerdrSpace], Never>?
-        var onResume: () -> Void = {}
-
-        init(_ continuation: CheckedContinuation<[HerdrSpace], Never>) {
-            self.continuation = continuation
-        }
-
-        func resume(_ value: [HerdrSpace]) {
-            guard let continuation else { return }
-            self.continuation = nil
-            onResume()
-            continuation.resume(returning: value)
-        }
-    }
-
-    private var offlineSpaces: [HerdrSpace] {
-        let terminals = records.values.filter { $0.source == primary }.sorted { $0.order < $1.order }.map(\.info)
-        return HerdrLabels.spaces(cached: cachedSpaces, terminals: terminals, pendingNames: pendingSpaceNames)
-    }
+    public func launchSpaces() async -> [HerdrSpace] { await spaceTracker.launchSpaces() }
 
     // MARK: Waiting preview
 
@@ -1631,7 +1543,7 @@ public final class AgentStore {
             if request.newSpaceName != nil {
                 request.space = HerdrLabels.newID("sp")
             } else {
-                request.space = HerdrLabels.target(picked: request.space, spaces: offlineSpaces)
+                request.space = HerdrLabels.target(picked: request.space, spaces: spaceTracker.offlineSpaces)
             }
         }
         launchWorktree = nil

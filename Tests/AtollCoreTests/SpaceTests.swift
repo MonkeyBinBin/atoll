@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import Testing
 @testable import AtollCore
 
@@ -21,6 +22,24 @@ struct SpaceTests {
         #expect(h.store.agent("t1")?.spaceName == "atoll")
         #expect(h.store.agent("t3")?.spaceID == "sp2")
         #expect(h.store.agent("t9")?.spaceID == nil)
+    }
+
+    @Test("spaces stays observable: a read that changes them notifies viewers, an unchanged one doesn't")
+    func observable() async {
+        let h = Harness()
+        h.client.spacesResult = .success([atoll])
+        h.connect([term("t1", "working")])
+        let changed = Locked(false)
+        withObservationTracking { _ = h.store.spaces } onChange: { changed.value = true }
+        h.store.herdrAppRunning = true
+        await settle()
+        #expect(changed.value)
+        let again = Locked(false)
+        withObservationTracking { _ = h.store.spaces } onChange: { again.value = true }
+        h.scheduler.advance(by: h.store.timing.spaceRefreshInterval)
+        await settle()
+        #expect(h.client.spacesCalls == 2)
+        #expect(!again.value)
     }
 
     @Test("a new agent without a space re-reads the spaces once; it isn't asked again")
