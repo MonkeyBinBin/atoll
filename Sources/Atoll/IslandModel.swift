@@ -16,22 +16,52 @@ struct ScreenGeometry: Equatable {
     var rightRoom: CGFloat
 
     static func of(_ screen: NSScreen) -> ScreenGeometry {
-        let frame = screen.frame
-        let menuBar = max(frame.maxY - screen.visibleFrame.maxY, 24)
-        if screen.safeAreaInsets.top > 0,
-           let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
+        of(
+            frame: screen.frame, visibleFrame: screen.visibleFrame, safeAreaTop: screen.safeAreaInsets.top,
+            leftArea: screen.auxiliaryTopLeftArea, rightArea: screen.auxiliaryTopRightArea
+        )
+    }
+
+    /// `NSScreen`'s values: `leftArea`/`rightArea` are the menu bar areas beside the notch (nil without one).
+    static func of(
+        frame: CGRect, visibleFrame: CGRect, safeAreaTop: CGFloat, leftArea: CGRect?, rightArea: CGRect?
+    ) -> ScreenGeometry {
+        let menuBar = max(frame.maxY - visibleFrame.maxY, 24)
+        if safeAreaTop > 0, let left = leftArea, let right = rightArea {
             // Derived from widths only, independent of which coordinate space the rects use.
             let notchMinX = frame.minX + left.width
             let notchWidth = frame.width - left.width - right.width
             return ScreenGeometry(
                 screenFrame: frame, hasNotch: true, notchMinX: notchMinX, notchWidth: notchWidth,
-                barHeight: screen.safeAreaInsets.top, leftRoom: left.width, rightRoom: right.width
+                barHeight: safeAreaTop, leftRoom: left.width, rightRoom: right.width
             )
         }
         return ScreenGeometry(
             screenFrame: frame, hasNotch: false, notchMinX: frame.midX, notchWidth: 0,
             barHeight: min(menuBar, 30), leftRoom: frame.width / 2, rightRoom: frame.width / 2
         )
+    }
+
+    /// The island window's frame: collapsed, the left wing ends at the notch (centered without one); expanded
+    /// (`width`, and `contentHeight` below the row), centered on the notch or screen. Kept on screen, rounded.
+    func islandFrame(layout: IslandLayout, expanded: (width: CGFloat, contentHeight: CGFloat)?) -> CGRect {
+        var width = layout.collapsedWidth
+        var height = layout.height
+        let centerX = hasNotch ? notchMinX + notchWidth / 2 : screenFrame.midX
+        var x: CGFloat
+        if let expanded {
+            width = expanded.width
+            height = layout.height + expanded.contentHeight
+            x = centerX - width / 2
+        } else if hasNotch {
+            x = notchMinX - layout.leftWidth
+        } else {
+            x = centerX - width / 2
+        }
+        let topInset: CGFloat = hasNotch ? 0 : 2
+        let y = screenFrame.maxY - topInset - height
+        x = min(max(x, screenFrame.minX), screenFrame.maxX - width)
+        return CGRect(x: x.rounded(), y: y.rounded(), width: width.rounded(.up), height: height.rounded(.up))
     }
 }
 

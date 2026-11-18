@@ -16,5 +16,6 @@ let package = Package(
             resources: [.copy("Resources/Sprites")]
         ),
         .testTarget(name: "AtollCoreTests", dependencies: ["AtollCore"]),
+        .testTarget(name: "AtollTests", dependencies: ["Atoll"]),
     ]
 )

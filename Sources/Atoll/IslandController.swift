@@ -173,25 +173,8 @@ final class IslandController {
     private func updateFrame() {
         guard let geometry = model.geometry else { return }
         let layout = model.layout
-        let expanded = model.isExpanded
-        let contentHeight = model.expandedContentHeight
-        var width = layout.collapsedWidth
-        var height = layout.height
-        let centerX = geometry.hasNotch ? geometry.notchMinX + geometry.notchWidth / 2 : geometry.screenFrame.midX
-        var x: CGFloat
-        if expanded {
-            width = model.expandedWidth(layout)
-            height = layout.height + contentHeight
-            x = centerX - width / 2
-        } else if geometry.hasNotch {
-            x = geometry.notchMinX - layout.leftWidth
-        } else {
-            x = centerX - width / 2
-        }
-        let topInset: CGFloat = geometry.hasNotch ? 0 : 2
-        let y = geometry.screenFrame.maxY - topInset - height
-        x = min(max(x, geometry.screenFrame.minX), geometry.screenFrame.maxX - width)
-        let frame = NSRect(x: x.rounded(), y: y.rounded(), width: width.rounded(.up), height: height.rounded(.up))
+        let expanded = model.isExpanded ? (width: model.expandedWidth(layout), contentHeight: model.expandedContentHeight) : nil
+        let frame = geometry.islandFrame(layout: layout, expanded: expanded)
         if panel.frame != frame { panel.setFrame(frame, display: true) }
         bubbles?.reposition()
     }
