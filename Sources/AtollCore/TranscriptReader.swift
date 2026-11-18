@@ -10,18 +10,21 @@ public struct TranscriptSnapshot: Equatable, Sendable {
     public var startsMidway: Bool
     /// The panel text, laid out off the main actor by the reader (nil when built by hand).
     public var rendered: TranscriptRendering.Output?
+    /// The file's inode: a file replaced at the same path is another transcript even at the same `version`.
+    public var fileID: Int?
 
     public init(path: String, entries: [TranscriptEntry], version: UInt64, startsMidway: Bool = false,
-                rendered: TranscriptRendering.Output? = nil) {
+                rendered: TranscriptRendering.Output? = nil, fileID: Int? = nil) {
         self.path = path
         self.entries = entries
         self.version = version
         self.startsMidway = startsMidway
         self.rendered = rendered
+        self.fileID = fileID
     }
 
     /// Changes whenever the entries can have: what caches and the store compare.
-    public var identity: String { "\(path)|\(version)" }
+    public var identity: String { "\(path)|\(fileID ?? 0)|\(version)" }
 }
 
 /// Reads transcripts incrementally, off the main actor: per agent it keeps the file, how far it has read, the
@@ -145,6 +148,6 @@ public actor TranscriptReader {
     /// Bytes of complete lines read: an unfinished line being written doesn't change it, as it adds no entry yet.
     private func snapshot(_ state: State) -> TranscriptSnapshot {
         TranscriptSnapshot(path: state.path, entries: state.entries, version: state.offset - UInt64(state.pending.count),
-                           startsMidway: state.startsMidway)
+                           startsMidway: state.startsMidway, fileID: state.fileID)
     }
 }

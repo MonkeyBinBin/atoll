@@ -104,10 +104,11 @@ public enum TranscriptParser {
             return [TranscriptEntry(.user, args.isEmpty ? name : "\(name) \(args)")]
         }
         if let command = tag("bash-input", in: text) { return [TranscriptEntry(.user, "! \(command)")] }
-        for name in ["local-command-stdout", "bash-stdout"] {
-            if let output = tag(name, in: text), let shortened = shortened(output) {
-                return [TranscriptEntry(.note, shortened)]
-            }
+        // Output of a `!` or local command: stdout and stderr in one note; nothing when both are empty.
+        let streams = ["bash-stdout", "bash-stderr", "local-command-stdout", "local-command-stderr"]
+        if streams.contains(where: { text.hasPrefix("<\($0)>") }) {
+            let output = streams.compactMap { tag($0, in: text) }.filter { !$0.isEmpty }.joined(separator: "\n")
+            return shortened(output).map { [TranscriptEntry(.note, $0)] } ?? []
         }
         if claudeSkippedTags.contains(where: { text.hasPrefix("<\($0)") }) { return [] }
         // A message typed in through herdr-core (`hc send`, Atoll's reply box): `<hc from="t7">text</hc>`.

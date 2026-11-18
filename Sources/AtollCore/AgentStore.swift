@@ -335,9 +335,11 @@ public final class AgentStore {
     /// rewritten, a new one not created yet) before the panel falls back to the screen.
     private var transcriptMisses = 0
     static let transcriptMissesAllowed = 3
-    /// The app shows the transcript only with Messages only on: off, it isn't read at all.
+    /// Reader calls (loads and forgets) run one after another, in the order they were made.
+    private var transcriptChain: Task<Void, Never>?
+    /// The app shows the transcript only with Messages only on: off, it isn't read and the panel drops it.
     @ObservationIgnored public var wantsTranscript = true {
-        didSet { if wantsTranscript, !oldValue { refreshTranscript() } }
+        didSet { if wantsTranscript != oldValue { refreshTranscript() } }
     }
     private var noOutputWatch = NoOutputWatch()
     private var noOutputTimer: ScheduledAction?
@@ -1379,17 +1381,27 @@ public final class AgentStore {
     }
 
     /// The conversation from the open agent's transcript, when its session can be found for certain (ticket 61); then
-    /// again every `transcriptPollInterval` while the panel stays open. While it wouldn't be shown (changes view, Needs
-    /// you, Messages only off) nothing is read and the timer stops; what ends each of those restarts it: hiding the
-    /// changes, the status change out of Needs you (it refreshes the panel), turning Messages only on.
+    /// again every `transcriptPollInterval` while the panel stays open. This is the one place that decides when the
+    /// panel has a transcript: never with Messages only off or while the agent needs you (its dialog is only on the
+    /// screen), so the panel drops it then. While the changes view is up it is kept but not read. Whenever it isn't
+    /// read the timer stops; what ends each case restarts it: turning Messages only on, the status change out of Needs
+    /// you (it refreshes the panel), hiding the changes.
     private func refreshTranscript() {
         transcriptPoll?.cancel()
         transcriptPoll = nil
-        guard let address = panel?.address, let agent = agent(address), agent.tool != .generic,
-              wantsTranscript, panel?.changes == nil, !agent.state.isNeedsYou else { return }
+        guard let address = panel?.address, let agent = agent(address), agent.tool != .generic else { return }
+        guard wantsTranscript, !agent.state.isNeedsYou else {
+            transcriptRequest += 1
+            transcriptMisses = 0
+            if panel?.transcript != nil { panel?.transcript = nil }
+            return
+        }
+        guard panel?.changes == nil else { return }
         transcriptRequest += 1
         let request = transcriptRequest
-        Task { [transcripts, locator = transcriptLocator, hint = agent.session, cwd = agent.projectPath, tool = agent.tool] in
+        let previous = transcriptChain
+        transcriptChain = Task { [transcripts, locator = transcriptLocator, hint = agent.session, cwd = agent.projectPath, tool = agent.tool] in
+            await previous?.value
             let snapshot = await transcripts.load(address: address, tool: tool, hint: hint, cwd: cwd, locator: locator)
             self.finishTranscript(request: request, address: address, snapshot: snapshot)
         }
@@ -1420,7 +1432,11 @@ public final class AgentStore {
         transcriptMisses = 0
         transcriptRequest += 1
         if let address = panel?.address {
-            Task { [transcripts] in await transcripts.forget(address: address) }
+            let previous = transcriptChain
+            transcriptChain = Task { [transcripts] in
+                await previous?.value
+                await transcripts.forget(address: address)
+            }
         }
     }
 

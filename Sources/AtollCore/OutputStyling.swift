@@ -160,9 +160,9 @@ public enum OutputStyling {
     private static let diffRow = try! NSRegularExpression(pattern: #"^\s+\d+ +([+-])"#)
     private static let toolCall = try! NSRegularExpression(pattern: #"^[⏺●•] ([A-Z][A-Za-z0-9_]*)\("#)
     private static let inlineCode = try! NSRegularExpression(pattern: #"`[^`\n]+`"#)
-    static let url = try! NSRegularExpression(pattern: #"https?://[^\s<>()\[\]"'`]+(?<![.,;:!?])"#)
+    private static let url = try! NSRegularExpression(pattern: #"https?://[^\s<>()\[\]"'`]+(?<![.,;:!?])"#)
     /// "Sources/App.swift", "~/x/y.md", "./a/b.ts:12:3", or a bare file with a line: "App.swift:12".
-    static let filePath = try! NSRegularExpression(
+    private static let filePath = try! NSRegularExpression(
         pattern: #"(?<![\w/.~-])(?:(?:~|\.{1,2})?/?(?:[\w.-]+/)+[\w.-]+\.[A-Za-z][A-Za-z0-9]*|[\w-]+\.[A-Za-z][A-Za-z0-9]*(?=:\d))(?::\d+(?::\d+)?)?"#)
     private static let boxDrawing = try! NSRegularExpression(pattern: #"[\u2500-\u257F]+"#)
 
@@ -184,14 +184,24 @@ public enum OutputStyling {
             add(match.range, code)
             taken.append(match.range)
         }
+        for (range, style) in linkRuns(row, excluding: taken) { add(range, style) }
+        for match in boxDrawing.matches(in: row, range: whole) { add(match.range, muted) }
+    }
+
+    /// Links, then file paths, in `text` outside `excluding` (code) and not inside each other. Shared with the
+    /// transcript's markdown.
+    static func linkRuns(_ text: String, excluding: [NSRange]) -> [(NSRange, TermStyle)] {
+        let whole = NSRange(location: 0, length: (text as NSString).length)
+        var taken = excluding
+        var runs: [(NSRange, TermStyle)] = []
         for (regex, style) in [(url, link), (filePath, path)] {
-            for match in regex.matches(in: row, range: whole)
+            for match in regex.matches(in: text, range: whole)
             where !taken.contains(where: { NSIntersectionRange($0, match.range).length > 0 }) {
-                add(match.range, style)
+                runs.append((match.range, style))
                 taken.append(match.range)
             }
         }
-        for match in boxDrawing.matches(in: row, range: whole) { add(match.range, muted) }
+        return runs
     }
 
     private static func isDiffRow(_ row: String) -> Bool {

@@ -226,7 +226,8 @@ struct AgentPanelView: View {
             // Refreshed output, Messages only flipped, or back from the changes view: match the text as shown.
             .onChange(of: text, initial: true) { _, text in model.outputSearch?.update(text: text) }
             HStack(spacing: 8) {
-                if let fetched = panel?.fetchedAt {
+                // Fetch time, read errors and the spinner are the screen read's: not shown over the transcript.
+                if !rendered.fromTranscript, let fetched = panel?.fetchedAt {
                     Text("Fetched at \(Format.clockSeconds.string(from: fetched))")
                 }
                 if rendered.fromTranscript {
@@ -239,13 +240,13 @@ struct AgentPanelView: View {
                         .padding(.horizontal, 5)
                         .background(Capsule().strokeBorder(Color.secondary.opacity(0.6)))
                 }
-                if let error = panel?.error {
+                if !rendered.fromTranscript, let error = panel?.error {
                     Text("Couldn't read output: \(error.message)")
                         .foregroundStyle(PixelPalette.error.color)
                         .lineLimit(1)
                 }
                 Spacer()
-                if panel?.isLoading == true {
+                if !rendered.fromTranscript, panel?.isLoading == true {
                     ProgressView().controlSize(.mini)
                 }
                 Toggle("Messages only", isOn: Binding(get: { settings.messagesOnly }, set: { settings.messagesOnly = $0 }))
@@ -318,8 +319,8 @@ struct AgentPanelView: View {
     }
 
     private func renderedOutput(_ panel: PanelState?) -> RenderedOutputCache.Value {
-        // A dialog waiting for an answer is only on the screen, never in the transcript.
-        let transcript = settings.messagesOnly && !agent.state.isNeedsYou ? panel?.transcript : nil
+        // The store decides when there is one to show (Messages only, not Needs you).
+        let transcript = panel?.transcript
         return outputCache.value(output: panel?.output, transcript: transcript, isLoading: panel?.isLoading == true,
                                  messagesOnly: settings.messagesOnly, tool: agent.tool, app: agent.app)
     }

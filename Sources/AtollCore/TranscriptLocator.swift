@@ -97,9 +97,11 @@ public struct TranscriptLocator: Sendable {
         return URL(fileURLWithPath: path)
     }
 
-    /// The transcript of a session id; may scan folders, so callers cache it.
+    /// The transcript of a session id; may scan folders, so callers cache it. Claude Code and Codex session ids are
+    /// UUIDs; anything else (cmux's own `cmux-…` ids) is never a transcript's name, so no folder is scanned for it.
     func transcript(tool: AgentTool, id: String, cwd: String) -> URL? {
-        switch tool {
+        guard UUID(uuidString: id) != nil else { return nil }
+        return switch tool {
         case .claudeCode: claudeTranscript(id: id, cwd: cwd)
         case .codex: codexTranscript(id: id)
         case .generic: nil

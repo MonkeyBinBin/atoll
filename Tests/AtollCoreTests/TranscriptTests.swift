@@ -54,6 +54,11 @@ struct TranscriptParserTests {
         #expect(parse(Rows.claudeUser("<bash-input>ls</bash-input>"), .claudeCode) == [TranscriptEntry(.user, "! ls")])
         #expect(parse(Rows.claudeUser("<local-command-stdout>Set model</local-command-stdout>"), .claudeCode)
             == [TranscriptEntry(.note, "Set model")])
+        #expect(parse(Rows.claudeUser("<bash-stdout></bash-stdout><bash-stderr>No such file</bash-stderr>"), .claudeCode)
+            == [TranscriptEntry(.note, "No such file")])
+        #expect(parse(Rows.claudeUser("<bash-stdout>out</bash-stdout><bash-stderr>warn</bash-stderr>"), .claudeCode)
+            == [TranscriptEntry(.note, "out\nwarn")])
+        #expect(parse(Rows.claudeUser("<local-command-stdout></local-command-stdout>"), .claudeCode).isEmpty)
         for skipped in ["<system-reminder>x</system-reminder>", "<local-command-caveat>x</local-command-caveat>",
                         "<task-notification>x</task-notification>"] {
             #expect(parse(Rows.claudeUser(skipped), .claudeCode).isEmpty)
@@ -159,9 +164,9 @@ struct TranscriptLocatorTests {
         let home = FakeHome()
         defer { home.remove() }
         home.write(".claude/sessions/4242.json", Rows.json([
-            "pid": 4242, "sessionId": "abc-1", "cwd": "/Users/me/my.app", "startedAt": 1_000_000_500,
+            "pid": 4242, "sessionId": "aaaaaaaa-0000-4000-8000-000000000001", "cwd": "/Users/me/my.app", "startedAt": 1_000_000_500,
         ]))
-        let file = home.write(".claude/projects/-Users-me-my-app/abc-1.jsonl", "")
+        let file = home.write(".claude/projects/-Users-me-my-app/aaaaaaaa-0000-4000-8000-000000000001.jsonl", "")
         // The process started half a second before the file says: the same process, whatever cwd the agent reports.
         let same = TranscriptLocator(home: home.url) { _ in Date(timeIntervalSince1970: 1_000_000) }
         #expect(same.locate(tool: .claudeCode, hint: SessionHint(pid: 4242), cwd: "/Users/me/my.app") == file)
@@ -186,21 +191,24 @@ struct TranscriptLocatorTests {
     func claudeID() {
         let home = FakeHome()
         defer { home.remove() }
-        let file = home.write(".claude/projects/-elsewhere/s-2.jsonl", "")
+        let file = home.write(".claude/projects/-elsewhere/22222222-2222-4222-8222-222222222222.jsonl", "")
         let locator = TranscriptLocator(home: home.url)
-        #expect(locator.locate(tool: .claudeCode, hint: SessionHint(sessionID: "s-2"), cwd: "/x") == file)
+        #expect(locator.locate(tool: .claudeCode, hint: SessionHint(sessionID: "22222222-2222-4222-8222-222222222222"), cwd: "/x") == file)
         let explicit = home.write("given.jsonl", "")
-        #expect(locator.locate(tool: .claudeCode, hint: SessionHint(sessionID: "s-2", transcriptPath: explicit.path), cwd: "/x") == explicit)
+        #expect(locator.locate(tool: .claudeCode, hint: SessionHint(sessionID: "22222222-2222-4222-8222-222222222222", transcriptPath: explicit.path), cwd: "/x") == explicit)
         #expect(locator.locate(tool: .claudeCode, hint: SessionHint(sessionID: "../../etc/passwd"), cwd: "/x") == nil)
-        #expect(locator.locate(tool: .generic, hint: SessionHint(sessionID: "s-2"), cwd: "/x") == nil)
+        // Not a UUID (cmux's own ids): never looked up, even with a file of that name.
+        home.write(".claude/projects/-x/cmux-feed.jsonl", "")
+        #expect(locator.locate(tool: .claudeCode, hint: SessionHint(sessionID: "cmux-feed"), cwd: "/x") == nil)
+        #expect(locator.locate(tool: .generic, hint: SessionHint(sessionID: "22222222-2222-4222-8222-222222222222"), cwd: "/x") == nil)
     }
 
     @Test("Claude Code: a source id with no transcript (cmux's own cmux-… ids) falls back to the pid's session file")
     func claudeFallsBackToPid() {
         let home = FakeHome()
         defer { home.remove() }
-        home.write(".claude/sessions/7.json", Rows.json(["sessionId": "real-1", "cwd": "/w", "startedAt": 1_000_000_000]))
-        let file = home.write(".claude/projects/-w/real-1.jsonl", "")
+        home.write(".claude/sessions/7.json", Rows.json(["sessionId": "bbbbbbbb-0000-4000-8000-000000000001", "cwd": "/w", "startedAt": 1_000_000_000]))
+        let file = home.write(".claude/projects/-w/bbbbbbbb-0000-4000-8000-000000000001.jsonl", "")
         let locator = TranscriptLocator(home: home.url) { _ in Date(timeIntervalSince1970: 1_000_000) }
         #expect(locator.locate(tool: .claudeCode, hint: SessionHint(pid: 7, sessionID: "cmux-fee"), cwd: "/w") == file)
     }
@@ -210,9 +218,9 @@ struct TranscriptLocatorTests {
         let home = FakeHome()
         defer { home.remove() }
         home.write(".codex/sessions/2026/10/01/rollout-2026-10-01T09-00-00-other.jsonl", "")
-        let file = home.write(".codex/sessions/2026/11/18/rollout-2026-11-18T10-00-00-019f-aa.jsonl", "")
+        let file = home.write(".codex/sessions/2026/11/18/rollout-2026-11-18T10-00-00-019f0000-aaaa-7aaa-8aaa-aaaaaaaaaaaa.jsonl", "")
         let locator = TranscriptLocator(home: home.url)
-        #expect(locator.locate(tool: .codex, hint: SessionHint(sessionID: "019f-aa"), cwd: "/x") == file)
+        #expect(locator.locate(tool: .codex, hint: SessionHint(sessionID: "019f0000-aaaa-7aaa-8aaa-aaaaaaaaaaaa"), cwd: "/x") == file)
         #expect(TranscriptLocator(home: home.url) { _ in nil } openFiles: { _ in [] }
             .locate(tool: .codex, hint: SessionHint(pid: 99), cwd: "/x") == nil)
     }
@@ -246,13 +254,13 @@ struct TranscriptLocatorTests {
     func currentFirst() {
         let home = FakeHome()
         defer { home.remove() }
-        home.write(".claude/sessions/7.json", Rows.json(["sessionId": "after-clear", "cwd": "/w", "startedAt": 1_000_000_000]))
-        let current = home.write(".claude/projects/-w/after-clear.jsonl", "")
-        home.write(".claude/projects/-w/before-clear.jsonl", "")
+        home.write(".claude/sessions/7.json", Rows.json(["sessionId": "dddddddd-0000-4000-8000-0000000000a1", "cwd": "/w", "startedAt": 1_000_000_000]))
+        let current = home.write(".claude/projects/-w/dddddddd-0000-4000-8000-0000000000a1.jsonl", "")
+        home.write(".claude/projects/-w/dddddddd-0000-4000-8000-0000000000b1.jsonl", "")
         let claude = TranscriptLocator(home: home.url, processStart: { _ in Date(timeIntervalSince1970: 1_000_000) }, openFiles: { _ in [] })
-        #expect(claude.locate(tool: .claudeCode, hint: SessionHint(pid: 7, sessionID: "before-clear"), cwd: "/w") == current)
-        #expect(claude.candidates(tool: .claudeCode, hint: SessionHint(pid: 7, sessionID: "before-clear"), cwd: "/w")
-            == [.id("after-clear"), .id("before-clear")])
+        #expect(claude.locate(tool: .claudeCode, hint: SessionHint(pid: 7, sessionID: "dddddddd-0000-4000-8000-0000000000b1"), cwd: "/w") == current)
+        #expect(claude.candidates(tool: .claudeCode, hint: SessionHint(pid: 7, sessionID: "dddddddd-0000-4000-8000-0000000000b1"), cwd: "/w")
+            == [.id("dddddddd-0000-4000-8000-0000000000a1"), .id("dddddddd-0000-4000-8000-0000000000b1")])
         let rollout = home.write(".codex/sessions/2026/11/18/rollout-now-new.jsonl", "")
         home.write(".codex/sessions/2026/11/17/rollout-old-stale.jsonl", "")
         let codex = TranscriptLocator(home: home.url, processStart: { _ in nil }, openFiles: { _ in [rollout.path] })
@@ -309,7 +317,8 @@ struct TranscriptReaderTests {
         let file = home.write("t.jsonl", Rows.claudeUser("hi") + "\n")
         let snapshot = try #require(await TranscriptReader().read(address: "a", url: file, format: .claudeCode))
         #expect(snapshot.rendered?.text == "❯ hi")
-        #expect(snapshot.identity == "\(file.path)|\(snapshot.version)")
+        #expect(snapshot.fileID != nil)
+        #expect(snapshot.identity == "\(file.path)|\(snapshot.fileID ?? 0)|\(snapshot.version)")
     }
 
     @Test("an unfinished line being written doesn't change the version")
@@ -342,12 +351,12 @@ struct TranscriptReaderTests {
         let home = FakeHome()
         defer { home.remove() }
         let locator = TranscriptLocator(home: home.url, processStart: { _ in nil }, openFiles: { _ in [] })
-        let hint = SessionHint(sessionID: "later")
+        let hint = SessionHint(sessionID: "cccccccc-0000-4000-8000-000000000001")
         let cached = TranscriptReader(missTTL: 60)
         let fresh = TranscriptReader(missTTL: 0)
         #expect(await cached.load(address: "a", tool: .claudeCode, hint: hint, cwd: "/w", locator: locator) == nil)
         #expect(await fresh.load(address: "a", tool: .claudeCode, hint: hint, cwd: "/w", locator: locator) == nil)
-        home.write(".claude/projects/-w/later.jsonl", Rows.claudeUser("hi") + "\n")
+        home.write(".claude/projects/-w/cccccccc-0000-4000-8000-000000000001.jsonl", Rows.claudeUser("hi") + "\n")
         #expect(await cached.load(address: "a", tool: .claudeCode, hint: hint, cwd: "/w", locator: locator) == nil)
         #expect(await fresh.load(address: "a", tool: .claudeCode, hint: hint, cwd: "/w", locator: locator)?.entries.count == 1)
     }
@@ -399,7 +408,7 @@ struct TranscriptRenderingTests {
         #expect(styles["  ⎿  a"] == OutputStyling.muted)
     }
 
-    @Test("parallel tool calls: each result goes under its own call, not under the last one")
+    @Test("parallel tool calls: each result goes under its own call; one whose call is cut off isn't shown")
     func parallelCalls() {
         let snapshot = TranscriptSnapshot(path: "/t", entries: [
             TranscriptEntry(.toolCall(name: "Read"), "a", id: "1"),
@@ -414,7 +423,6 @@ struct TranscriptRenderingTests {
 
         ⏺ Read(b)
           ⎿  B
-          ⎿  orphan
         """)
     }
 
@@ -481,11 +489,11 @@ struct TranscriptPanelTests {
     func panelReads() async throws {
         let home = FakeHome()
         defer { home.remove() }
-        home.write(".claude/projects/-x/s-1.jsonl", Rows.claudeUser("hello") + "\n")
+        home.write(".claude/projects/-x/11111111-1111-4111-8111-111111111111.jsonl", Rows.claudeUser("hello") + "\n")
         let h = Harness()
         h.store.transcriptLocator = TranscriptLocator(home: home.url)
         var info = term("t1", "idle")
-        info.labels[SessionHint.idLabel] = "s-1"
+        info.labels[SessionHint.idLabel] = "11111111-1111-4111-8111-111111111111"
         h.connect([info])
         h.store.openPanel("t1")
         let transcript = try #require(await waitForTranscript(h))
@@ -496,11 +504,11 @@ struct TranscriptPanelTests {
     func polls() async throws {
         let home = FakeHome()
         defer { home.remove() }
-        let file = home.write(".claude/projects/-x/s-1.jsonl", Rows.claudeUser("one") + "\n")
+        let file = home.write(".claude/projects/-x/11111111-1111-4111-8111-111111111111.jsonl", Rows.claudeUser("one") + "\n")
         let h = Harness()
         h.store.transcriptLocator = TranscriptLocator(home: home.url)
         var info = term("t1", "idle")
-        info.labels[SessionHint.idLabel] = "s-1"
+        info.labels[SessionHint.idLabel] = "11111111-1111-4111-8111-111111111111"
         h.connect([info])
         h.store.openPanel("t1")
         _ = try #require(await waitForTranscript(h))
@@ -519,11 +527,11 @@ struct TranscriptPanelTests {
     }
 
     fileprivate func transcriptHarness(_ home: FakeHome, state: String = "idle") -> Harness {
-        home.write(".claude/projects/-x/s-1.jsonl", Rows.claudeUser("hello") + "\n")
+        home.write(".claude/projects/-x/11111111-1111-4111-8111-111111111111.jsonl", Rows.claudeUser("hello") + "\n")
         let h = Harness()
         h.store.transcriptLocator = TranscriptLocator(home: home.url, processStart: { _ in nil }, openFiles: { _ in [] })
         var info = term("t1", state, kind: state == "blocked" ? "permission" : nil)
-        info.labels[SessionHint.idLabel] = "s-1"
+        info.labels[SessionHint.idLabel] = "11111111-1111-4111-8111-111111111111"
         h.connect([info])
         return h
     }
@@ -535,7 +543,7 @@ struct TranscriptPanelTests {
         let h = transcriptHarness(home)
         h.store.openPanel("t1")
         _ = try #require(await waitForTranscript(h))
-        try FileManager.default.removeItem(at: home.url.appendingPathComponent(".claude/projects/-x/s-1.jsonl"))
+        try FileManager.default.removeItem(at: home.url.appendingPathComponent(".claude/projects/-x/11111111-1111-4111-8111-111111111111.jsonl"))
         for _ in 0..<2 {
             h.scheduler.advance(by: 2)
             try? await Task.sleep(for: .milliseconds(30))
@@ -556,6 +564,15 @@ struct TranscriptPanelTests {
         #expect(await waitForTranscript(h, tries: 20) == nil)
         h.store.wantsTranscript = true
         _ = try #require(await waitForTranscript(h))
+
+        // Turned off again: the panel drops it.
+        h.store.wantsTranscript = false
+        #expect(h.store.panel?.transcript == nil)
+        h.store.wantsTranscript = true
+        _ = try #require(await waitForTranscript(h))
+        // Needs you: dropped too (the dialog is only on the screen).
+        h.status("t1", "blocked", kind: "permission", seq: 11)
+        #expect(h.store.panel?.transcript == nil)
 
         let waiting = transcriptHarness(home, state: "blocked")
         waiting.store.openPanel("t1")

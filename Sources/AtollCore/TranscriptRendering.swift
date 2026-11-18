@@ -28,7 +28,9 @@ public enum TranscriptRendering {
         }
         var previous: TranscriptEntry.Kind?
         for entry in entries {
-            if entry.kind == .toolResult, let id = entry.id, resultByCall[id] != nil { continue }
+            // Results go under their call; one whose call isn't shown (cut off above) would read as the output of
+            // whatever precedes it, so it isn't shown either.
+            if entry.kind == .toolResult, entry.id != nil { continue }
             let attached = entry.kind == .toolResult || entry.kind == .note
             if previous != nil, !attached { out.line("") }
             switch entry.kind {
@@ -172,13 +174,7 @@ public enum TranscriptRendering {
                 rest = rest.dropFirst()
             }
         }
-        let whole = NSRange(location: 0, length: length)
-        for (regex, style) in [(OutputStyling.url, OutputStyling.link), (OutputStyling.filePath, OutputStyling.path)] {
-            for match in regex.matches(in: plain, range: whole)
-            where !codeRanges.contains(where: { NSIntersectionRange($0, match.range).length > 0 }) {
-                spans.append((match.range, style))
-            }
-        }
+        spans += OutputStyling.linkRuns(plain, excluding: codeRanges).map { (range: $0.0, style: $0.1) }
         let start = out.length
         out.text(plain, base)
         for span in spans {
