@@ -430,3 +430,172 @@ struct TurnChangeTrackerTests {
         #expect(tracker.addresses.isEmpty)
     }
 }
+
+// MARK: - Spaces
+
+@MainActor
+@Suite("SpaceTracker")
+struct SpaceTrackerTests {
+    let client = FakeHerdrClient()
+    let scheduler = FakeScheduler()
+    let tracker: SpaceTracker
+    let timing = AgentStore.Timing()
+    let sp1 = HerdrSpace(id: "sp1", name: "atoll", terminals: ["t1"])
+
+    init() {
+        tracker = SpaceTracker(
+            client: client,
+            scheduler: scheduler,
+            refreshInterval: timing.spaceRefreshInterval,
+            launchTimeout: timing.launchSpacesTimeout
+        )
+    }
+
+    private var renames: Int {
+        client.commands.filter { if case .renameSpace = $0 { true } else { false } }.count
+    }
+
+    @Test("a refresh asked for while a read is in flight runs once after it")
+    func coalesces() async {
+        client.spacesResult = .success([sp1])
+        tracker.appRunning = true
+        tracker.refresh()
+        tracker.refresh()
+        await settle()
+        #expect(client.spacesCalls == 2)
+        scheduler.advance(by: timing.spaceRefreshInterval)
+        await settle()
+        #expect(client.spacesCalls == 3)
+    }
+
+    @Test("a refresh started while a read's result is handled owns the next timer: polling doesn't double")
+    func noStackedTimers() async {
+        // The store's rebuild refreshes again when a changed read leaves a terminal without a space.
+        tracker.onChange = { [tracker] _ in tracker.refresh() }
+        client.spacesResult = .success([sp1])
+        tracker.appRunning = true
+        await settle()
+        #expect(client.spacesCalls == 2)
+        for round in 1...3 {
+            scheduler.advance(by: timing.spaceRefreshInterval)
+            await settle()
+            #expect(client.spacesCalls == 2 + round)
+        }
+    }
+
+    @Test("only a change is reported; a failed read keeps the last spaces; quitting the app empties them")
+    func changesOnly() async {
+        var seen: [[HerdrSpace]] = []
+        tracker.onChange = { seen.append($0) }
+        client.spacesResult = .success([sp1])
+        tracker.appRunning = true
+        await settle()
+        scheduler.advance(by: timing.spaceRefreshInterval)
+        await settle()
+        client.spacesResult = .failure(.unavailable("down"))
+        scheduler.advance(by: timing.spaceRefreshInterval)
+        await settle()
+        #expect(seen == [[sp1]])
+        tracker.appRunning = false
+        #expect(seen == [[sp1], []])
+        scheduler.advance(by: timing.spaceRefreshInterval * 3)
+        await settle()
+        #expect(client.spacesCalls == 3)
+    }
+
+    @Test("a read that lands after the app quit is dropped")
+    func lateReadDropped() async {
+        var seen: [[HerdrSpace]] = []
+        var cached: [[HerdrSpace]] = []
+        tracker.onChange = { seen.append($0) }
+        tracker.onCached = { cached.append($0) }
+        client.spacesResult = .success([sp1])
+        tracker.appRunning = true
+        tracker.appRunning = false
+        await settle()
+        #expect(client.spacesCalls == 1)
+        #expect(seen.isEmpty)
+        #expect(cached.isEmpty)
+        #expect(tracker.cached.isEmpty)
+    }
+
+    @Test("new non-empty spaces replace the cache; an empty read doesn't")
+    func cache() async {
+        var cached: [[HerdrSpace]] = []
+        tracker.onCached = { cached.append($0) }
+        client.spacesResult = .success([sp1])
+        tracker.appRunning = true
+        await settle()
+        client.spacesResult = .success([])
+        scheduler.advance(by: timing.spaceRefreshInterval)
+        await settle()
+        #expect(cached == [[sp1]])
+        #expect(tracker.cached == [sp1])
+    }
+
+    @Test("a failed rename is tried again on the next read; a done one drops its pending name")
+    func renameRetry() async {
+        var names: [[String: String]] = []
+        tracker.onPendingNamesChange = { names.append($0) }
+        tracker.snapshotArrived = { true }
+        tracker.pendingNames = ["sp1": "named"]
+        client.spacesResult = .success([sp1])
+        client.renameResult = .failure(.unavailable("busy"))
+        tracker.appRunning = true
+        await settle()
+        #expect(renames == 1)
+        #expect(tracker.pendingNames == ["sp1": "named"])
+        client.renameResult = .success(())
+        scheduler.advance(by: timing.spaceRefreshInterval)
+        await settle()
+        #expect(renames == 2)
+        #expect(tracker.pendingNames.isEmpty)
+        #expect(names == [["sp1": "named"], [:]])
+    }
+
+    @Test("pending names wait for the snapshot; then one no live terminal is labelled for is dropped")
+    func orphans() async {
+        tracker.pendingNames = ["gone": "a", "kept": "b"]
+        tracker.liveSpaceIDs = { ["kept"] }
+        tracker.snapshotArrived = { false }
+        tracker.appRunning = true
+        await settle()
+        #expect(tracker.pendingNames.count == 2)
+        tracker.snapshotArrived = { true }
+        scheduler.advance(by: timing.spaceRefreshInterval)
+        await settle()
+        #expect(tracker.pendingNames == ["kept": "b"])
+        #expect(renames == 0)
+    }
+
+    @Test("launch spaces: offline without the app; with it, its answer, or the offline ones after the timeout")
+    func launchSpaces() async {
+        tracker.cached = [HerdrSpace(id: "sp1", name: "a")]
+        #expect(await tracker.launchSpaces().map(\.id) == ["sp1"])
+        #expect(client.spacesCalls == 0)
+
+        client.spacesResult = .success([HerdrSpace(id: "live", name: "live")])
+        tracker.appRunning = true
+        await settle()
+        #expect(await tracker.launchSpaces().map(\.id) == ["live"])
+
+        tracker.cached = [HerdrSpace(id: "sp1", name: "a")]
+        client.spacesHang = true
+        let read = Task { await tracker.launchSpaces() }
+        await settle()
+        scheduler.advance(by: timing.launchSpacesTimeout)
+        #expect(await read.value.map(\.id) == ["sp1"])
+    }
+
+    @Test("an unlisted terminal triggers one refresh while the app runs, again only after it is removed")
+    func misses() async {
+        #expect(!tracker.claimMiss("t1"))
+        tracker.appRunning = true
+        await settle()
+        #expect(tracker.claimMiss("t1"))
+        #expect(!tracker.claimMiss("t1"))
+        tracker.remove("t1")
+        #expect(tracker.addresses.isEmpty)
+        #expect(tracker.claimMiss("t1"))
+    }
+}
