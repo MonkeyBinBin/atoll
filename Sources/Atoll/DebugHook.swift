@@ -96,6 +96,20 @@ final class DebugHook {
             case "interrupt": if parts.count > 1 { model.store.pressInterrupt(parts[1]) }
             case "earliest": model.openEarliestWaiting()
             case "bubble": if parts.count > 1 { onBubble?(parts[1]) }
+            case "tlocate":
+                // tlocate: how the open panel's agent maps to a transcript (ids shortened, file name only).
+                if let address = model.store.panel?.address, let agent = model.store.agent(address) {
+                    let locator = model.store.transcriptLocator
+                    let candidates = locator.candidates(tool: agent.tool, hint: agent.session, cwd: agent.projectPath).map { candidate in
+                        switch candidate {
+                        case .file(let url): "file:\(url.lastPathComponent)"
+                        case .id(let id): "id:\(id.prefix(8))"
+                        }
+                    }
+                    let url = locator.locate(tool: agent.tool, hint: agent.session, cwd: agent.projectPath)
+                    let line = "tool=\(agent.tool) candidates=\(candidates) file=\(url?.lastPathComponent ?? "none") panelTranscript=\(model.store.panel?.transcript.map { "\($0.entries.count)" } ?? "none")"
+                    try? line.write(to: dir.appendingPathComponent("tlocate.txt"), atomically: true, encoding: .utf8)
+                }
             case "hour":
                 // hour <0-24> | hour off: pin the backdrop's time of day
                 SkyClock.shared.overrideHour = parts.count > 1 ? Double(parts[1]) : nil
@@ -280,7 +294,7 @@ final class DebugHook {
         view.cacheDisplay(in: bounds, to: rep)
         let data = rep.representation(using: .png, properties: [:])
         try? data?.write(to: dir.appendingPathComponent("\(name).png"))
-        let info = "frame=\(panel.frame) agents=\(model.store.agents.map { "\($0.address):\($0.state.label)" }) mode=\(model.mode) key=\(panel.isKeyWindow) selection=\(model.selection) live=\(model.store.isLive) send=\(model.store.sendStates) keys=\(model.store.keyStates) answers=\(model.store.listAnswers) queued=\(model.store.queuedMessages) notices=\(model.store.queueNotices) choices=\(model.store.agents.compactMap { a in a.permissionChoices.map { "\(a.address):\($0.allowKey)/\($0.denyKey)" } }) interrupt=\(model.store.interruptStates) feedback=\(model.store.agents.compactMap { a in a.interruptFeedback.map { o in "\(a.address):\(o)" } }) launch=\(model.store.launchState) visible=\(panel.isVisible) fullscreen=\(model.fullScreen) hidden=\(model.hiddenByFullScreen) collapsed=\(model.collapsedAgents?.map(\.address) ?? []) pinned=\(model.pinned) search=\(model.outputSearch.map { "\($0.query)|\($0.counter ?? "-")" } ?? "closed") searchFocused=\(model.searchFieldFocused)\n"
+        let info = "frame=\(panel.frame) agents=\(model.store.agents.map { "\($0.address):\($0.state.label)" }) mode=\(model.mode) key=\(panel.isKeyWindow) selection=\(model.selection) live=\(model.store.isLive) send=\(model.store.sendStates) keys=\(model.store.keyStates) answers=\(model.store.listAnswers) queued=\(model.store.queuedMessages) notices=\(model.store.queueNotices) choices=\(model.store.agents.compactMap { a in a.permissionChoices.map { "\(a.address):\($0.allowKey)/\($0.denyKey)" } }) interrupt=\(model.store.interruptStates) feedback=\(model.store.agents.compactMap { a in a.interruptFeedback.map { o in "\(a.address):\(o)" } }) launch=\(model.store.launchState) visible=\(panel.isVisible) fullscreen=\(model.fullScreen) hidden=\(model.hiddenByFullScreen) collapsed=\(model.collapsedAgents?.map(\.address) ?? []) pinned=\(model.pinned) search=\(model.outputSearch.map { "\($0.query)|\($0.counter ?? "-")" } ?? "closed") searchFocused=\(model.searchFieldFocused) transcript=\(model.store.panel?.transcript.map { "\($0.entries.count)" } ?? "none") sessions=\(model.store.agents.map { "\($0.address):pid=\($0.session.pid.map(String.init) ?? "-"),id=\($0.session.sessionID.map { String($0.prefix(8)) } ?? "-"),cwd=\($0.projectPath)" })\n"
         try? info.write(to: dir.appendingPathComponent("\(name).txt"), atomically: true, encoding: .utf8)
     }
 }

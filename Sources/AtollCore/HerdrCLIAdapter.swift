@@ -206,6 +206,17 @@ public final class HerdrCLIAdapter: HerdrClient, Sendable {
         }
     }
 
+    /// herdr's `agent_session` (`{kind: "id" | "path", value}`, reported by its agent integrations) as session labels.
+    static func sessionLabels(_ value: Any?) -> [String: String] {
+        guard let session = value as? [String: Any], let kind = session["kind"] as? String,
+              let ref = session["value"] as? String, !ref.isEmpty else { return [:] }
+        switch kind {
+        case "id": return [SessionHint.idLabel: ref]
+        case "path": return [SessionHint.pathLabel: ref]
+        default: return [:]
+        }
+    }
+
     static func terminalInfo(_ a: [String: Any]) -> TerminalInfo? {
         guard let term = a["terminal_id"] as? String else { return nil }
         let status = (a["agent_status"] as? String).map { word -> String in
@@ -221,7 +232,7 @@ public final class HerdrCLIAdapter: HerdrClient, Sendable {
             reported: true,
             turn: (a["completion_seq"] as? NSNumber)?.uint64Value ?? 0,
             title: (a["terminal_title_stripped"] as? String) ?? "",
-            labels: ["atoll.herdr.pane": (a["pane_id"] as? String) ?? ""]
+            labels: sessionLabels(a["agent_session"]).merging(["atoll.herdr.pane": (a["pane_id"] as? String) ?? ""]) { $1 }
         )
         info.foreground = CoreForeground(cwd: cwd)
         return info
@@ -244,7 +255,14 @@ public final class HerdrCLIAdapter: HerdrClient, Sendable {
                 events.append(.turn(terminal: info.address, turn: info.turn, state: info.status?.state))
             }
             if before.cwd != info.cwd {
-                events.append(.foreground(terminal: info.address, foreground: CoreForeground(cwd: info.cwd)))
+                // Keep what else the source knows of the foreground process (cmux: its pid).
+                var foreground = info.foreground ?? CoreForeground()
+                foreground.cwd = info.cwd
+                events.append(.foreground(terminal: info.address, foreground: foreground))
+            }
+            if before.labels != info.labels {
+                // cmux: `/clear` starts a new session id under the same agent.
+                events.append(.labels(terminal: info.address, labels: info.labels))
             }
             if before.title != info.title {
                 events.append(.title(terminal: info.address, title: info.title))

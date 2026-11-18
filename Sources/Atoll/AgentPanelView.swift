@@ -226,21 +226,27 @@ struct AgentPanelView: View {
             // Refreshed output, Messages only flipped, or back from the changes view: match the text as shown.
             .onChange(of: text, initial: true) { _, text in model.outputSearch?.update(text: text) }
             HStack(spacing: 8) {
-                if let fetched = panel?.fetchedAt {
+                // Fetch time, read errors and the spinner are the screen read's: not shown over the transcript.
+                if !rendered.fromTranscript, let fetched = panel?.fetchedAt {
                     Text("Fetched at \(Format.clockSeconds.string(from: fetched))")
                 }
-                if panel?.output?.isScreenOnly == true || agent.state == .working || agent.state.isNeedsYou {
+                if rendered.fromTranscript {
+                    Text("Transcript")
+                        .padding(.horizontal, 5)
+                        .background(Capsule().strokeBorder(Color.secondary.opacity(0.6)))
+                        .help("The conversation from the agent's session file; turn off Messages only for the terminal screen")
+                } else if panel?.output?.isScreenOnly == true || agent.state == .working || agent.state.isNeedsYou {
                     Text("Screen only")
                         .padding(.horizontal, 5)
                         .background(Capsule().strokeBorder(Color.secondary.opacity(0.6)))
                 }
-                if let error = panel?.error {
+                if !rendered.fromTranscript, let error = panel?.error {
                     Text("Couldn't read output: \(error.message)")
                         .foregroundStyle(PixelPalette.error.color)
                         .lineLimit(1)
                 }
                 Spacer()
-                if panel?.isLoading == true {
+                if !rendered.fromTranscript, panel?.isLoading == true {
                     ProgressView().controlSize(.mini)
                 }
                 Toggle("Messages only", isOn: Binding(get: { settings.messagesOnly }, set: { settings.messagesOnly = $0 }))
@@ -313,8 +319,10 @@ struct AgentPanelView: View {
     }
 
     private func renderedOutput(_ panel: PanelState?) -> RenderedOutputCache.Value {
-        outputCache.value(output: panel?.output, isLoading: panel?.isLoading == true, messagesOnly: settings.messagesOnly,
-                          tool: agent.tool, app: agent.app)
+        // The store decides when there is one to show (Messages only, not Needs you).
+        let transcript = panel?.transcript
+        return outputCache.value(output: panel?.output, transcript: transcript, isLoading: panel?.isLoading == true,
+                                 messagesOnly: settings.messagesOnly, tool: agent.tool, app: agent.app)
     }
 
     // MARK: Reply
@@ -678,10 +686,12 @@ struct OpenTarget {
 /// The shown output and its colors, worked out again only when the read or the Messages setting changes: the panel
 /// re-renders on every keystroke in the reply box and every store update. Not observed; read and filled in `body`.
 final class RenderedOutputCache {
-    typealias Value = (text: String, styles: [StyledRun])
+    typealias Value = (text: String, styles: [StyledRun], fromTranscript: Bool)
 
     private struct Key: Equatable {
         var output: ReadOutput?
+        /// `TranscriptSnapshot.identity`: it changes whenever the entries can have.
+        var transcript: String?
         var isLoading: Bool
         var messagesOnly: Bool
         var tool: AgentTool
@@ -689,22 +699,34 @@ final class RenderedOutputCache {
     }
 
     private var key: Key?
-    private var cached: Value = ("", [])
+    private var cached: Value = ("", [], false)
 
-    func value(output: ReadOutput?, isLoading: Bool, messagesOnly: Bool, tool: AgentTool, app: String?) -> Value {
+    /// The transcript wins when given and not empty; otherwise the terminal output, as before.
+    func value(output: ReadOutput?, transcript: TranscriptSnapshot? = nil, isLoading: Bool, messagesOnly: Bool,
+               tool: AgentTool, app: String?) -> Value {
+        let transcript = transcript.flatMap { $0.entries.isEmpty ? nil : $0 }
         // Loading only changes what is shown while there is no output yet.
-        let key = Key(output: output, isLoading: output == nil && isLoading, messagesOnly: messagesOnly, tool: tool, app: app)
+        let key = Key(output: transcript == nil ? output : nil,
+                      transcript: transcript?.identity,
+                      isLoading: output == nil && transcript == nil && isLoading,
+                      messagesOnly: messagesOnly, tool: tool, app: app)
         if key == self.key { return cached }
         self.key = key
+        if let transcript {
+            // Laid out by the reader, off the main actor; by hand only for snapshots built elsewhere.
+            let rendered = transcript.rendered ?? TranscriptRendering.render(transcript)
+            cached = (rendered.text, rendered.runs, true)
+            return cached
+        }
         guard let output else {
-            cached = (isLoading ? "Loading…" : "", [])
+            cached = (isLoading ? "Loading…" : "", [], false)
             return cached
         }
         let filtered = messagesOnly
             ? OutputFilter.messages(output.text, tool: tool, app: app)
             : OutputFilter.clean(output.text)
         let text = filtered.split(separator: "\n", omittingEmptySubsequences: false).suffix(200).joined(separator: "\n")
-        cached = (text, OutputStyling.runs(shown: text, source: output))
+        cached = (text, OutputStyling.runs(shown: text, source: output), false)
         return cached
     }
 }

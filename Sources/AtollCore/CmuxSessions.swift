@@ -149,7 +149,7 @@ public struct CmuxSessions: Sendable {
                     status: CoreStatus(state: status(of: session), app: session.app, kind: kind(of: session)),
                     statusMs: session.lastHookMs,
                     reported: true,
-                    labels: ["atoll.cmux.surface": session.surfaceID]
+                    labels: ["atoll.cmux.surface": session.surfaceID, SessionHint.idLabel: session.sessionID]
                 )
                 info.foreground = CoreForeground(pid: session.pid.map(Int.init), cwd: session.cwd)
                 return info
@@ -166,6 +166,37 @@ public struct CmuxSessions: Sendable {
 public enum ProcessInspector {
     public static func isAlive(_ pid: Int32) -> Bool {
         kill(pid, 0) == 0 || errno == EPERM
+    }
+
+    /// Paths of the files the process has open (libproc), empty when it can't be read.
+    public static func openFiles(_ pid: Int32) -> [String] {
+        let bytes = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, nil, 0)
+        guard bytes > 0 else { return [] }
+        let stride = MemoryLayout<proc_fdinfo>.stride
+        var fds = [proc_fdinfo](repeating: proc_fdinfo(), count: Int(bytes) / stride + 16)
+        let filled = fds.withUnsafeMutableBytes { proc_pidinfo(pid, PROC_PIDLISTFDS, 0, $0.baseAddress, Int32($0.count)) }
+        guard filled > 0 else { return [] }
+        var paths: [String] = []
+        for fd in fds.prefix(Int(filled) / stride) where fd.proc_fdtype == UInt32(PROX_FDTYPE_VNODE) {
+            var info = vnode_fdinfowithpath()
+            let size = Int32(MemoryLayout<vnode_fdinfowithpath>.stride)
+            guard proc_pidfdinfo(pid, fd.proc_fd, PROC_PIDFDVNODEPATHINFO, &info, size) == size else { continue }
+            let path = withUnsafeBytes(of: info.pvip.vip_path) { raw in
+                String(decoding: raw.prefix { $0 != 0 }, as: UTF8.self)
+            }
+            if !path.isEmpty { paths.append(path) }
+        }
+        return paths
+    }
+
+    /// When the process started (sysctl KERN_PROC_PID); nil when it isn't running.
+    public static func startTime(_ pid: Int32) -> Date? {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        guard sysctl(&mib, 4, &info, &size, nil, 0) == 0, size > 0, info.kp_proc.p_pid == pid else { return nil }
+        let start = info.kp_proc.p_un.__p_starttime
+        return Date(timeIntervalSince1970: Double(start.tv_sec) + Double(start.tv_usec) / 1_000_000)
     }
 
     public static func environment(of pid: Int32) -> [String: String]? {

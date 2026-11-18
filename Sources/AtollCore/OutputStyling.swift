@@ -184,14 +184,24 @@ public enum OutputStyling {
             add(match.range, code)
             taken.append(match.range)
         }
+        for (range, style) in linkRuns(row, excluding: taken) { add(range, style) }
+        for match in boxDrawing.matches(in: row, range: whole) { add(match.range, muted) }
+    }
+
+    /// Links, then file paths, in `text` outside `excluding` (code) and not inside each other. Shared with the
+    /// transcript's markdown.
+    static func linkRuns(_ text: String, excluding: [NSRange]) -> [(NSRange, TermStyle)] {
+        let whole = NSRange(location: 0, length: (text as NSString).length)
+        var taken = excluding
+        var runs: [(NSRange, TermStyle)] = []
         for (regex, style) in [(url, link), (filePath, path)] {
-            for match in regex.matches(in: row, range: whole)
+            for match in regex.matches(in: text, range: whole)
             where !taken.contains(where: { NSIntersectionRange($0, match.range).length > 0 }) {
-                add(match.range, style)
+                runs.append((match.range, style))
                 taken.append(match.range)
             }
         }
-        for match in boxDrawing.matches(in: row, range: whole) { add(match.range, muted) }
+        return runs
     }
 
     private static func isDiffRow(_ row: String) -> Bool {
