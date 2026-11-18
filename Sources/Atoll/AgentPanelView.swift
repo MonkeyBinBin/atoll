@@ -689,7 +689,7 @@ final class RenderedOutputCache {
 
     private struct Key: Equatable {
         var output: ReadOutput?
-        /// The transcript's path, bytes read and entry count: it changes whenever the entries can have.
+        /// `TranscriptSnapshot.identity`: it changes whenever the entries can have.
         var transcript: String?
         var isLoading: Bool
         var messagesOnly: Bool
@@ -706,13 +706,14 @@ final class RenderedOutputCache {
         let transcript = transcript.flatMap { $0.entries.isEmpty ? nil : $0 }
         // Loading only changes what is shown while there is no output yet.
         let key = Key(output: transcript == nil ? output : nil,
-                      transcript: transcript.map { "\($0.path)|\($0.version)|\($0.entries.count)" },
+                      transcript: transcript?.identity,
                       isLoading: output == nil && transcript == nil && isLoading,
                       messagesOnly: messagesOnly, tool: tool, app: app)
         if key == self.key { return cached }
         self.key = key
         if let transcript {
-            let rendered = TranscriptRendering.render(transcript)
+            // Laid out by the reader, off the main actor; by hand only for snapshots built elsewhere.
+            let rendered = transcript.rendered ?? TranscriptRendering.render(transcript)
             cached = (rendered.text, rendered.runs, true)
             return cached
         }

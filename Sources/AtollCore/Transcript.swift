@@ -206,7 +206,13 @@ public enum TranscriptParser {
     static func toolOutput(_ content: Any?) -> String? {
         let text: String
         if let string = content as? String {
-            text = string
+            // Some Codex versions store `{"output": "...", "metadata": {...}}` as a string.
+            if string.hasPrefix("{"), let data = string.data(using: .utf8),
+               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let output = object["output"] as? String {
+                text = output
+            } else {
+                text = string
+            }
         } else if let blocks = content as? [[String: Any]] {
             text = blocks.compactMap { $0["text"] as? String }.joined(separator: "\n")
         } else if let object = content as? [String: Any], let output = object["output"] as? String {

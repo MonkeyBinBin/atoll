@@ -124,6 +124,10 @@ struct TranscriptParserTests {
         #expect(parse(patch, .codex) == [TranscriptEntry(.toolCall(name: "apply_patch"), "*** Begin Patch")])
         let output = Rows.codex(["type": "function_call_output", "output": "On branch main"])
         #expect(parse(output, .codex) == [TranscriptEntry(.toolResult, "On branch main")])
+        let encoded = Rows.codex(["type": "function_call_output", "output": #"{"output":"total 8","metadata":{"exit_code":0}}"#])
+        #expect(parse(encoded, .codex) == [TranscriptEntry(.toolResult, "total 8")])
+        let blocks = Rows.codex(["type": "custom_tool_call_output", "output": [["type": "input_text", "text": "done"], ["type": "input_image"]]])
+        #expect(parse(blocks, .codex) == [TranscriptEntry(.toolResult, "done")])
         #expect(parse(Rows.json(["type": "event_msg", "payload": ["type": "task_complete"]]), .codex).isEmpty)
     }
 }
@@ -165,10 +169,9 @@ struct TranscriptLocatorTests {
         // A reused pid: this process started long after the file's.
         let reused = TranscriptLocator(home: home.url) { _ in Date(timeIntervalSince1970: 2_000_000) }
         #expect(reused.locate(tool: .claudeCode, hint: SessionHint(pid: 4242), cwd: "/Users/me/my.app") == nil)
-        // No start time: the cwd decides.
-        let unknown = TranscriptLocator(home: home.url) { _ in nil }
-        #expect(unknown.locate(tool: .claudeCode, hint: SessionHint(pid: 4242), cwd: "/Users/me/my.app") == file)
-        #expect(unknown.locate(tool: .claudeCode, hint: SessionHint(pid: 4242), cwd: "/Users/me/other") == nil)
+        // No start time: the process is gone, so its file is stale, whatever its cwd.
+        let gone = TranscriptLocator(home: home.url) { _ in nil }
+        #expect(gone.locate(tool: .claudeCode, hint: SessionHint(pid: 4242), cwd: "/Users/me/my.app") == nil)
         #expect(same.locate(tool: .claudeCode, hint: SessionHint(pid: 1), cwd: "/Users/me/my.app") == nil)
     }
 
@@ -286,6 +289,29 @@ struct TranscriptReaderTests {
         #expect(third.entries.map(\.text) == ["new"])
     }
 
+    @Test("a file replaced at the same path (another inode) is read afresh, even when it is longer")
+    func replacedFile() async throws {
+        let home = FakeHome()
+        defer { home.remove() }
+        let file = home.write("t.jsonl", Rows.claudeUser("old") + "\n")
+        let reader = TranscriptReader()
+        _ = try #require(await reader.read(address: "a", url: file, format: .claudeCode))
+        let replacement = home.write("new.jsonl", Rows.claudeUser("new one") + "\n" + Rows.claudeUser("new two") + "\n")
+        _ = try FileManager.default.replaceItemAt(file, withItemAt: replacement)
+        let snapshot = try #require(await reader.read(address: "a", url: file, format: .claudeCode))
+        #expect(snapshot.entries.map(\.text) == ["new one", "new two"])
+    }
+
+    @Test("the reader lays the panel text out, again only when the entries change")
+    func renderedByReader() async throws {
+        let home = FakeHome()
+        defer { home.remove() }
+        let file = home.write("t.jsonl", Rows.claudeUser("hi") + "\n")
+        let snapshot = try #require(await TranscriptReader().read(address: "a", url: file, format: .claudeCode))
+        #expect(snapshot.rendered?.text == "❯ hi")
+        #expect(snapshot.identity == "\(file.path)|\(snapshot.version)")
+    }
+
     @Test("an unfinished line being written doesn't change the version")
     func versionCountsCompleteLines() async throws {
         let home = FakeHome()
@@ -343,7 +369,7 @@ struct TranscriptReaderTests {
 
 @Suite("Transcript rendering")
 struct TranscriptRenderingTests {
-    func pieces(_ rendered: (text: String, runs: [StyledRun])) -> [String: TermStyle] {
+    func pieces(_ rendered: TranscriptRendering.Output) -> [String: TermStyle] {
         Dictionary(rendered.runs.map { ((rendered.text as NSString).substring(with: $0.range), $0.style) }, uniquingKeysWith: { a, _ in a })
     }
 
@@ -390,6 +416,17 @@ struct TranscriptRenderingTests {
           ⎿  B
           ⎿  orphan
         """)
+    }
+
+    @Test("markers with no partner or nothing inside are kept as typed")
+    func unpairedMarkers() {
+        func render(_ text: String) -> TranscriptRendering.Output {
+            TranscriptRendering.render(TranscriptSnapshot(path: "/t", entries: [TranscriptEntry(.assistant, text)], version: 1))
+        }
+        #expect(render("costs `5 and **more").text == "⏺ costs `5 and **more")
+        #expect(render("empty `` and ****").text == "⏺ empty `` and ****")
+        let closed = TranscriptRendering.render(TranscriptSnapshot(path: "/t", entries: [TranscriptEntry(.assistant, "`x` and **y**")], version: 1))
+        #expect(closed.text == "⏺ x and y")
     }
 
     @Test("only the newest entries that fit the row budget are laid out")

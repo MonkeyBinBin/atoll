@@ -4,7 +4,13 @@ import Foundation
 /// and tool calls, `⎿` tool output; reply markdown is styled and its markers dropped (headings, bold, backticks).
 public enum TranscriptRendering {
     /// Only the newest entries that fit in about `maxRows` rows are laid out: the panel is built on the main actor.
-    public static func render(_ snapshot: TranscriptSnapshot, maxRows: Int = 2000) -> (text: String, runs: [StyledRun]) {
+    /// Panel text and its colors.
+    public struct Output: Equatable, Sendable {
+        public var text: String
+        public var runs: [StyledRun]
+    }
+
+    public static func render(_ snapshot: TranscriptSnapshot, maxRows: Int = 2000) -> Output {
         var out = Builder()
         let start = firstShown(snapshot.entries, maxRows: maxRows)
         if snapshot.startsMidway || start > 0 {
@@ -43,7 +49,7 @@ public enum TranscriptRendering {
             }
             previous = entry.kind
         }
-        return (out.result, out.runs)
+        return Output(text: out.result, runs: out.runs)
     }
 
     /// The first entry kept so the rows (each entry's lines plus its blank line) stay within `maxRows`; the newest
@@ -120,29 +126,53 @@ public enum TranscriptRendering {
     /// outside code. `base` styles the rest.
     static func inline(_ text: String, base: TermStyle?, into out: inout Builder) {
         var plain = ""
+        /// UTF-16 length of `plain`, kept as it grows (bridging the whole string per span would be quadratic).
+        var length = 0
         var spans: [(range: NSRange, style: TermStyle)] = []
         var codeRanges: [NSRange] = []
         var rest = Substring(text)
-        func length(_ s: String) -> Int { (s as NSString).length }
+        // A marker with no partner means none follows either: stop looking for that kind.
+        var codeOpen = true
+        var boldOpen = true
+        func append(_ s: Substring) {
+            plain += s
+            length += s.utf16.count
+        }
         while !rest.isEmpty {
-            if rest.hasPrefix("`"), let close = rest.dropFirst().firstIndex(of: "`"), close > rest.index(after: rest.startIndex) {
-                let code = String(rest[rest.index(after: rest.startIndex)..<close])
-                let range = NSRange(location: length(plain), length: length(code))
-                spans.append((range, OutputStyling.code))
-                codeRanges.append(range)
-                plain += code
+            if codeOpen, rest.first == "`" {
+                guard let close = rest.dropFirst().firstIndex(of: "`") else {
+                    codeOpen = false
+                    continue
+                }
+                let code = rest[rest.index(after: rest.startIndex)..<close]
+                if !code.isEmpty {
+                    let range = NSRange(location: length, length: code.utf16.count)
+                    spans.append((range, OutputStyling.code))
+                    codeRanges.append(range)
+                    append(code)
+                } else {
+                    append("``")
+                }
                 rest = rest[rest.index(after: close)...]
-            } else if rest.hasPrefix("**"), let close = rest.dropFirst(2).range(of: "**"),
-                      close.lowerBound > rest.index(rest.startIndex, offsetBy: 2) {
-                let bold = String(rest[rest.index(rest.startIndex, offsetBy: 2)..<close.lowerBound])
-                spans.append((NSRange(location: length(plain), length: length(bold)), OutputStyling.bold))
-                plain += bold
+            } else if boldOpen, rest.hasPrefix("**") {
+                guard let close = rest.dropFirst(2).range(of: "**") else {
+                    boldOpen = false
+                    continue
+                }
+                let bold = rest[rest.index(rest.startIndex, offsetBy: 2)..<close.lowerBound]
+                if !bold.isEmpty {
+                    spans.append((NSRange(location: length, length: bold.utf16.count), OutputStyling.bold))
+                    append(bold)
+                } else {
+                    append("****")
+                }
                 rest = rest[close.upperBound...]
             } else {
-                plain.append(rest.removeFirst())
+                append(rest.prefix(1))
+                rest = rest.dropFirst()
             }
         }
-        let whole = NSRange(location: 0, length: length(plain))
+        let whole = NSRange(location: 0, length: length)
         for (regex, style) in [(OutputStyling.url, OutputStyling.link), (OutputStyling.filePath, OutputStyling.path)] {
             for match in regex.matches(in: plain, range: whole)
             where !codeRanges.contains(where: { NSIntersectionRange($0, match.range).length > 0 }) {

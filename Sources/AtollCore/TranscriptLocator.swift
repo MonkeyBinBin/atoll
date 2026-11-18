@@ -68,7 +68,7 @@ public struct TranscriptLocator: Sendable {
         var list: [Candidate] = []
         switch tool {
         case .claudeCode:
-            if let pid = hint.pid, let id = claudeSessionID(pid: pid, cwd: cwd) { list.append(.id(id)) }
+            if let pid = hint.pid, let id = claudeSessionID(pid: pid) { list.append(.id(id)) }
         case .codex:
             if let url = openTranscript(tool: tool, hint: hint) { list.append(.file(url)) }
         case .generic:
@@ -112,16 +112,15 @@ public struct TranscriptLocator: Sendable {
 
     /// Claude Code keeps `~/.claude/sessions/<pid>.json` with the process's current session id. The file must belong
     /// to this process, not an earlier one with a reused pid: its `startedAt` within a short while of the process's
-    /// start (measured 0.3–1.6 s apart), or, when the start time can't be read, its cwd the agent's.
-    func claudeSessionID(pid: Int, cwd: String) -> String? {
+    /// start (measured 0.3–1.6 s apart).
+    func claudeSessionID(pid: Int) -> String? {
         let url = home.appendingPathComponent(".claude/sessions/\(pid).json")
         guard let data = try? Data(contentsOf: url),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let id = object["sessionId"] as? String, !id.isEmpty else { return nil }
-        if let started = (object["startedAt"] as? NSNumber)?.doubleValue, let processStart = processStart(pid) {
-            return abs(started / 1000 - processStart.timeIntervalSince1970) <= 30 ? id : nil
-        }
-        return (object["cwd"] as? String).map({ Self.samePath($0, cwd) }) == true ? id : nil
+        // A running process's start time can always be read: none means it is gone, and its file is stale.
+        guard let started = (object["startedAt"] as? NSNumber)?.doubleValue, let processStart = processStart(pid) else { return nil }
+        return abs(started / 1000 - processStart.timeIntervalSince1970) <= 30 ? id : nil
     }
 
     /// `~/.claude/projects/<cwd with every non-alphanumeric as "-">/<id>.jsonl`, else any project folder holding it.
@@ -173,15 +172,5 @@ public struct TranscriptLocator: Sendable {
     /// Session ids are uuids or similar: never a path.
     static func isSafeName(_ id: String) -> Bool {
         !id.isEmpty && id.count <= 128 && id.allSatisfy { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
-    }
-
-    static func samePath(_ a: String, _ b: String) -> Bool {
-        func normalized(_ path: String) -> String {
-            var p = (path as NSString).standardizingPath
-            // /tmp and /var are /private/... on macOS.
-            if p.hasPrefix("/private/") { p = String(p.dropFirst("/private".count)) }
-            return p
-        }
-        return normalized(a) == normalized(b)
     }
 }

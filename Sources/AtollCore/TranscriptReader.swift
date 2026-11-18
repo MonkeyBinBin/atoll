@@ -8,18 +8,26 @@ public struct TranscriptSnapshot: Equatable, Sendable {
     public var version: UInt64
     /// Reading started partway into a long file, so older entries are missing.
     public var startsMidway: Bool
+    /// The panel text, laid out off the main actor by the reader (nil when built by hand).
+    public var rendered: TranscriptRendering.Output?
 
-    public init(path: String, entries: [TranscriptEntry], version: UInt64, startsMidway: Bool = false) {
+    public init(path: String, entries: [TranscriptEntry], version: UInt64, startsMidway: Bool = false,
+                rendered: TranscriptRendering.Output? = nil) {
         self.path = path
         self.entries = entries
         self.version = version
         self.startsMidway = startsMidway
+        self.rendered = rendered
     }
+
+    /// Changes whenever the entries can have: what caches and the store compare.
+    public var identity: String { "\(path)|\(version)" }
 }
 
 /// Reads transcripts incrementally, off the main actor: per agent it keeps the file, how far it has read, the
 /// unfinished last line and the parsed entries, so a refresh only parses what was appended. A long file is read
-/// from its tail only. A different file, or one that got shorter, starts over.
+/// from its tail only. A different file (path or inode), or one that got shorter, starts over. The panel text is laid
+/// out here too, whenever the entries changed, so the main actor only shows it.
 public actor TranscriptReader {
     private struct State {
         var path: String
@@ -28,6 +36,10 @@ public actor TranscriptReader {
         var pending = Data()
         var entries: [TranscriptEntry] = []
         var startsMidway = false
+        /// The file's inode: a file replaced at the same path is read afresh.
+        var fileID: Int?
+        var rendered: TranscriptRendering.Output?
+        var renderedVersion: UInt64?
     }
 
     private var states: [String: State] = [:]
@@ -53,13 +65,15 @@ public actor TranscriptReader {
         }
         defer { try? handle.close() }
         guard let size = try? handle.seekToEnd() else { return nil }
-        var state = states[address].flatMap { $0.path == url.path && $0.format == format && $0.offset <= size ? $0 : nil }
-            ?? State(path: url.path, format: format, offset: 0)
+        let fileID = (try? FileManager.default.attributesOfItem(atPath: url.path)[.systemFileNumber]) as? Int
+        var state = states[address].flatMap {
+            $0.path == url.path && $0.format == format && $0.offset <= size && $0.fileID == fileID ? $0 : nil
+        } ?? State(path: url.path, format: format, offset: 0, fileID: fileID)
         var dropFirstLine = false
         if size - state.offset > window {
             // First read of a long file, or it grew by more than the window since: only its tail. Unless the window
             // starts right after a newline, its first line is a fragment.
-            state = State(path: url.path, format: format, offset: size - window, startsMidway: true)
+            state = State(path: url.path, format: format, offset: size - window, startsMidway: true, fileID: fileID)
             try? handle.seek(toOffset: state.offset - 1)
             dropFirstLine = (try? handle.read(upToCount: 1)) != Data([UInt8(ascii: "\n")])
         }
@@ -72,8 +86,7 @@ public actor TranscriptReader {
                 // The window starts inside a line: skip to the next one.
                 guard let newline = data.firstIndex(of: UInt8(ascii: "\n")) else {
                     state.pending = Data()
-                    states[address] = state
-                    return snapshot(state)
+                    return finish(&state, address: address)
                 }
                 data = data[(newline + 1)...]
             }
@@ -89,8 +102,19 @@ public actor TranscriptReader {
                 state.startsMidway = true
             }
         }
+        return finish(&state, address: address)
+    }
+
+    /// Lays the text out again when the entries changed, keeps the state, and returns the snapshot.
+    private func finish(_ state: inout State, address: String) -> TranscriptSnapshot {
+        var shot = snapshot(state)
+        if state.renderedVersion != shot.version || state.rendered == nil {
+            state.rendered = TranscriptRendering.render(shot)
+            state.renderedVersion = shot.version
+        }
+        shot.rendered = state.rendered
         states[address] = state
-        return snapshot(state)
+        return shot
     }
 
     /// Finds the agent's transcript and reads it; nil when there is none to show (no certain link, or unreadable). A
