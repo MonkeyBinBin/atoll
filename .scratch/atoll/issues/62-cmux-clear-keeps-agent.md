@@ -44,7 +44,12 @@
   - **stream 已重啟**：重新檢查觸發時，除了 generation 以外，也確認排程它的 `cmux events` 子程序仍是目前的 `child`，避免在 `.disconnected` 之後，或下一個 stream 的 replay 中途 publish。
   - **舊 session 復活**：已結束的 session 只接受 `SessionStart`（`/resume`），其他晚到的重複 hook 都略過，不會蓋過接手的新 session。從沒看過的 session 送來的 `SessionEnd` 也略過。
   - **記憶體**：已結束的 session 寬限期一過，就在下一個 hook 時從 `sessions` 移除。
-  - 限制：被移除後才到的同一 session 非 `SessionStart` hook（晚到超過 2 秒）會被當成新的 live session。
   - 時鐘基準不一致（結束時間用 wall clock、計時器用單調時鐘）未處理，只有系統時鐘往回調整時才會讓 agent 多留一下。
   - 測試新增 `endedStaysEnded`、`pruneEnded`、`graceDeadline`。用到 `occurred_at` 的測試，`apply` 都傳入同一個 `now`。`make check` 587 個通過。
+- 2026-11-19（agent，第二次 `/code-review medium` 後修正）：
+  - **清除後復活（important，上一輪造成的 regression）**：replay 套用舊 frame 時用的是現在時間，所以歷史裡已結束的 session 一律被當成寬限期已過、從 `sessions` 移除。之後晚到的重複 hook 會把它重建成 live session，蓋過接手的新 session。改成另外記一份已結束的 session id（`endedIDs`，cmux boot 換掉時清空），session 被移除後仍然只接受 `SessionStart`。這份集合只存 id，記憶體影響可忽略。新增 `endedStaysEndedAfterPrune` 測試。
+  - **replay 時沒有 `occurred_at` 的 `SessionEnd`**：原本退回用現在時間，舊 session 會在啟動時拿到 2 秒寬限期。replay 期間改傳 `.distantPast` 當 fallback 時間。
+  - **睡眠喚醒後計時器延遲**：重新檢查改用 `asyncAfter(wallDeadline:)`，與 `endedMs` 同樣用 wall clock，系統睡眠期間也會繼續計時。
+  - 未處理（原本就存在）：從沒送 `SessionEnd` 的 session（crash、kill -9）不會被移除，只影響記憶體，adapter 的 `include` 已經會濾掉已結束的 pid；cmux 漏送 `SessionEnd` 時，舊的 live session 會在另一個 session 的寬限期內勝出。
+  - `make check` 588 個通過。
 

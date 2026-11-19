@@ -31,6 +31,8 @@ public struct CmuxSessions: Sendable {
     /// Workspaces whose sidebar says an agent is waiting for input.
     public private(set) var waitingWorkspaces: Set<String> = []
     private var clock = 0
+    /// Ids of ended sessions, kept after `prune` forgets the session itself.
+    private var endedIDs: Set<String> = []
 
     public init() {}
 
@@ -49,6 +51,7 @@ public struct CmuxSessions: Sendable {
             bootID = boot
             sessions = [:]
             waitingWorkspaces = []
+            endedIDs = []
         }
         let payload = frame["payload"] as? [String: Any] ?? [:]
         if name.hasPrefix("agent.hook.") {
@@ -64,7 +67,7 @@ public struct CmuxSessions: Sendable {
         prune(now: now)
         // An ended session only comes back through SessionStart (`/resume`): cmux repeats every
         // hook, and a late repeat must not revive it over the session that replaced it.
-        if let known = sessions[sessionID], known.ended, hook != "SessionStart" { return }
+        if endedIDs.contains(sessionID), hook != "SessionStart" { return }
         if sessions[sessionID] == nil, hook == "SessionEnd" { return }
         var session = sessions[sessionID] ?? Session(
             sessionID: sessionID, surfaceID: surfaceID, workspaceID: nil, cwd: "/",
@@ -78,6 +81,7 @@ public struct CmuxSessions: Sendable {
         case "SessionEnd":
             session.endedMs = Self.ms(Self.occurredAt(frame) ?? now)
             session.ended = true
+            endedIDs.insert(sessionID)
         case "SubagentStart", "SubagentStop", "PreCompact", "Notification", "AskUserQuestion":
             // Sub-agent and housekeeping hooks don't change the main agent's state. Notification
             // follows a PermissionRequest, or is an idle reminder: either way keep the state.
@@ -88,6 +92,7 @@ public struct CmuxSessions: Sendable {
             session.lastTool = hook == "PreToolUse" ? payload["tool_name"] as? String : nil
             session.ended = false
             session.endedMs = nil
+            endedIDs.remove(sessionID)
             if let occurred = Self.occurredAt(frame) { session.lastHookMs = Self.ms(occurred) }
         }
         clock += 1

@@ -196,7 +196,9 @@ public final class CmuxAdapter: HerdrClient, Sendable {
                 }
                 guard type == "event" else { continue }
                 let frameSeq = (frame["seq"] as? NSNumber)?.uint64Value ?? 0
-                shared.withLock { $0.sessions.apply(frame) }
+                // History without `occurred_at` counts as long past, so it gets no grace.
+                let received = replaying ? Date.distantPast : Date()
+                shared.withLock { $0.sessions.apply(frame, now: received) }
                 if replaying {
                     if frameSeq >= latest {
                         replaying = false
@@ -266,8 +268,9 @@ public final class CmuxAdapter: HerdrClient, Sendable {
             return deadline
         }
         guard let deadline else { return }
-        // A little past the deadline: `endedMs` is truncated to whole milliseconds.
-        DispatchQueue.global().asyncAfter(deadline: .now() + deadline.timeIntervalSince(now) + 0.05) { [weak self] in
+        // Wall clock like `endedMs` (keeps counting through sleep), a little past the deadline
+        // because `endedMs` is truncated to whole milliseconds.
+        DispatchQueue.global().asyncAfter(wallDeadline: .now() + deadline.timeIntervalSince(now) + 0.05) { [weak self] in
             guard let self, self.isCurrent(gen), self.shared.withLock({ $0.child === process }) else { return }
             self.publishChanges()
             self.scheduleGraceRecheck(process: process, generation: gen)

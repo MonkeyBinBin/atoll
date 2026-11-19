@@ -224,6 +224,20 @@ struct CmuxTests {
         #expect(exit.terminals(now: date("17.700")).isEmpty)
     }
 
+    @Test("replayed history: a repeat of an ended session's hook doesn't revive it after it was forgotten")
+    func endedStaysEndedAfterPrune() {
+        // Replay applies old frames at the current time, so every ended session is already past its grace.
+        var s = CmuxSessions()
+        s.apply(at(hook("Stop", session: "before"), "10.000"))
+        s.apply(at(hook("SessionEnd", session: "before"), "15.600"))
+        s.apply(at(hook("SessionStart", session: "after"), "15.709"))
+        s.apply(at(hook("Stop", session: "before"), "15.710"))
+        #expect(s.terminals(now: date("15.750")).first?.labels[SessionHint.idLabel] == "cmux-feed-v1:after")
+        // `/resume` of that session still works.
+        s.apply(at(hook("SessionStart", session: "before"), "20.000"))
+        #expect(s.sessions["cmux-feed-v1:before"]?.ended == false)
+    }
+
     @Test("ended sessions are forgotten once their grace is over")
     func pruneEnded() {
         var s = CmuxSessions()
