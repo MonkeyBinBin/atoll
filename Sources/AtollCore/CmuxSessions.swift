@@ -61,6 +61,11 @@ public struct CmuxSessions: Sendable {
     private mutating func applyHook(_ hook: String, payload: [String: Any], frame: [String: Any], now: Date) {
         guard let sessionID = payload["session_id"] as? String,
               let surfaceID = (payload["surface_id"] as? String) ?? (frame["surface_id"] as? String) else { return }
+        prune(now: now)
+        // An ended session only comes back through SessionStart (`/resume`): cmux repeats every
+        // hook, and a late repeat must not revive it over the session that replaced it.
+        if let known = sessions[sessionID], known.ended, hook != "SessionStart" { return }
+        if sessions[sessionID] == nil, hook == "SessionEnd" { return }
         var session = sessions[sessionID] ?? Session(
             sessionID: sessionID, surfaceID: surfaceID, workspaceID: nil, cwd: "/",
             app: Self.appName(payload["_source"] as? String ?? frame["source"] as? String), pid: nil, lastHook: hook
@@ -71,8 +76,7 @@ public struct CmuxSessions: Sendable {
         if let pid = (payload["_ppid"] as? NSNumber)?.int32Value { session.pid = pid }
         switch hook {
         case "SessionEnd":
-            // cmux repeats every hook; the grace counts from the first SessionEnd.
-            if !session.ended { session.endedMs = Self.ms(Self.occurredAt(frame) ?? now) }
+            session.endedMs = Self.ms(Self.occurredAt(frame) ?? now)
             session.ended = true
         case "SubagentStart", "SubagentStop", "PreCompact", "Notification", "AskUserQuestion":
             // Sub-agent and housekeeping hooks don't change the main agent's state. Notification
@@ -177,6 +181,22 @@ public struct CmuxSessions: Sendable {
     /// of the old SessionEnd can arrive after the new SessionStart), then the newer one wins.
     private static func outranks(_ a: Session, _ b: Session) -> Bool {
         a.ended != b.ended ? !a.ended : a.touched > b.touched
+    }
+
+    /// When the earliest ending agent's grace runs out, so the adapter can publish its removal
+    /// on time; nil when no agent is ending.
+    public func graceDeadline(now: Date) -> Date? {
+        let graceStart = Self.ms(now.addingTimeInterval(-Self.endGrace))
+        return sessions.values
+            .filter { $0.ended && isShown($0, graceStart: graceStart) }
+            .compactMap(\.endedMs).min()
+            .map { Date(timeIntervalSince1970: Double($0) / 1000 + Self.endGrace) }
+    }
+
+    /// Ended sessions are forgotten once their grace is over.
+    private mutating func prune(now: Date) {
+        let graceStart = Self.ms(now.addingTimeInterval(-Self.endGrace))
+        sessions = sessions.filter { !$0.value.ended || ($0.value.endedMs ?? 0) > graceStart }
     }
 
     /// Live, or ended within the grace period. Only sessions of a known process get the grace:

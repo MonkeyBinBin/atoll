@@ -24,6 +24,8 @@ public final class CmuxAdapter: HerdrClient, Sendable {
         var ownership: [Int32: Bool] = [:]
         /// Set by reconnect(): report offline again if cmux still isn't running.
         var announceOffline = false
+        /// The grace deadline a recheck is already scheduled for.
+        var graceRecheck: Date?
     }
     private let shared = Mutex(State())
     /// Serialises publishing (reader, ticker and the post-grace recheck) so an older
@@ -152,6 +154,7 @@ public final class CmuxAdapter: HerdrClient, Sendable {
             state.child = process
             state.sessions = CmuxSessions()
             state.published = [:]
+            state.graceRecheck = nil
         }
 
         let ticker = Thread { [weak self] in
@@ -167,7 +170,7 @@ public final class CmuxAdapter: HerdrClient, Sendable {
         }
 
         var replaying = latest > 0
-        if !replaying { publishSnapshot(); ticker.start() }
+        if !replaying { publishSnapshot(); scheduleGraceRecheck(process: process, generation: gen); ticker.start() }
         let reader = out.fileHandleForReading
         var buffer = Data()
         while isCurrent(gen) {
@@ -184,6 +187,7 @@ public final class CmuxAdapter: HerdrClient, Sendable {
                         // Heartbeats only come once the replay is over.
                         replaying = false
                         publishSnapshot()
+                        scheduleGraceRecheck(process: process, generation: gen)
                         ticker.start()
                     } else {
                         emit(.heartbeat(seq: currentSeq))
@@ -197,11 +201,12 @@ public final class CmuxAdapter: HerdrClient, Sendable {
                     if frameSeq >= latest {
                         replaying = false
                         publishSnapshot()
+                        scheduleGraceRecheck(process: process, generation: gen)
                         ticker.start()
                     }
                 } else {
                     publishChanges()
-                    if frame["name"] as? String == "agent.hook.SessionEnd" { publishAfterGrace(generation: gen) }
+                    scheduleGraceRecheck(process: process, generation: gen)
                 }
             }
         }
@@ -251,12 +256,21 @@ public final class CmuxAdapter: HerdrClient, Sendable {
         }
     }
 
-    /// An ended session keeps its agent for `CmuxSessions.endGrace`; publish again once that
-    /// is over so `/exit` doesn't wait for the next tick.
-    private func publishAfterGrace(generation gen: Int) {
-        DispatchQueue.global().asyncAfter(deadline: .now() + CmuxSessions.endGrace) { [weak self] in
-            guard let self, self.isCurrent(gen) else { return }
+    /// An ended session keeps its agent for `CmuxSessions.endGrace`; publish again when that
+    /// runs out so `/exit` doesn't wait for the next tick. Only for the stream that scheduled it.
+    private func scheduleGraceRecheck(process: Process, generation gen: Int) {
+        let now = Date()
+        let deadline = shared.withLock { state -> Date? in
+            guard let deadline = state.sessions.graceDeadline(now: now), deadline != state.graceRecheck else { return nil }
+            state.graceRecheck = deadline
+            return deadline
+        }
+        guard let deadline else { return }
+        // A little past the deadline: `endedMs` is truncated to whole milliseconds.
+        DispatchQueue.global().asyncAfter(deadline: .now() + deadline.timeIntervalSince(now) + 0.05) { [weak self] in
+            guard let self, self.isCurrent(gen), self.shared.withLock({ $0.child === process }) else { return }
             self.publishChanges()
+            self.scheduleGraceRecheck(process: process, generation: gen)
         }
     }
 

@@ -39,4 +39,12 @@
 - 2026-11-19（agent）：**測試**：`CmuxTests` 新增 `clearGap`、`exitAfterGrace`、`clearDuplicates`、`noPidNoGrace`。`make check` 584 個通過。
 - 2026-11-19（agent）：**限制**：frame 晚到超過 2 秒時（app 卡住、stream 積壓），收到時寬限期已經過了，panel 仍會被關掉。
 - 2026-11-19（使用者）：安裝後在 cmux 實測 `/clear`，panel 保持開著。同一段錄到的事件：`/clear` 間隔 103 ms（02:21:09.635 → .738）；02:21:37 的 `/exit` 之後程序在幾秒內結束。
+- 2026-11-19（agent，`/code-review medium` 後修正）：
+  - **replay 結尾的寬限期**：原本只在收到 `SessionEnd` 時排重新檢查，replay 最後 2 秒內結束的 session 最久會留到下一個 tick（約 5 秒）。改成由 `CmuxSessions.graceDeadline(now:)` 回報最早到期的寬限期，adapter 在每次 publish（含 replay 結束時的 snapshot）後依此排程，到期後再排下一個。adapter 也不必再認 `SessionEnd` 事件名。
+  - **stream 已重啟**：重新檢查觸發時，除了 generation 以外，也確認排程它的 `cmux events` 子程序仍是目前的 `child`，避免在 `.disconnected` 之後，或下一個 stream 的 replay 中途 publish。
+  - **舊 session 復活**：已結束的 session 只接受 `SessionStart`（`/resume`），其他晚到的重複 hook 都略過，不會蓋過接手的新 session。從沒看過的 session 送來的 `SessionEnd` 也略過。
+  - **記憶體**：已結束的 session 寬限期一過，就在下一個 hook 時從 `sessions` 移除。
+  - 限制：被移除後才到的同一 session 非 `SessionStart` hook（晚到超過 2 秒）會被當成新的 live session。
+  - 時鐘基準不一致（結束時間用 wall clock、計時器用單調時鐘）未處理，只有系統時鐘往回調整時才會讓 agent 多留一下。
+  - 測試新增 `endedStaysEnded`、`pruneEnded`、`graceDeadline`。用到 `occurred_at` 的測試，`apply` 都傳入同一個 `now`。`make check` 587 個通過。
 

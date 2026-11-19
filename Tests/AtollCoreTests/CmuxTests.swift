@@ -50,8 +50,8 @@ struct CmuxTests {
     @Test("/exit: the agent stays through the grace period, then goes")
     func exitAfterGrace() {
         var s = CmuxSessions()
-        s.apply(at(hook("Stop"), "10.000"))
-        s.apply(at(hook("SessionEnd"), "15.600"))
+        s.apply(at(hook("Stop"), "10.000"), now: date("10.000"))
+        s.apply(at(hook("SessionEnd"), "15.600"), now: date("15.600"))
         #expect(s.terminals(now: date("17.500")).map(\.address) == ["cmux:pid44475"])
         #expect(s.terminals(now: date("17.700")).isEmpty)
     }
@@ -177,11 +177,11 @@ struct CmuxTests {
     func clearGap() {
         // Recorded from cmux (pid 41108): SessionStart of the new session came 109 ms after the old SessionEnd.
         var s = CmuxSessions()
-        s.apply(at(hook("Stop", session: "before"), "10.000"))
-        s.apply(at(hook("SessionEnd", session: "before"), "15.600"))
+        s.apply(at(hook("Stop", session: "before"), "10.000"), now: date("10.000"))
+        s.apply(at(hook("SessionEnd", session: "before"), "15.600"), now: date("15.600"))
         #expect(s.terminals(now: date("15.650")).map(\.address) == ["cmux:pid44475"])
         #expect(s.terminals(now: date("15.650")).first?.status?.state == "done")
-        s.apply(at(hook("SessionStart", session: "after"), "15.709"))
+        s.apply(at(hook("SessionStart", session: "after"), "15.709"), now: date("15.709"))
         let after = s.terminals(now: date("15.750"))
         #expect(after.map(\.address) == ["cmux:pid44475"])
         #expect(after.first?.labels[SessionHint.idLabel] == "cmux-feed-v1:after")
@@ -192,23 +192,67 @@ struct CmuxTests {
     func clearDuplicates() {
         // cmux sends every hook twice; the repeat of the old SessionEnd may land after the new SessionStart.
         var s = CmuxSessions()
-        s.apply(at(hook("SessionEnd", session: "before"), "15.600"))
-        s.apply(at(hook("SessionStart", session: "after"), "15.709"))
-        s.apply(at(hook("SessionEnd", session: "before"), "15.710"))
-        s.apply(at(hook("SessionStart", session: "after"), "15.711"))
+        s.apply(at(hook("Stop", session: "before"), "10.000"), now: date("10.000"))
+        s.apply(at(hook("SessionEnd", session: "before"), "15.600"), now: date("15.600"))
+        s.apply(at(hook("SessionStart", session: "after"), "15.709"), now: date("15.709"))
+        s.apply(at(hook("SessionEnd", session: "before"), "15.710"), now: date("15.710"))
+        s.apply(at(hook("SessionStart", session: "after"), "15.711"), now: date("15.711"))
         #expect(s.terminals(now: date("15.750")).first?.labels[SessionHint.idLabel] == "cmux-feed-v1:after")
         // The grace counts from the first SessionEnd.
         var exit = CmuxSessions()
-        exit.apply(at(hook("SessionEnd"), "15.600"))
-        exit.apply(at(hook("SessionEnd"), "17.000"))
+        exit.apply(at(hook("Stop"), "10.000"), now: date("10.000"))
+        exit.apply(at(hook("SessionEnd"), "15.600"), now: date("15.600"))
+        exit.apply(at(hook("SessionEnd"), "17.000"), now: date("17.000"))
         #expect(exit.terminals(now: date("17.700")).isEmpty)
+    }
+
+    @Test("a late repeat of the old session's hooks doesn't bring it back")
+    func endedStaysEnded() {
+        var s = CmuxSessions()
+        s.apply(at(hook("Stop", session: "before"), "10.000"), now: date("10.000"))
+        s.apply(at(hook("SessionEnd", session: "before"), "15.600"), now: date("15.600"))
+        s.apply(at(hook("SessionStart", session: "after"), "15.709"), now: date("15.709"))
+        s.apply(at(hook("Stop", session: "before"), "15.710"), now: date("15.710"))
+        let t = s.terminals(now: date("15.750"))
+        #expect(t.first?.labels[SessionHint.idLabel] == "cmux-feed-v1:after")
+        #expect(t.first?.status?.state == "idle")
+        // Ending without a new session: the repeat doesn't restart it either.
+        var exit = CmuxSessions()
+        exit.apply(at(hook("Stop"), "10.000"), now: date("10.000"))
+        exit.apply(at(hook("SessionEnd"), "15.600"), now: date("15.600"))
+        exit.apply(at(hook("Stop"), "15.610"), now: date("15.610"))
+        #expect(exit.terminals(now: date("17.700")).isEmpty)
+    }
+
+    @Test("ended sessions are forgotten once their grace is over")
+    func pruneEnded() {
+        var s = CmuxSessions()
+        s.apply(at(hook("Stop", session: "before"), "10.000"), now: date("10.000"))
+        s.apply(at(hook("SessionEnd", session: "before"), "15.600"), now: date("15.600"))
+        s.apply(at(hook("SessionStart", session: "after"), "15.709"), now: date("15.709"))
+        #expect(s.sessions["cmux-feed-v1:before"] != nil)
+        s.apply(at(hook("UserPromptSubmit", session: "after"), "20.000"), now: date("20.000"))
+        #expect(s.sessions["cmux-feed-v1:before"] == nil)
+        // A SessionEnd for a session it never saw (e.g. a repeat after pruning) adds nothing.
+        s.apply(at(hook("SessionEnd", session: "before"), "20.100"), now: date("20.100"))
+        #expect(s.sessions["cmux-feed-v1:before"] == nil)
+    }
+
+    @Test("graceDeadline: when the earliest ending agent should be dropped")
+    func graceDeadline() {
+        var s = CmuxSessions()
+        s.apply(at(hook("Stop"), "10.000"), now: date("10.000"))
+        #expect(s.graceDeadline(now: date("10.100")) == nil)
+        s.apply(at(hook("SessionEnd"), "15.600"), now: date("15.600"))
+        #expect(s.graceDeadline(now: date("15.650")) == date("17.600"))
+        #expect(s.graceDeadline(now: date("17.700")) == nil)
     }
 
     @Test("without a pid an ended session goes at once (the next session is another agent anyway)")
     func noPidNoGrace() {
         var s = CmuxSessions()
-        s.apply(at(hook("Stop", session: "before", pid: nil), "10.000"))
-        s.apply(at(hook("SessionEnd", session: "before", pid: nil), "15.600"))
+        s.apply(at(hook("Stop", session: "before", pid: nil), "10.000"), now: date("10.000"))
+        s.apply(at(hook("SessionEnd", session: "before", pid: nil), "15.600"), now: date("15.600"))
         #expect(s.terminals(now: date("15.650")).isEmpty)
     }
 
