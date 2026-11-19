@@ -65,3 +65,10 @@ ticket 62 之前，B 一結束就直接消失，A 一樣會勝出；差別是現
   - `applyHook` 的 `endedIDs` 檢查補上反向註解，說明 `terminals()` 依賴它；`docs/agents/issue-tracker.md` 補上 `.out-of-scope/` 的用途（ticket 63 首次使用）。
 - 2026-11-19（agent）：**測試**：新增 `staleLiveLosesToNewerEnding`（brief 指定的情境，加上 C 開始後立即接手）與 `lateEndDoesNotWin`，兩者修改前都會失敗。ticket 62 的 `/clear` 測試全部維持通過。`make check` 590 個通過。
 
+- 2026-11-19（agent，`/code-review medium` 後改為開始順序模型）：
+  - review 指出 regression：舊 session B 晚到的非 `SessionEnd` hook（cmux 重複送的 `Stop`，或不改狀態的 `Notification`、`SubagentStop`、`PreCompact`），只要在新 session C 的 `SessionStart` 之後、B 的 `SessionEnd` 之前到達，B 的 `touched` 就會變成最新，在寬限期內蓋過 C。拿掉的「live 優先」原本擋得住這種情況。另一個原本就存在的問題：A 漏送 `SessionEnd`，B 的寬限期過後、C 還沒開始時，A 又會變回 agent 的代表。
+  - 根源是「最後活動」這個排序依據會被任何晚到的 hook 改變。改成依**開始順序**：`Session.touched` 換成 `started`，只在 `SessionStart` 或第一次看到該 session 時設定，之後的 hook 一律不影響。同一 pid 由最晚開始的 session 代表 agent，不論 live 或寬限期內。
+  - 新 session 開始時，同一 pid 其他仍是 live 的 session 視為漏送 `SessionEnd`：立即結束（`endedMs = 0`，不給寬限）並記進 `endedIDs`，其後晚到的 hook 一律略過。每個 pid 同時最多只有一個 live session，A 不會再回來。`/resume` 照常運作，因為 `SessionStart` 會更新開始順序。
+  - 前提驗證：錄到的事件（`cmux events` 保留歷史加上 11-19 錄製，共 1223 個帶 pid 的 hook）中，同一 pid 的不同 session 交錯出現 0 次，subagent 也沒有用別的 session id 回報，所以「同一程序一次只跑一個 session」成立。
+  - 上一則提到的「`SessionEnd` 不算活動」在新模型下不再需要，一併拿掉。
+  - 測試：新增 `lateHooksAfterNewStart`（晚到的 `Stop` 與 `Notification`）、`newerSessionSupersedes`（A 不會在 B 的寬限期後回來，晚到的 hook 也不會讓它復活），兩者修改前都會失敗。`staleLiveLosesToNewerEnding`、`lateEndDoesNotWin` 與 ticket 62 的測試都維持通過。`make check` 592 個通過。完整測試曾經有一次 2 個失敗（耗時 0.788 秒，平常約 0.36 秒），之後連跑 12 次都沒有重現，抓不到是哪個測試；這次只改了 pure 的 `CmuxSessions`，判斷與本次改動無關。
