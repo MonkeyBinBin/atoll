@@ -2,7 +2,7 @@
 
 > 2026-11-10 由 Herdr Agent Island 改名為 Atoll：產品已同時整合 herdr-app、herdr CLI 與 cmux，不再只服務 Herdr。app 為 `Atoll.app`（bundle id `local.atoll`，首次啟動會搬移舊 `local.herdr-island` 的設定），模組為 `Atoll`／`AtollCore`，label 前綴為 `atoll.`（仍讀取舊的 `island.origin`）。
 
-Status: ready-for-agent
+Status: resolved
 
 ## Problem Statement
 
