@@ -13,13 +13,13 @@ ticket 62 之前，B 一結束就直接消失，A 一樣會勝出；差別是現
 
 **Blocked by:** —
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] 確認重複送來的舊 `SessionEnd` 已經不會更新 `touched`，結論寫進 Comments
-- [ ] 上述情境中，B 的寬限期內 agent 仍由 B 代表，不會切回 A
-- [ ] ticket 62 的 `/clear` 測試（`clearGap`、`clearDuplicates`、`endedStaysEnded`、`endedStaysEndedAfterPrune`）維持通過
-- [ ] AtollCore 測試：A 漏送 `SessionEnd`、B 開始後又結束，寬限期內 `terminals()` 的 session id 是 B
-- [ ] `make check` 通過
+- [x] 確認重複送來的舊 `SessionEnd` 已經不會更新 `touched`，結論寫進 Comments
+- [x] 上述情境中，B 的寬限期內 agent 仍由 B 代表，不會切回 A
+- [x] ticket 62 的 `/clear` 測試（`clearGap`、`clearDuplicates`、`endedStaysEnded`、`endedStaysEndedAfterPrune`）維持通過
+- [x] AtollCore 測試：A 漏送 `SessionEnd`、B 開始後又結束，寬限期內 `terminals()` 的 session id 是 B
+- [x] `make check` 通過
 
 **Out of scope:**
 - B 的寬限期過後、C 還沒開始時由 A 代表 agent：這是漏送 `SessionEnd` 本身的結果，ticket 62 之前就是這樣
@@ -58,3 +58,10 @@ ticket 62 之前，B 一結束就直接消失，A 一樣會勝出；差別是現
   - B 的寬限期過後、C 還沒開始時由 A 代表 agent：這是漏送 `SessionEnd` 本身的結果
   - 偵測或補回遺失的 `SessionEnd`、清除從沒結束的 session（ticket 63，`wontfix`）
   - herdr CLI、herdr-core adapter
+- 2026-11-19（agent）：**確認前提**：如 triage 所驗證，`applyHook` 對 `endedIDs` 裡的 session 只接受 `SessionStart`，其他重複 hook 在更新 `touched` 前就略過，重複的舊 `SessionEnd` 不會讓舊 session 變新。
+- 2026-11-19（agent）：**實作**：
+  - 同一 pid 的 session 改成只依 `touched` 決定由誰代表 agent，不論 live 或寬限期內。比較只剩一個式子，所以 `outranks` 刪掉、inline 回 `terminals()`，原本 doc comment 的理由搬到那裡的註解（agent brief 字面是「改寫 `outranks`」，行為相同）。
+  - code review 指出一個 brief 沒涵蓋的殘餘風險：舊 session 的 `SessionEnd`（不是重複的那份）若晚於新 session 的 `SessionStart` 才到，第一份仍會增加 `touched`，舊 session 會在寬限期內蓋過新的。這種情況原本由「live 優先」擋住。改成 `SessionEnd` 不算活動、不增加 `touched`：結束不會讓 session 變新，漏送 `SessionEnd` 的情境也不受影響（B 的 `Stop` 已經比 A 新）。
+  - `applyHook` 的 `endedIDs` 檢查補上反向註解，說明 `terminals()` 依賴它；`docs/agents/issue-tracker.md` 補上 `.out-of-scope/` 的用途（ticket 63 首次使用）。
+- 2026-11-19（agent）：**測試**：新增 `staleLiveLosesToNewerEnding`（brief 指定的情境，加上 C 開始後立即接手）與 `lateEndDoesNotWin`，兩者修改前都會失敗。ticket 62 的 `/clear` 測試全部維持通過。`make check` 590 個通過。
+
