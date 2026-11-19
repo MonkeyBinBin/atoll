@@ -297,6 +297,35 @@ struct CmuxTests {
         #expect(t.first?.status?.state == "idle")
     }
 
+    @Test("an old session's late hooks after the new SessionStart don't take the agent back")
+    func lateHooksAfterNewStart() {
+        // Recorded shape of `/clear`, with cmux delivering the old session's Stop repeat and an
+        // idle-reminder Notification only after the new session started.
+        for late in ["Stop", "Notification"] {
+            var s = CmuxSessions()
+            s.apply(at(hook("Stop", session: "B"), "10.000"), now: date("10.000"))
+            s.apply(at(hook("SessionStart", session: "C"), "15.709"), now: date("15.709"))
+            s.apply(at(hook(late, session: "B"), "15.710"), now: date("15.710"))
+            s.apply(at(hook("SessionEnd", session: "B"), "15.711"), now: date("15.711"))
+            let t = s.terminals(now: date("15.750"))
+            #expect(t.first?.labels[SessionHint.idLabel] == "cmux-feed-v1:C", "late \(late)")
+            #expect(t.first?.status?.state == "idle", "late \(late)")
+        }
+    }
+
+    @Test("a newer session in the same process supersedes a live one that lost its SessionEnd")
+    func newerSessionSupersedes() {
+        var s = CmuxSessions()
+        s.apply(at(hook("UserPromptSubmit", session: "A"), "01.000"), now: date("01.000"))
+        s.apply(at(hook("SessionStart", session: "B"), "02.000"), now: date("02.000"))
+        s.apply(at(hook("SessionEnd", session: "B"), "04.000"), now: date("04.000"))
+        // B's grace is over and the next session hasn't started: A doesn't come back.
+        #expect(s.terminals(now: date("06.100")).isEmpty)
+        // Nor does a late hook of A revive it.
+        s.apply(at(hook("Stop", session: "A"), "06.200"), now: date("06.200"))
+        #expect(s.terminals(now: date("06.300")).isEmpty)
+    }
+
     @Test("history from an earlier cmux boot is dropped")
     func bootReset() {
         var s = CmuxSessions()
