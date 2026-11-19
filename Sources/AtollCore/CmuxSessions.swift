@@ -156,13 +156,15 @@ public struct CmuxSessions: Sendable {
     /// to another backend (herdr CLI, herdr-core).
     public func terminals(now: Date = Date(), include: (Session) -> Bool = { _ in true }) -> [TerminalInfo] {
         // One agent per process: `/clear` starts a new session in the same Claude, which must
-        // keep its character, colour and open panel. The newest session of a process wins,
-        // and a live session always beats one that is ending.
+        // keep its character, colour and open panel. The most recently updated session of a
+        // process wins, even while it is ending: a live one can be stale (its SessionEnd was
+        // lost), and cmux's late repeats of an ended session's hooks are dropped in applyHook,
+        // so they can't make an old session look newer.
         let graceStart = Self.ms(now.addingTimeInterval(-Self.endGrace))
         var newest: [String: Session] = [:]
         for session in sessions.values where isShown(session, graceStart: graceStart) && include(session) {
             let key = Self.agentKey(session)
-            if let existing = newest[key], Self.outranks(existing, session) { continue }
+            if let existing = newest[key], existing.touched > session.touched { continue }
             newest[key] = session
         }
         return newest.values
@@ -180,12 +182,6 @@ public struct CmuxSessions: Sendable {
                 info.foreground = CoreForeground(pid: session.pid.map(Int.init), cwd: session.cwd)
                 return info
             }
-    }
-
-    /// Whether `a` keeps the agent over `b`: a live session beats an ending one (cmux's repeat
-    /// of the old SessionEnd can arrive after the new SessionStart), then the newer one wins.
-    private static func outranks(_ a: Session, _ b: Session) -> Bool {
-        a.ended != b.ended ? !a.ended : a.touched > b.touched
     }
 
     /// When the earliest ending agent's grace runs out, so the adapter can publish its removal

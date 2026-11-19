@@ -270,6 +270,22 @@ struct CmuxTests {
         #expect(s.terminals(now: date("15.650")).isEmpty)
     }
 
+    @Test("a session that lost its SessionEnd doesn't take the agent over while a newer one is ending")
+    func staleLiveLosesToNewerEnding() {
+        // A's SessionEnd never came, so A still looks live; B, newer, is ending through `/clear`.
+        var s = CmuxSessions()
+        s.apply(at(hook("UserPromptSubmit", session: "A"), "01.000"), now: date("01.000"))
+        s.apply(at(hook("SessionStart", session: "B"), "02.000"), now: date("02.000"))
+        s.apply(at(hook("Stop", session: "B"), "03.000"), now: date("03.000"))
+        s.apply(at(hook("SessionEnd", session: "B"), "04.000"), now: date("04.000"))
+        let t = s.terminals(now: date("04.050"))
+        #expect(t.first?.labels[SessionHint.idLabel] == "cmux-feed-v1:B")
+        #expect(t.first?.status?.state == "done")
+        // The next session takes over at once.
+        s.apply(at(hook("SessionStart", session: "C"), "04.100"), now: date("04.100"))
+        #expect(s.terminals(now: date("04.150")).first?.labels[SessionHint.idLabel] == "cmux-feed-v1:C")
+    }
+
     @Test("history from an earlier cmux boot is dropped")
     func bootReset() {
         var s = CmuxSessions()
