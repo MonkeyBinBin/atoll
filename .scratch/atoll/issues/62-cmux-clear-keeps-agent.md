@@ -53,3 +53,4 @@
   - 未處理（原本就存在）：從沒送 `SessionEnd` 的 session（crash、kill -9）不會被移除，只影響記憶體，adapter 的 `include` 已經會濾掉已結束的 pid；cmux 漏送 `SessionEnd` 時，舊的 live session 會在另一個 session 的寬限期內勝出。
   - `make check` 588 個通過。
 
+- 2026-11-19（agent）：未處理的兩個既有問題已開成 ticket 63（從沒結束的 session 與快取不會被清除）、64（漏送 `SessionEnd` 時舊的 live session 勝出）。
