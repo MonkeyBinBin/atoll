@@ -286,6 +286,17 @@ struct CmuxTests {
         #expect(s.terminals(now: date("04.150")).first?.labels[SessionHint.idLabel] == "cmux-feed-v1:C")
     }
 
+    @Test("an old session's SessionEnd arriving after the new SessionStart doesn't take the agent back")
+    func lateEndDoesNotWin() {
+        var s = CmuxSessions()
+        s.apply(at(hook("Stop", session: "B"), "01.000"), now: date("01.000"))
+        s.apply(at(hook("SessionStart", session: "C"), "02.000"), now: date("02.000"))
+        s.apply(at(hook("SessionEnd", session: "B"), "02.010"), now: date("02.010"))
+        let t = s.terminals(now: date("02.050"))
+        #expect(t.first?.labels[SessionHint.idLabel] == "cmux-feed-v1:C")
+        #expect(t.first?.status?.state == "idle")
+    }
+
     @Test("history from an earlier cmux boot is dropped")
     func bootReset() {
         var s = CmuxSessions()

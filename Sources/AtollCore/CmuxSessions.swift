@@ -22,7 +22,8 @@ public struct CmuxSessions: Sendable {
         public var ended = false
         /// When the session ended (ms since epoch), from `occurred_at` or the time it arrived.
         public var endedMs: UInt64?
-        /// Order of the last update, to pick the newest session of a process.
+        /// Order of the session's last activity, to pick the newest session of a process.
+        /// SessionEnd isn't activity: an ending session must not look newer than the one after it.
         public var touched = 0
     }
 
@@ -67,6 +68,7 @@ public struct CmuxSessions: Sendable {
         prune(now: now)
         // An ended session only comes back through SessionStart (`/resume`): cmux repeats every
         // hook, and a late repeat must not revive it over the session that replaced it.
+        // terminals() relies on this when it picks a process's newest session.
         if endedIDs.contains(sessionID), hook != "SessionStart" { return }
         if sessions[sessionID] == nil, hook == "SessionEnd" { return }
         var session = sessions[sessionID] ?? Session(
@@ -95,8 +97,10 @@ public struct CmuxSessions: Sendable {
             endedIDs.remove(sessionID)
             if let occurred = Self.occurredAt(frame) { session.lastHookMs = Self.ms(occurred) }
         }
-        clock += 1
-        session.touched = clock
+        if hook != "SessionEnd" {
+            clock += 1
+            session.touched = clock
+        }
         sessions[sessionID] = session
     }
 
@@ -158,8 +162,8 @@ public struct CmuxSessions: Sendable {
         // One agent per process: `/clear` starts a new session in the same Claude, which must
         // keep its character, colour and open panel. The most recently updated session of a
         // process wins, even while it is ending: a live one can be stale (its SessionEnd was
-        // lost), and cmux's late repeats of an ended session's hooks are dropped in applyHook,
-        // so they can't make an old session look newer.
+        // lost). SessionEnd doesn't count as activity and cmux's late repeats of an ended
+        // session's hooks are dropped in applyHook, so neither makes an old session look newer.
         let graceStart = Self.ms(now.addingTimeInterval(-Self.endGrace))
         var newest: [String: Session] = [:]
         for session in sessions.values where isShown(session, graceStart: graceStart) && include(session) {
