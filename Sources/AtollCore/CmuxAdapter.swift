@@ -198,6 +198,7 @@ public final class CmuxAdapter: HerdrClient, Sendable {
                     }
                 } else {
                     publishChanges()
+                    if frame["name"] as? String == "agent.hook.SessionEnd" { publishAfterGrace(generation: gen) }
                 }
             }
         }
@@ -241,6 +242,15 @@ public final class CmuxAdapter: HerdrClient, Sendable {
             return result
         }
         for event in result.events { emit(.event(seq: nextSeq(), event)) }
+    }
+
+    /// An ended session keeps its agent for `CmuxSessions.endGrace`; publish again once that
+    /// is over so `/exit` doesn't wait for the next tick.
+    private func publishAfterGrace(generation gen: Int) {
+        DispatchQueue.global().asyncAfter(deadline: .now() + CmuxSessions.endGrace + 0.1) { [weak self] in
+            guard let self, self.isCurrent(gen) else { return }
+            self.publishChanges()
+        }
     }
 
     private func surface(_ address: String) throws -> String {

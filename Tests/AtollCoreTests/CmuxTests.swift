@@ -43,8 +43,15 @@ struct CmuxTests {
         #expect(status(s) == "working")
         s.apply(hook("Stop"))
         #expect(status(s) == "done")
-        s.apply(hook("SessionEnd"))
-        #expect(s.terminals().isEmpty)
+    }
+
+    @Test("/exit: the agent stays through the grace period, then goes")
+    func exitAfterGrace() {
+        var s = CmuxSessions()
+        s.apply(at(hook("Stop"), "10.000"))
+        s.apply(at(hook("SessionEnd"), "15.600"))
+        #expect(s.terminals(now: date("17.500")).map(\.address) == ["cmux:pid44475"])
+        #expect(s.terminals(now: date("17.700")).isEmpty)
     }
 
     @Test("terminals carry app, cwd, pid and the surface for commands")
@@ -154,6 +161,44 @@ struct CmuxTests {
         s.apply(hook("SessionStart", session: "after"))
         #expect(s.terminals().map(\.address) == ["cmux:pid44475"])
         #expect(status(s) == "idle")
+    }
+
+    func at(_ frame: [String: Any], _ time: String) -> [String: Any] {
+        var frame = frame
+        frame["occurred_at"] = "2026-11-18T10:01:\(time)Z"
+        return frame
+    }
+
+    func date(_ time: String) -> Date { CmuxSessions.parseDate("2026-11-18T10:01:\(time)Z")! }
+
+    @Test("/clear: the agent stays between the old SessionEnd and the new SessionStart")
+    func clearGap() {
+        // Recorded from cmux (pid 41108): SessionStart of the new session came 109 ms after the old SessionEnd.
+        var s = CmuxSessions()
+        s.apply(at(hook("Stop", session: "before"), "10.000"))
+        s.apply(at(hook("SessionEnd", session: "before"), "15.600"))
+        #expect(s.terminals(now: date("15.650")).map(\.address) == ["cmux:pid44475"])
+        #expect(s.terminals(now: date("15.650")).first?.status?.state == "done")
+        s.apply(at(hook("SessionStart", session: "after"), "15.709"))
+        let after = s.terminals(now: date("15.750"))
+        #expect(after.map(\.address) == ["cmux:pid44475"])
+        #expect(after.first?.labels[SessionHint.idLabel] == "cmux-feed-v1:after")
+        #expect(after.first?.status?.state == "idle")
+    }
+
+    @Test("without a pid an ended session goes at once (the next session is another agent anyway)")
+    func noPidNoGrace() {
+        func pidless(_ frame: [String: Any]) -> [String: Any] {
+            var frame = frame
+            var payload = frame["payload"] as! [String: Any]
+            payload["_ppid"] = nil
+            frame["payload"] = payload
+            return frame
+        }
+        var s = CmuxSessions()
+        s.apply(at(pidless(hook("Stop", session: "before")), "10.000"))
+        s.apply(at(pidless(hook("SessionEnd", session: "before")), "15.600"))
+        #expect(s.terminals(now: date("15.650")).isEmpty)
     }
 
     @Test("history from an earlier cmux boot is dropped")
