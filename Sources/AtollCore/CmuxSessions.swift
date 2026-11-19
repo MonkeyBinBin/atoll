@@ -20,6 +20,8 @@ public struct CmuxSessions: Sendable {
         /// When the last state-changing hook happened (ms since epoch), from `occurred_at`.
         public var lastHookMs: UInt64?
         public var ended = false
+        /// When the session ended (ms since epoch), from `occurred_at` or the time it arrived.
+        public var endedMs: UInt64?
         /// Order of the last update, to pick the newest session of a process.
         public var touched = 0
     }
@@ -29,30 +31,44 @@ public struct CmuxSessions: Sendable {
     /// Workspaces whose sidebar says an agent is waiting for input.
     public private(set) var waitingWorkspaces: Set<String> = []
     private var clock = 0
+    /// Ids of ended sessions, kept after `prune` forgets the session itself.
+    private var endedIDs: Set<String> = []
 
     public init() {}
 
     public static let addressPrefix = "cmux:"
 
+    /// How long an ended session of a known process keeps its agent. `/clear` and `/resume`
+    /// end the old session before the new one starts in the same process; cmux measured
+    /// 37–370 ms between them. Without this the agent would vanish and close its panel.
+    public static let endGrace: TimeInterval = 2
+
     /// Applies one event frame (already JSON-decoded). Frames from another cmux boot reset state.
-    public mutating func apply(_ frame: [String: Any]) {
+    /// `now` stands in for `occurred_at` when the frame has none.
+    public mutating func apply(_ frame: [String: Any], now: Date = Date()) {
         guard (frame["type"] as? String) == "event", let name = frame["name"] as? String else { return }
         if let boot = frame["boot_id"] as? String, boot != bootID {
             bootID = boot
             sessions = [:]
             waitingWorkspaces = []
+            endedIDs = []
         }
         let payload = frame["payload"] as? [String: Any] ?? [:]
         if name.hasPrefix("agent.hook.") {
-            applyHook(String(name.dropFirst("agent.hook.".count)), payload: payload, frame: frame)
+            applyHook(String(name.dropFirst("agent.hook.".count)), payload: payload, frame: frame, now: now)
         } else if name == "sidebar.metadata.updated" {
             applySidebar(payload)
         }
     }
 
-    private mutating func applyHook(_ hook: String, payload: [String: Any], frame: [String: Any]) {
+    private mutating func applyHook(_ hook: String, payload: [String: Any], frame: [String: Any], now: Date) {
         guard let sessionID = payload["session_id"] as? String,
               let surfaceID = (payload["surface_id"] as? String) ?? (frame["surface_id"] as? String) else { return }
+        prune(now: now)
+        // An ended session only comes back through SessionStart (`/resume`): cmux repeats every
+        // hook, and a late repeat must not revive it over the session that replaced it.
+        if endedIDs.contains(sessionID), hook != "SessionStart" { return }
+        if sessions[sessionID] == nil, hook == "SessionEnd" { return }
         var session = sessions[sessionID] ?? Session(
             sessionID: sessionID, surfaceID: surfaceID, workspaceID: nil, cwd: "/",
             app: Self.appName(payload["_source"] as? String ?? frame["source"] as? String), pid: nil, lastHook: hook
@@ -63,7 +79,9 @@ public struct CmuxSessions: Sendable {
         if let pid = (payload["_ppid"] as? NSNumber)?.int32Value { session.pid = pid }
         switch hook {
         case "SessionEnd":
+            session.endedMs = Self.ms(Self.occurredAt(frame) ?? now)
             session.ended = true
+            endedIDs.insert(sessionID)
         case "SubagentStart", "SubagentStop", "PreCompact", "Notification", "AskUserQuestion":
             // Sub-agent and housekeeping hooks don't change the main agent's state. Notification
             // follows a PermissionRequest, or is an idle reminder: either way keep the state.
@@ -73,9 +91,9 @@ public struct CmuxSessions: Sendable {
             session.lastHook = hook
             session.lastTool = hook == "PreToolUse" ? payload["tool_name"] as? String : nil
             session.ended = false
-            if let occurred = frame["occurred_at"] as? String, let date = Self.parseDate(occurred) {
-                session.lastHookMs = UInt64(date.timeIntervalSince1970 * 1000)
-            }
+            session.endedMs = nil
+            endedIDs.remove(sessionID)
+            if let occurred = Self.occurredAt(frame) { session.lastHookMs = Self.ms(occurred) }
         }
         clock += 1
         session.touched = clock
@@ -94,6 +112,12 @@ public struct CmuxSessions: Sendable {
             waitingWorkspaces.remove(String(tab))
         }
     }
+
+    static func occurredAt(_ frame: [String: Any]) -> Date? {
+        (frame["occurred_at"] as? String).flatMap(parseDate)
+    }
+
+    static func ms(_ date: Date) -> UInt64 { UInt64(max(date.timeIntervalSince1970, 0) * 1000) }
 
     static func parseDate(_ text: String) -> Date? {
         let formatter = ISO8601DateFormatter()
@@ -130,13 +154,15 @@ public struct CmuxSessions: Sendable {
 
     /// Live sessions as terminals. `include` drops sessions whose process is gone or belongs
     /// to another backend (herdr CLI, herdr-core).
-    public func terminals(include: (Session) -> Bool = { _ in true }) -> [TerminalInfo] {
+    public func terminals(now: Date = Date(), include: (Session) -> Bool = { _ in true }) -> [TerminalInfo] {
         // One agent per process: `/clear` starts a new session in the same Claude, which must
-        // keep its character, colour and open panel. The newest session of a process wins.
+        // keep its character, colour and open panel. The newest session of a process wins,
+        // and a live session always beats one that is ending.
+        let graceStart = Self.ms(now.addingTimeInterval(-Self.endGrace))
         var newest: [String: Session] = [:]
-        for session in sessions.values where !session.ended && include(session) {
+        for session in sessions.values where isShown(session, graceStart: graceStart) && include(session) {
             let key = Self.agentKey(session)
-            if let existing = newest[key], existing.touched > session.touched { continue }
+            if let existing = newest[key], Self.outranks(existing, session) { continue }
             newest[key] = session
         }
         return newest.values
@@ -154,6 +180,36 @@ public struct CmuxSessions: Sendable {
                 info.foreground = CoreForeground(pid: session.pid.map(Int.init), cwd: session.cwd)
                 return info
             }
+    }
+
+    /// Whether `a` keeps the agent over `b`: a live session beats an ending one (cmux's repeat
+    /// of the old SessionEnd can arrive after the new SessionStart), then the newer one wins.
+    private static func outranks(_ a: Session, _ b: Session) -> Bool {
+        a.ended != b.ended ? !a.ended : a.touched > b.touched
+    }
+
+    /// When the earliest ending agent's grace runs out, so the adapter can publish its removal
+    /// on time; nil when no agent is ending.
+    public func graceDeadline(now: Date) -> Date? {
+        let graceStart = Self.ms(now.addingTimeInterval(-Self.endGrace))
+        return sessions.values
+            .filter { $0.ended && isShown($0, graceStart: graceStart) }
+            .compactMap(\.endedMs).min()
+            .map { Date(timeIntervalSince1970: Double($0) / 1000 + Self.endGrace) }
+    }
+
+    /// Ended sessions are forgotten once their grace is over.
+    private mutating func prune(now: Date) {
+        let graceStart = Self.ms(now.addingTimeInterval(-Self.endGrace))
+        sessions = sessions.filter { !$0.value.ended || ($0.value.endedMs ?? 0) > graceStart }
+    }
+
+    /// Live, or ended within the grace period. Only sessions of a known process get the grace:
+    /// without a pid the next session is a different agent anyway.
+    private func isShown(_ session: Session, graceStart: UInt64) -> Bool {
+        guard session.ended else { return true }
+        guard session.pid != nil, let ended = session.endedMs else { return false }
+        return ended > graceStart
     }
 
     /// Stable per agent process; falls back to the session id when the pid is unknown.
