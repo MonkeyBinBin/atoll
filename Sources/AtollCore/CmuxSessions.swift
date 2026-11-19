@@ -22,8 +22,9 @@ public struct CmuxSessions: Sendable {
         public var ended = false
         /// When the session ended (ms since epoch), from `occurred_at` or the time it arrived.
         public var endedMs: UInt64?
-        /// Order of the last update, to pick the newest session of a process.
-        public var touched = 0
+        /// Order in which the session started (its SessionStart, or when it was first seen).
+        /// A process runs its sessions one after another, so the latest started one is current.
+        public var started = 0
     }
 
     public private(set) var bootID: String?
@@ -31,7 +32,7 @@ public struct CmuxSessions: Sendable {
     /// Workspaces whose sidebar says an agent is waiting for input.
     public private(set) var waitingWorkspaces: Set<String> = []
     private var clock = 0
-    /// Ids of ended sessions, kept after `prune` forgets the session itself.
+    /// Ids of ended (or superseded) sessions, kept after `prune` forgets the session itself.
     private var endedIDs: Set<String> = []
 
     public init() {}
@@ -68,7 +69,8 @@ public struct CmuxSessions: Sendable {
         // An ended session only comes back through SessionStart (`/resume`): cmux repeats every
         // hook, and a late repeat must not revive it over the session that replaced it.
         if endedIDs.contains(sessionID), hook != "SessionStart" { return }
-        if sessions[sessionID] == nil, hook == "SessionEnd" { return }
+        let isNew = sessions[sessionID] == nil
+        if isNew, hook == "SessionEnd" { return }
         var session = sessions[sessionID] ?? Session(
             sessionID: sessionID, surfaceID: surfaceID, workspaceID: nil, cwd: "/",
             app: Self.appName(payload["_source"] as? String ?? frame["source"] as? String), pid: nil, lastHook: hook
@@ -95,9 +97,25 @@ public struct CmuxSessions: Sendable {
             endedIDs.remove(sessionID)
             if let occurred = Self.occurredAt(frame) { session.lastHookMs = Self.ms(occurred) }
         }
-        clock += 1
-        session.touched = clock
+        if isNew || hook == "SessionStart" {
+            clock += 1
+            session.started = clock
+            if let pid = session.pid { supersede(pid: pid, by: sessionID) }
+        }
         sessions[sessionID] = session
+    }
+
+    /// A process runs one session at a time: once a new one starts, any other session of the
+    /// process still marked live lost its SessionEnd. End it at once (no grace) so it can't
+    /// stand in for the agent later, and drop its late hooks like any ended session's.
+    private mutating func supersede(pid: Int32, by sessionID: String) {
+        for (id, other) in sessions where id != sessionID && other.pid == pid && !other.ended {
+            var other = other
+            other.ended = true
+            other.endedMs = 0
+            sessions[id] = other
+            endedIDs.insert(id)
+        }
     }
 
     /// `set_status` args look like `claude_code Waiting --icon=… --color=… --tab=<workspace uuid>`.
@@ -156,13 +174,13 @@ public struct CmuxSessions: Sendable {
     /// to another backend (herdr CLI, herdr-core).
     public func terminals(now: Date = Date(), include: (Session) -> Bool = { _ in true }) -> [TerminalInfo] {
         // One agent per process: `/clear` starts a new session in the same Claude, which must
-        // keep its character, colour and open panel. The newest session of a process wins,
-        // and a live session always beats one that is ending.
+        // keep its character, colour and open panel. The latest started session of a process
+        // wins, even while it is ending; later hooks of older sessions don't change that.
         let graceStart = Self.ms(now.addingTimeInterval(-Self.endGrace))
         var newest: [String: Session] = [:]
         for session in sessions.values where isShown(session, graceStart: graceStart) && include(session) {
             let key = Self.agentKey(session)
-            if let existing = newest[key], Self.outranks(existing, session) { continue }
+            if let existing = newest[key], existing.started > session.started { continue }
             newest[key] = session
         }
         return newest.values
@@ -180,12 +198,6 @@ public struct CmuxSessions: Sendable {
                 info.foreground = CoreForeground(pid: session.pid.map(Int.init), cwd: session.cwd)
                 return info
             }
-    }
-
-    /// Whether `a` keeps the agent over `b`: a live session beats an ending one (cmux's repeat
-    /// of the old SessionEnd can arrive after the new SessionStart), then the newer one wins.
-    private static func outranks(_ a: Session, _ b: Session) -> Bool {
-        a.ended != b.ended ? !a.ended : a.touched > b.touched
     }
 
     /// When the earliest ending agent's grace runs out, so the adapter can publish its removal
