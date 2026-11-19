@@ -26,6 +26,9 @@ public final class CmuxAdapter: HerdrClient, Sendable {
         var announceOffline = false
     }
     private let shared = Mutex(State())
+    /// Serialises publishing (reader, ticker and the post-grace recheck) so an older
+    /// snapshot can't be diffed after a newer one and briefly remove an agent.
+    private let publishing = Mutex(())
 
     public init(
         cmuxPath: String? = CmuxAdapter.findCmux(),
@@ -228,26 +231,30 @@ public final class CmuxAdapter: HerdrClient, Sendable {
     }
 
     private func publishSnapshot() {
-        let terminals = currentTerminals()
-        shared.withLock { $0.published = Dictionary(uniqueKeysWithValues: terminals.map { ($0.address, $0) }) }
-        emit(.connected(CoreHello(generation: 1, version: "cmux", methods: [])))
-        emit(.snapshot(seq: nextSeq(), terminals: terminals))
+        publishing.withLock { _ in
+            let terminals = currentTerminals()
+            shared.withLock { $0.published = Dictionary(uniqueKeysWithValues: terminals.map { ($0.address, $0) }) }
+            emit(.connected(CoreHello(generation: 1, version: "cmux", methods: [])))
+            emit(.snapshot(seq: nextSeq(), terminals: terminals))
+        }
     }
 
     private func publishChanges() {
-        let terminals = currentTerminals()
-        let result = shared.withLock { state in
-            let result = HerdrCLIAdapter.diff(old: state.published, new: terminals)
-            state.published = result.next
-            return result
+        publishing.withLock { _ in
+            let terminals = currentTerminals()
+            let result = shared.withLock { state in
+                let result = HerdrCLIAdapter.diff(old: state.published, new: terminals)
+                state.published = result.next
+                return result
+            }
+            for event in result.events { emit(.event(seq: nextSeq(), event)) }
         }
-        for event in result.events { emit(.event(seq: nextSeq(), event)) }
     }
 
     /// An ended session keeps its agent for `CmuxSessions.endGrace`; publish again once that
     /// is over so `/exit` doesn't wait for the next tick.
     private func publishAfterGrace(generation gen: Int) {
-        DispatchQueue.global().asyncAfter(deadline: .now() + CmuxSessions.endGrace + 0.1) { [weak self] in
+        DispatchQueue.global().asyncAfter(deadline: .now() + CmuxSessions.endGrace) { [weak self] in
             guard let self, self.isCurrent(gen) else { return }
             self.publishChanges()
         }

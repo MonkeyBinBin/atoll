@@ -71,10 +71,8 @@ public struct CmuxSessions: Sendable {
         if let pid = (payload["_ppid"] as? NSNumber)?.int32Value { session.pid = pid }
         switch hook {
         case "SessionEnd":
-            if !session.ended {
-                let occurred = (frame["occurred_at"] as? String).flatMap(Self.parseDate) ?? now
-                session.endedMs = Self.ms(occurred)
-            }
+            // cmux repeats every hook; the grace counts from the first SessionEnd.
+            if !session.ended { session.endedMs = Self.ms(Self.occurredAt(frame) ?? now) }
             session.ended = true
         case "SubagentStart", "SubagentStop", "PreCompact", "Notification", "AskUserQuestion":
             // Sub-agent and housekeeping hooks don't change the main agent's state. Notification
@@ -86,9 +84,7 @@ public struct CmuxSessions: Sendable {
             session.lastTool = hook == "PreToolUse" ? payload["tool_name"] as? String : nil
             session.ended = false
             session.endedMs = nil
-            if let occurred = frame["occurred_at"] as? String, let date = Self.parseDate(occurred) {
-                session.lastHookMs = Self.ms(date)
-            }
+            if let occurred = Self.occurredAt(frame) { session.lastHookMs = Self.ms(occurred) }
         }
         clock += 1
         session.touched = clock
@@ -106,6 +102,10 @@ public struct CmuxSessions: Sendable {
         } else {
             waitingWorkspaces.remove(String(tab))
         }
+    }
+
+    static func occurredAt(_ frame: [String: Any]) -> Date? {
+        (frame["occurred_at"] as? String).flatMap(parseDate)
     }
 
     static func ms(_ date: Date) -> UInt64 { UInt64(max(date.timeIntervalSince1970, 0) * 1000) }
@@ -173,6 +173,8 @@ public struct CmuxSessions: Sendable {
             }
     }
 
+    /// Whether `a` keeps the agent over `b`: a live session beats an ending one (cmux's repeat
+    /// of the old SessionEnd can arrive after the new SessionStart), then the newer one wins.
     private static func outranks(_ a: Session, _ b: Session) -> Bool {
         a.ended != b.ended ? !a.ended : a.touched > b.touched
     }
