@@ -267,10 +267,11 @@ public enum OutputFilter {
 
     // MARK: Antigravity CLI
 
-    /// Antigravity CLI reports `antigravity`; herdr may name it after its command, `agy`.
+    /// Antigravity CLI reports `antigravity`; herdr may name it after its command, `agy`. Same word rule as
+    /// `AgentCLI.matching(app:)`: the word itself, or it followed by `-`.
     static func isAntigravity(app: String?) -> Bool {
         guard let app = app?.lowercased() else { return false }
-        return app.hasPrefix("antigravity") || app.hasPrefix("agy")
+        return ["antigravity", "agy"].contains { app == $0 || app.hasPrefix($0 + "-") }
     }
 
     /// Antigravity CLI: like Claude Code, the input box is a pair of full-width `─` rules around `>` with a status
@@ -297,15 +298,20 @@ public enum OutputFilter {
               !inside.contains(where: { trimmed($0).isEmpty }),
               lines[(lower + 1)...].filter({ !trimmed($0).isEmpty }).count <= 3 else { return nil }
         var kept = Array(lines[..<upper])
-        while let last = kept.last, isAntigravityFooterRow(last) { kept.removeLast() }
+        peelAntigravityFooter(&kept)
+        // A tip: a block of `┃` rows ending in "┃ esc to dismiss" ("┃ Auto is now the default agent mode").
+        if let last = kept.last, trimmed(last) == "┃ esc to dismiss" {
+            while let last = kept.last, trimmed(last).hasPrefix("┃") { kept.removeLast() }
+            peelAntigravityFooter(&kept)
+        }
         return kept
     }
 
-    /// Rows between the last message and the input box: the working spinner ("⡿  Working...") and tips
-    /// ("┃ Auto is now the default agent mode"). "⎿  Interrupted · …" is the turn's, and stays.
-    static func isAntigravityFooterRow(_ line: String) -> Bool {
-        let t = trimmed(line)
-        return t.isEmpty || isDecorationRow(line) || isAntigravitySpinnerRow(line) || t.hasPrefix("┃")
+    /// Rows between the last message and the input box: blank rows and the working spinner ("⡿  Working...").
+    /// "⎿  Interrupted · …" is the turn's, and stays.
+    static func peelAntigravityFooter(_ rows: inout [String]) {
+        while let last = rows.last,
+              trimmed(last).isEmpty || isDecorationRow(last) || isAntigravitySpinnerRow(last) { rows.removeLast() }
     }
 
     /// "⡿  Working..." or "⡿  <what it's thinking about>": a braille spinner leads the row.
@@ -315,18 +321,22 @@ public enum OutputFilter {
     }
 
     /// The row under the input box: "? for shortcuts" / "esc to cancel" on the left, "auto · <model> · <effort>"
-    /// right-aligned.
+    /// right-aligned (alone when the left hint is blank).
     static func isAntigravityStatusRow(_ line: String) -> Bool {
         let t = trimmed(line)
-        return t.hasPrefix("? for shortcuts") || t.hasPrefix("esc to ") || line.prefix { $0 == " " }.count >= 40
+        if t.hasPrefix("? for shortcuts") || t.hasPrefix("esc to ") { return true }
+        return line.prefix { $0 == " " }.count >= 40 && t.components(separatedBy: " · ").count >= 2
     }
 
     /// The start banner: logo rows ("▄▀▀▄   Antigravity CLI 1.5.13", then account, model and folder beside the
-    /// logo) and the blank rows after them. What sits above it (the shell's `❯ agy`) isn't the agent's.
+    /// logo) and the blank rows after them. What sits above it (the shell's `❯ agy`) isn't the agent's. When the
+    /// read starts partway into the banner (its first row scrolled out), the logo rows at the top still go.
     static func stripAntigravityBanner(_ lines: [String]) -> [String] {
         let logo: Set<Character> = ["▀", "▄"]
         let isLogo = { (line: String) in trimmed(line).first.map(logo.contains) ?? false }
-        guard let start = lines.lastIndex(where: { isLogo($0) && $0.contains("Antigravity CLI") }) else { return lines }
+        let start = lines.lastIndex { isLogo($0) && $0.contains("Antigravity CLI") }
+            ?? lines.firstIndex { !trimmed($0).isEmpty }.flatMap { isLogo(lines[$0]) ? $0 : nil }
+        guard let start else { return lines }
         var end = start
         while end < lines.count, isLogo(lines[end]) { end += 1 }
         while end < lines.count, trimmed(lines[end]).isEmpty { end += 1 }

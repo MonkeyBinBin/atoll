@@ -92,6 +92,8 @@ File access
   - 測試：`Tests/AtollCoreTests/AntigravityOutputTests.swift`，fixture 來自 hc 實測（idle、working、permission、被打斷、信任資料夾），已去識別化。另外用未去識別化的 200 欄原始畫面跑過一次 filter，結果一致（臨時測試已刪除）。`make check` 全過（607 tests）。
   - 剛啟動、還沒有訊息的 session 過濾後會是空的，依既有規則退回全畫面（banner 會顯示），和 Claude Code 一致。
   - hc 回報的 app word 是 `antigravity`。herdr 0.9.3 有安裝但當時沒在跑，沒有啟動它，所以 herdr 的 agent word 仍未驗證。
+- 2026-11-20（agent）：依 code review 修正。工具列只認 `● <Verb> <N> files/commands/tasks/patterns` 與 `● Ran (`，避免 hc 讀到的 Claude Code 回覆 bullet（`● Found 3 issues:`、`● Updated (and pushed) …`）被染成工具列；`┃` 列只在以 `┃ esc to dismiss` 結尾時當提示拿掉；banner 第一列捲出讀取範圍時，頂端的 logo 列仍會拿掉；沒有輸入框時，縮排 ≥ 40 的最後一列要帶 ` · ` 才算狀態列；app word 分派改成與 `AgentCLI.matching(app:)` 相同的「完全相同或接 `-`」。
+  - 未處理：slash menu 打開（輸入框下方超過 3 列）或輸入內容含空白列時認不出輸入框，會退回全畫面。這兩種畫面還沒實測，等抓到實機畫面再調整判定。
 
 ## Agent Brief
 

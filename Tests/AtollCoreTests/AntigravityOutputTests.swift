@@ -138,6 +138,29 @@ struct AntigravityOutputTests {
         #expect(messages(screen) == messages(S.idle))
     }
 
+    @Test("`┃` rows that aren't a tip (no \"esc to dismiss\" at the end) are the reply's and stay")
+    func quoteAboveInput() {
+        let quote = ["  ┃ Note: main.go now prints hello atoll.", "  ┃ Run go run . to see it."]
+        let screen = (S.firstTurn + quote + S.inputBox()).joined(separator: "\n")
+        #expect(messages(screen).hasSuffix(quote.joined(separator: "\n")))
+    }
+
+    @Test("a read that starts partway into the banner still drops its logo rows")
+    func scrolledBanner() {
+        let screen = (Array(S.banner.dropFirst(3)) + S.firstTurn + S.inputBox()).joined(separator: "\n")
+        #expect(messages(screen) == messages(S.idle))
+        #expect(!messages(screen).contains("user@example.com"))
+    }
+
+    @Test("with no input box, a deeply indented last row is content, not the status row")
+    func indentedLastRow() {
+        let row = String(repeating: " ", count: 44) + "centered text"
+        let screen = (S.firstTurn + ["Command", S.fullRule, row]).joined(separator: "\n")
+        #expect(messages(screen).hasSuffix(row))
+        let status = String(repeating: " ", count: 60) + "Gemini 3.8 Flash · high"
+        #expect(!messages(screen + "\n" + status).hasSuffix(status))
+    }
+
     @Test("permission dialog: no input box, so the dialog stays and only the banner and status row go")
     func permission() {
         let shown = messages(S.permission)
@@ -183,6 +206,8 @@ struct AntigravityOutputTests {
     func dispatch() {
         #expect(messages(S.idle, app: "agy") == messages(S.idle))
         #expect(messages(S.idle, app: "Antigravity") == messages(S.idle))
+        #expect(messages(S.idle, app: "agy-1.6") == messages(S.idle))
+        #expect(OutputFilter.messages(S.idle, tool: .generic, app: "agyle") == OutputFilter.clean(S.idle))
         #expect(OutputFilter.messages(S.idle, tool: .generic, app: "droid") == OutputFilter.clean(S.idle))
         #expect(OutputFilter.messages(S.idle, tool: .generic) == OutputFilter.clean(S.idle))
     }
@@ -255,9 +280,10 @@ struct AntigravityStylingTests {
         #expect(byText["•"] == OutputStyling.listMarker)
     }
 
-    @Test("a reply bullet without a count, or `(` after a word that isn't a tool verb, stays a plain bold bullet")
+    @Test("reply bullets (Claude Code via hc uses `●` too) stay plain bold bullets")
     func replyBullet() {
-        for row in ["● Updated the README with the new flags.", "● Done (all tests pass)"] {
+        for row in ["● Updated the README with the new flags.", "● Done (all tests pass)", "● Found 3 issues:",
+                    "● All 12 tests pass.", "● Updated (and pushed) the branch."] {
             let pieces = styled(row)
             #expect(pieces.first?.0 == "●")
             #expect(pieces.first?.1 == OutputStyling.bold)

@@ -160,18 +160,10 @@ public enum OutputStyling {
     private static let diffRow = try! NSRegularExpression(pattern: #"^\s+\d+ +([+-])"#)
     private static let toolCall = try! NSRegularExpression(pattern: #"^[⏺●•] ([A-Z][A-Za-z0-9_]*)\("#)
     /// Antigravity CLI's tool rows: "● Explored 2 files (…)", "● Ran 9 commands, killed 1 task (…)", "● Ran (go run .)".
-    /// A count right after the verb tells them from a reply bullet ("● Updated the README…"); `(` does too, but only
-    /// after a known tool verb ("● Done (all tests pass)" is a reply).
-    private static let summaryToolRow = try! NSRegularExpression(pattern: #"^● ([A-Z][a-z]+) (\d|\()"#)
-
-    private static func summaryToolMatch(_ row: String, in whole: NSRange) -> NSTextCheckingResult? {
-        guard let match = summaryToolRow.firstMatch(in: row, range: whole) else { return nil }
-        let ns = row as NSString
-        if ns.substring(with: match.range(at: 2)) == "(", !codexToolVerbs.contains(ns.substring(with: match.range(at: 1))) {
-            return nil
-        }
-        return match
-    }
+    /// A count of files / commands / tasks right after the verb, or `(` right after "Ran", tells them from a reply
+    /// bullet ("● Found 3 issues:", "● Updated (and pushed) the branch").
+    private static let summaryToolRow = try! NSRegularExpression(
+        pattern: #"^● ([A-Z][a-z]+) (?:\d+ (?:files?|commands?|tasks?|patterns?)\b|(?<=● Ran )\()"#)
     private static let inlineCode = try! NSRegularExpression(pattern: #"`[^`\n]+`"#)
     private static let url = try! NSRegularExpression(pattern: #"https?://[^\s<>()\[\]"'`]+(?<![.,;:!?])"#)
     /// "Sources/App.swift", "~/x/y.md", "./a/b.ts:12:3", or a bare file with a line: "App.swift:12".
@@ -291,7 +283,7 @@ public enum OutputStyling {
             }
             if indent == 0, let first = trimmed.first, first == "⏺" || first == "●" || first == "•" {
                 let bullet = NSRange(location: 0, length: (String(first) as NSString).length)
-                if let match = toolCall.firstMatch(in: row, range: whole) ?? summaryToolMatch(row, in: whole) {
+                if let match = toolCall.firstMatch(in: row, range: whole) ?? summaryToolRow.firstMatch(in: row, range: whole) {
                     add(bullet, green)
                     add(match.range(at: 1), bold)
                 } else if first == "•", let verb = trimmed.dropFirst(2).split(separator: " ").first,
