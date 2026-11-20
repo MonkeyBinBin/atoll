@@ -62,14 +62,14 @@ File access
 
 **Blocked by:** —
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] `app` 為 `antigravity` 的 agent 在 Messages 模式下，不顯示啟動列、banner、輸入框與狀態列；使用者訊息上方的短 rule 與訊息本身保留
 - [x] 找不到輸入框時（例如 Settings 等全螢幕畫面）退回目前的 cleaned 全畫面，不會變成空白
 - [x] `activityFingerprint` 對 Antigravity 排除輸入框、狀態列與 banner
 - [x] heuristic：`● <Verb> …` 工具列 green bullet + 動詞加粗；`○` / `▸ Thought for …` muted；不影響 Claude Code / Codex 既有樣式（`OutputStylingTests` 維持通過）
 - [x] AtollCore 測試：以去識別化的實機畫面做 fixture，涵蓋 idle、等待回應（permission 對話框）、被打斷三種畫面
-- [ ] `make check` 通過；實機確認 hc 裡的 Antigravity session
+- [x] `make check` 通過；實機確認 hc 裡的 Antigravity session
 
 **Out of scope:**
 - Antigravity 的 `WaitingPreview` / `PermissionChoices`（畫面上是 `Run this command?` / `Allow access to this file?` 與編號選項），另開 ticket
@@ -96,6 +96,7 @@ File access
   - 未處理：slash menu 打開（輸入框下方超過 3 列）或輸入內容含空白列時認不出輸入框，會退回全畫面。這兩種畫面還沒實測，等抓到實機畫面再調整判定。
 - 2026-11-20（agent）：在 herdr 0.9.3 實測（在使用者的 workspace 開 pane 跑 `agy`，用完已關掉）。herdr 回報的 agent word 是 `agy`，`HerdrCLIAdapter.appName` 原樣傳成 `app`，`isAntigravity` 認得。herdr pane 約 97 欄時 banner 改成上下排：logo 在上，版本／帳號／model／路徑另起幾列在下，原本只認「logo 列含 `Antigravity CLI`」會整段漏掉，已改成兩種版面都認（上下排要求 `Antigravity CLI ` 列的上一個非空列是 logo，避免回覆提到版本時誤判）。用 herdr 的 `recent_unwrapped` + ANSI 讀回畫面跑過 filter 與 `mapped` 上色，結果正確。
 - 2026-11-20（agent）：依第二次 code review（medium）收緊判定，皆為未在實機重現的推測情境：輸入框第一列是 `> <數字>.` 時視為選項對話框而非輸入框；上下排 banner 的資訊列遇到 rule 或 `>` 列就停，不會吃掉第一則訊息；沒有錨點時頂端的 logo 列後面要接 rule 才剝，避免誤刪回覆裡的區塊字元；狀態列縮排門檻放寬到 ≥ 20（仍要求含 ` · `），涵蓋窄 pane；提示最後一列以 `┃` 開頭且含 `esc to dismiss` 即可；工具列的計數格式還要求同列後面有 ` (` 摘要（`● Updated 3 files to use the new API.` 不再被染色）。實機 hc／herdr 畫面重跑結果不變。
+- 2026-11-20（agent）：使用者在 Atoll 目視確認 Messages 模式與上色沒問題，標為 resolved。
 
 ## Agent Brief
 
@@ -132,7 +133,7 @@ File access
 - [x] Claude Code、Codex、opencode 既有行為不變：`OutputFilterTests`、`OpenCodeOutputTests`、`OutputStylingTests`、`NoOutputTests` 不修改既有斷言即通過
 - [x] AtollCore 新增測試，以去識別化的實機畫面做 fixture，涵蓋 idle、等待回應（permission 對話框）、被打斷三種畫面
 - [x] `make check` 通過
-- [ ] 實機確認 hc 裡的 Antigravity session（Messages 模式與上色）；若能開 herdr，順便記下 herdr 回報的 agent word，結果寫到 `## Comments`
+- [x] 實機確認 hc 裡的 Antigravity session（Messages 模式與上色）；若能開 herdr，順便記下 herdr 回報的 agent word，結果寫到 `## Comments`
 
 **Out of scope:**
 - Antigravity 的 `WaitingPreview` / `PermissionChoices`（另開 ticket）
