@@ -94,6 +94,7 @@ File access
   - hc 回報的 app word 是 `antigravity`。herdr 0.9.3 有安裝但當時沒在跑，沒有啟動它，所以 herdr 的 agent word 仍未驗證。
 - 2026-11-20（agent）：依 code review 修正。工具列只認 `● <Verb> <N> files/commands/tasks/patterns` 與 `● Ran (`，避免 hc 讀到的 Claude Code 回覆 bullet（`● Found 3 issues:`、`● Updated (and pushed) …`）被染成工具列；`┃` 列只在以 `┃ esc to dismiss` 結尾時當提示拿掉；banner 第一列捲出讀取範圍時，頂端的 logo 列仍會拿掉；沒有輸入框時，縮排 ≥ 40 的最後一列要帶 ` · ` 才算狀態列；app word 分派改成與 `AgentCLI.matching(app:)` 相同的「完全相同或接 `-`」。
   - 未處理：slash menu 打開（輸入框下方超過 3 列）或輸入內容含空白列時認不出輸入框，會退回全畫面。這兩種畫面還沒實測，等抓到實機畫面再調整判定。
+- 2026-11-20（agent）：在 herdr 0.9.3 實測（在使用者的 workspace 開 pane 跑 `agy`，用完已關掉）。herdr 回報的 agent word 是 `agy`，`HerdrCLIAdapter.appName` 原樣傳成 `app`，`isAntigravity` 認得。herdr pane 約 97 欄時 banner 改成上下排：logo 在上，版本／帳號／model／路徑另起幾列在下，原本只認「logo 列含 `Antigravity CLI`」會整段漏掉，已改成兩種版面都認（上下排要求 `Antigravity CLI ` 列的上一個非空列是 logo，避免回覆提到版本時誤判）。用 herdr 的 `recent_unwrapped` + ANSI 讀回畫面跑過 filter 與 `mapped` 上色，結果正確。
 
 ## Agent Brief
 

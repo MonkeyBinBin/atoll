@@ -145,6 +145,35 @@ struct AntigravityOutputTests {
         #expect(messages(screen).hasSuffix(quote.joined(separator: "\n")))
     }
 
+    @Test("narrow (herdr pane): the banner's text rows are stacked under the logo and go too")
+    func stackedBanner() {
+        let banner = [
+            "❯ agy",
+            "",
+            "      ▄▀▀▄",
+            "     ▀▀▀▀▀▀",
+            "    ▀▀▀▀▀▀▀▀",
+            "   ▄▀▀    ▀▀▄",
+            "  ▄▀▀      ▀▀▄",
+            "",
+            "  Antigravity CLI 1.5.13",
+            "  user@example.com (Antigravity Starter Quota)",
+            "  Gemini 3.8 Flash (High)",
+            "  /path/to/project",
+            "",
+        ]
+        let screen = (banner + S.firstTurn + S.inputBox()).joined(separator: "\n")
+        #expect(messages(screen, app: "agy") == messages(S.idle))
+    }
+
+    @Test("a reply that mentions the version isn't taken for the banner")
+    func versionInReply() {
+        let turn = S.firstTurn + ["  Antigravity CLI 1.5.13 is installed.", ""]
+        let screen = (S.banner + turn + S.inputBox()).joined(separator: "\n")
+        #expect(messages(screen).hasSuffix("  Antigravity CLI 1.5.13 is installed."))
+        #expect(messages(screen).hasPrefix(S.messageRule))
+    }
+
     @Test("a read that starts partway into the banner still drops its logo rows")
     func scrolledBanner() {
         let screen = (Array(S.banner.dropFirst(3)) + S.firstTurn + S.inputBox()).joined(separator: "\n")

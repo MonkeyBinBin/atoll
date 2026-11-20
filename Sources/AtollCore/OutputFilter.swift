@@ -328,17 +328,33 @@ public enum OutputFilter {
         return line.prefix { $0 == " " }.count >= 40 && t.components(separatedBy: " · ").count >= 2
     }
 
-    /// The start banner: logo rows ("▄▀▀▄   Antigravity CLI 1.5.13", then account, model and folder beside the
-    /// logo) and the blank rows after them. What sits above it (the shell's `❯ agy`) isn't the agent's. When the
-    /// read starts partway into the banner (its first row scrolled out), the logo rows at the top still go.
+    /// The start banner and the blank rows after it. Wide, the version, account, model and folder sit beside the
+    /// logo ("▄▀▀▄   Antigravity CLI 1.5.13"); narrow (under ~100 columns), they're stacked below it. What sits
+    /// above it (the shell's `❯ agy`) isn't the agent's. When the read starts partway into the logo (its first
+    /// row scrolled out), the logo rows at the top still go.
     static func stripAntigravityBanner(_ lines: [String]) -> [String] {
         let logo: Set<Character> = ["▀", "▄"]
-        let isLogo = { (line: String) in trimmed(line).first.map(logo.contains) ?? false }
-        let start = lines.lastIndex { isLogo($0) && $0.contains("Antigravity CLI") }
-            ?? lines.firstIndex { !trimmed($0).isEmpty }.flatMap { isLogo(lines[$0]) ? $0 : nil }
-        guard let start else { return lines }
-        var end = start
-        while end < lines.count, isLogo(lines[end]) { end += 1 }
+        let isLogo = { (index: Int) in trimmed(lines[index]).first.map(logo.contains) ?? false }
+        let isTitle = { (index: Int) -> Bool in
+            if isLogo(index) { return lines[index].contains("Antigravity CLI ") }
+            guard trimmed(lines[index]).hasPrefix("Antigravity CLI "),
+                  let above = lines[..<index].lastIndex(where: { !trimmed($0).isEmpty }) else { return false }
+            return isLogo(above)
+        }
+        var end: Int
+        if let title = lines.indices.last(where: isTitle) {
+            end = title
+            if isLogo(title) {
+                while end < lines.count, isLogo(end) { end += 1 }
+            } else {
+                while end < lines.count, !trimmed(lines[end]).isEmpty { end += 1 }
+            }
+        } else if let first = lines.firstIndex(where: { !trimmed($0).isEmpty }), isLogo(first) {
+            end = first
+            while end < lines.count, isLogo(end) { end += 1 }
+        } else {
+            return lines
+        }
         while end < lines.count, trimmed(lines[end]).isEmpty { end += 1 }
         return Array(lines[end...])
     }
