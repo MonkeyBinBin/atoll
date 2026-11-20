@@ -15,7 +15,7 @@ public enum OutputFilter {
     }
 
     /// Only the messages, for tools whose layout is known; others are returned cleaned. `app` is the agent's
-    /// OSC 7501 word, which tells generic agents with a known layout (OpenCode) apart.
+    /// OSC 7501 word, which tells generic agents with a known layout (OpenCode, Antigravity CLI) apart.
     /// Falls back to the cleaned full screen if filtering would leave nothing.
     public static func messages(_ text: String, tool: AgentTool, app: String? = nil) -> String {
         let all = lines(text)
@@ -23,7 +23,7 @@ public enum OutputFilter {
         switch tool {
         case .claudeCode: kept = claudeMessages(all)
         case .codex: kept = codexMessages(all)
-        case .generic: kept = app.flatMap(AgentCLI.matching(app:))?.command == "opencode" ? openCodeMessages(all) : all
+        case .generic: kept = genericMessages(all, app: app) ?? all
         }
         kept = kept.filter { !isDecorationRow($0) }
         kept = trimTrailingBlankLines(kept)
@@ -35,10 +35,10 @@ public enum OutputFilter {
     /// A hash of what the agent has put on screen, for "no output for 10m": the input box, status lines,
     /// spinners, statusline art and elapsed-time / token counters are left out first, or the screen would
     /// always look changed. Only the hash is kept; the text is dropped right away.
-    public static func activityFingerprint(_ text: String, tool: AgentTool) -> Int {
+    public static func activityFingerprint(_ text: String, tool: AgentTool, app: String? = nil) -> Int {
         // FNV-1a: stable across launches, cheap, and nothing but this number is kept.
         var hash: UInt64 = 0xcbf29ce484222325
-        for line in activityLines(text, tool: tool) {
+        for line in activityLines(text, tool: tool, app: app) {
             for byte in line.utf8 {
                 hash = (hash ^ UInt64(byte)) &* 0x100000001b3
             }
@@ -48,13 +48,16 @@ public enum OutputFilter {
     }
 
     /// The rows the fingerprint is taken over, counters already blanked.
-    static func activityLines(_ text: String, tool: AgentTool) -> [String] {
+    static func activityLines(_ text: String, tool: AgentTool, app: String? = nil) -> [String] {
         let all = lines(text)
         var kept: [String]
         switch tool {
         case .claudeCode: kept = withoutToolTitles(claudeMessages(all))
         case .codex: kept = codexMessages(all).filter { !isCodexWorkingRow($0) }
-        case .generic: kept = all
+        case .generic:
+            kept = isAntigravity(app: app)
+                ? antigravityMessages(all).filter { !isAntigravitySpinnerRow($0) }
+                : all
         }
         kept = kept.filter { !isDecorationRow($0) && !isBrailleArt($0.trimmingCharacters(in: .whitespaces)) }
         return trimTrailingBlankLines(kept).map(withoutCounters)
@@ -253,7 +256,114 @@ public enum OutputFilter {
         text.count > limit ? String(text.prefix(limit - 1)) + "…" : text
     }
 
-    // MARK: Helpers
+    // MARK: Generic agents
+
+    /// The messages of a generic agent whose layout is known from its OSC 7501 word; nil for the rest.
+    static func genericMessages(_ lines: [String], app: String?) -> [String]? {
+        if isAntigravity(app: app) { return antigravityMessages(lines) }
+        if app.flatMap(AgentCLI.matching(app:))?.command == "opencode" { return openCodeMessages(lines) }
+        return nil
+    }
+
+    // MARK: Antigravity CLI
+
+    /// Antigravity CLI reports `antigravity`; herdr may name it after its command, `agy`. Same word rule as
+    /// `AgentCLI.matching(app:)`: the word itself, or it followed by `-`.
+    static func isAntigravity(app: String?) -> Bool {
+        guard let app = app?.lowercased() else { return false }
+        return ["antigravity", "agy"].contains { app == $0 || app.hasPrefix($0 + "-") }
+    }
+
+    /// Antigravity CLI: like Claude Code, the input box is a pair of full-width `─` rules around `>` with a status
+    /// row below; each sent message also gets a shorter rule above it, which stays. A dialog (permission, file
+    /// access) takes the input box's place: then only the status row goes, so the dialog stays readable.
+    static func antigravityMessages(_ input: [String]) -> [String] {
+        let lines = stripAntigravityBanner(input)
+        if let kept = antigravityMessagesAboveInput(lines) { return kept }
+        var kept = trimTrailingBlankLines(lines)
+        if let last = kept.last, isAntigravityStatusRow(last) { kept.removeLast() }
+        return kept
+    }
+
+    /// The messages above the input box, or nil when no input box sits at the bottom.
+    static func antigravityMessagesAboveInput(_ lines: [String]) -> [String]? {
+        let rules = lines.indices.filter { isRule(lines[$0]) }
+        guard rules.count >= 2 else { return nil }
+        let upper = rules[rules.count - 2], lower = rules[rules.count - 1]
+        // A message's own rule is shorter, and its `>` row is followed by a blank row before the reply; the
+        // input box's rows (one per typed line) have no blank between its rules. A choice list's highlighted row
+        // ("> 1. Yes, run command") is a dialog's, not the input box's.
+        let inside = lines[(upper + 1)..<lower]
+        guard trimmed(lines[upper]).count == trimmed(lines[lower]).count,
+              let first = inside.first, first.hasPrefix(">"), inside.count <= 10,
+              first.range(of: #"^>\s+\d+\.\s"#, options: .regularExpression) == nil,
+              !inside.contains(where: { trimmed($0).isEmpty }),
+              lines[(lower + 1)...].filter({ !trimmed($0).isEmpty }).count <= 3 else { return nil }
+        var kept = Array(lines[..<upper])
+        peelAntigravityFooter(&kept)
+        // A tip: a block of `┃` rows ending in "┃ esc to dismiss" ("┃ Auto is now the default agent mode").
+        if let last = kept.last, trimmed(last).hasPrefix("┃"), last.contains("esc to dismiss") {
+            while let last = kept.last, trimmed(last).hasPrefix("┃") { kept.removeLast() }
+            peelAntigravityFooter(&kept)
+        }
+        return kept
+    }
+
+    /// Rows between the last message and the input box: blank rows and the working spinner ("⡿  Working...").
+    /// "⎿  Interrupted · …" is the turn's, and stays.
+    static func peelAntigravityFooter(_ rows: inout [String]) {
+        while let last = rows.last,
+              trimmed(last).isEmpty || isDecorationRow(last) || isAntigravitySpinnerRow(last) { rows.removeLast() }
+    }
+
+    /// "⡿  Working..." or "⡿  <what it's thinking about>": a braille spinner leads the row.
+    static func isAntigravitySpinnerRow(_ line: String) -> Bool {
+        guard let first = trimmed(line).unicodeScalars.first else { return false }
+        return (0x2800...0x28FF).contains(first.value)
+    }
+
+    /// The row under the input box: "? for shortcuts" / "esc to cancel" on the left, "auto · <model> · <effort>"
+    /// right-aligned (alone when the left hint is blank).
+    static func isAntigravityStatusRow(_ line: String) -> Bool {
+        let t = trimmed(line)
+        if t.hasPrefix("? for shortcuts") || t.hasPrefix("esc to ") { return true }
+        return line.prefix { $0 == " " }.count >= 20 && t.components(separatedBy: " · ").count >= 2
+    }
+
+    /// The start banner and the blank rows after it. Wide, the version, account, model and folder sit beside the
+    /// logo ("▄▀▀▄   Antigravity CLI 1.5.13"); narrow (under ~100 columns), they're stacked below it. What sits
+    /// above it (the shell's `❯ agy`) isn't the agent's. When the read starts partway into the logo (its first
+    /// row scrolled out), the logo rows at the top still go, if a rule (the first message's) follows them.
+    static func stripAntigravityBanner(_ lines: [String]) -> [String] {
+        let logo: Set<Character> = ["▀", "▄"]
+        let isLogo = { (index: Int) in trimmed(lines[index]).first.map(logo.contains) ?? false }
+        let isTitle = { (index: Int) -> Bool in
+            if isLogo(index) { return lines[index].contains("Antigravity CLI ") }
+            guard trimmed(lines[index]).hasPrefix("Antigravity CLI "),
+                  let above = lines[..<index].lastIndex(where: { !trimmed($0).isEmpty }) else { return false }
+            return isLogo(above)
+        }
+        var end: Int
+        if let title = lines.indices.last(where: isTitle) {
+            end = title
+            if isLogo(title) {
+                while end < lines.count, isLogo(end) { end += 1 }
+            } else {
+                // Version, account, model, folder: stop at a blank row, or at the first message if none came.
+                while end < lines.count, !trimmed(lines[end]).isEmpty, !isRule(lines[end]),
+                      !lines[end].hasPrefix(">") { end += 1 }
+            }
+        } else if let first = lines.firstIndex(where: { !trimmed($0).isEmpty }), isLogo(first) {
+            end = first
+            while end < lines.count, isLogo(end) { end += 1 }
+            let next = lines[end...].firstIndex { !trimmed($0).isEmpty }
+            guard let next, isRule(lines[next]) else { return lines }
+        } else {
+            return lines
+        }
+        while end < lines.count, trimmed(lines[end]).isEmpty { end += 1 }
+        return Array(lines[end...])
+    }
 
     // MARK: OpenCode
 
