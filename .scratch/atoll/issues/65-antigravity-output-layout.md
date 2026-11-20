@@ -95,6 +95,7 @@ File access
 - 2026-11-20（agent）：依 code review 修正。工具列只認 `● <Verb> <N> files/commands/tasks/patterns` 與 `● Ran (`，避免 hc 讀到的 Claude Code 回覆 bullet（`● Found 3 issues:`、`● Updated (and pushed) …`）被染成工具列；`┃` 列只在以 `┃ esc to dismiss` 結尾時當提示拿掉；banner 第一列捲出讀取範圍時，頂端的 logo 列仍會拿掉；沒有輸入框時，縮排 ≥ 40 的最後一列要帶 ` · ` 才算狀態列；app word 分派改成與 `AgentCLI.matching(app:)` 相同的「完全相同或接 `-`」。
   - 未處理：slash menu 打開（輸入框下方超過 3 列）或輸入內容含空白列時認不出輸入框，會退回全畫面。這兩種畫面還沒實測，等抓到實機畫面再調整判定。
 - 2026-11-20（agent）：在 herdr 0.9.3 實測（在使用者的 workspace 開 pane 跑 `agy`，用完已關掉）。herdr 回報的 agent word 是 `agy`，`HerdrCLIAdapter.appName` 原樣傳成 `app`，`isAntigravity` 認得。herdr pane 約 97 欄時 banner 改成上下排：logo 在上，版本／帳號／model／路徑另起幾列在下，原本只認「logo 列含 `Antigravity CLI`」會整段漏掉，已改成兩種版面都認（上下排要求 `Antigravity CLI ` 列的上一個非空列是 logo，避免回覆提到版本時誤判）。用 herdr 的 `recent_unwrapped` + ANSI 讀回畫面跑過 filter 與 `mapped` 上色，結果正確。
+- 2026-11-20（agent）：依第二次 code review（medium）收緊判定，皆為未在實機重現的推測情境：輸入框第一列是 `> <數字>.` 時視為選項對話框而非輸入框；上下排 banner 的資訊列遇到 rule 或 `>` 列就停，不會吃掉第一則訊息；沒有錨點時頂端的 logo 列後面要接 rule 才剝，避免誤刪回覆裡的區塊字元；狀態列縮排門檻放寬到 ≥ 20（仍要求含 ` · `），涵蓋窄 pane；提示最後一列以 `┃` 開頭且含 `esc to dismiss` 即可；工具列的計數格式還要求同列後面有 ` (` 摘要（`● Updated 3 files to use the new API.` 不再被染色）。實機 hc／herdr 畫面重跑結果不變。
 
 ## Agent Brief
 

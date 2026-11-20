@@ -160,10 +160,11 @@ public enum OutputStyling {
     private static let diffRow = try! NSRegularExpression(pattern: #"^\s+\d+ +([+-])"#)
     private static let toolCall = try! NSRegularExpression(pattern: #"^[⏺●•] ([A-Z][A-Za-z0-9_]*)\("#)
     /// Antigravity CLI's tool rows: "● Explored 2 files (…)", "● Ran 9 commands, killed 1 task (…)", "● Ran (go run .)".
-    /// A count of files / commands / tasks right after the verb, or `(` right after "Ran", tells them from a reply
-    /// bullet ("● Found 3 issues:", "● Updated (and pushed) the branch").
+    /// A count of files / commands / tasks right after the verb with the `(…)` summary later on the row, or `(`
+    /// right after "Ran", tells them from a reply bullet ("● Found 3 issues:", "● Updated 3 files to use the new
+    /// API.", "● Updated (and pushed) the branch").
     private static let summaryToolRow = try! NSRegularExpression(
-        pattern: #"^● ([A-Z][a-z]+) (?:\d+ (?:files?|commands?|tasks?|patterns?)\b|(?<=● Ran )\()"#)
+        pattern: #"^● ([A-Z][a-z]+) (?:\d+ (?:files?|commands?|tasks?|patterns?)\b.* \(|(?<=● Ran )\()"#)
     private static let inlineCode = try! NSRegularExpression(pattern: #"`[^`\n]+`"#)
     private static let url = try! NSRegularExpression(pattern: #"https?://[^\s<>()\[\]"'`]+(?<![.,;:!?])"#)
     /// "Sources/App.swift", "~/x/y.md", "./a/b.ts:12:3", or a bare file with a line: "App.swift:12".

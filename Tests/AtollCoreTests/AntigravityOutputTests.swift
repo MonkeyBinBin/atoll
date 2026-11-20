@@ -166,6 +166,41 @@ struct AntigravityOutputTests {
         #expect(messages(screen, app: "agy") == messages(S.idle))
     }
 
+    @Test("a stacked banner with no blank row before the first message keeps that message")
+    func stackedBannerNoBlank() {
+        let banner = ["      ▄▀▀▄", "  ▄▀▀      ▀▀▄", "", "  Antigravity CLI 1.5.13", "  user@example.com", "  /path/to/project"]
+        let screen = (banner + S.firstTurn + S.inputBox()).joined(separator: "\n")
+        #expect(messages(screen) == messages(S.idle))
+    }
+
+    @Test("block characters at the top that no rule follows are a reply's, not a scrolled banner")
+    func blockArtAtTop() {
+        let chart = ["▄▄▄▄▄▄▄▄ 80%", "▄▄▄▄ 40%", "  Coverage by module."]
+        let screen = (chart + [""] + S.firstTurn + S.inputBox()).joined(separator: "\n")
+        #expect(messages(screen).hasPrefix(chart.joined(separator: "\n")))
+    }
+
+    @Test("a choice list between two full-width rules is a dialog, not the input box")
+    func dialogBetweenRules() {
+        let dialog = [S.fullRule, "> 1. Yes, allow access", "  2. No", S.fullRule, S.status("esc to cancel")]
+        let screen = (S.firstTurn + ["Allow access to this file?"] + dialog).joined(separator: "\n")
+        #expect(messages(screen).hasSuffix("> 1. Yes, allow access\n  2. No\n" + S.fullRule))
+    }
+
+    @Test("a tip whose last row carries another hint still goes")
+    func tipWithMoreHints() {
+        let screen = (S.firstTurn + [" ┃ Auto is now the default agent mode", " ┃ esc to dismiss · ctrl+t for more tips"]
+            + S.inputBox()).joined(separator: "\n")
+        #expect(messages(screen) == messages(S.idle))
+    }
+
+    @Test("narrow pane: a right-aligned status row with under 40 columns of padding still goes")
+    func narrowStatusRow() {
+        let status = String(repeating: " ", count: 30) + "auto · Gemini 3.8 Flash · high"
+        let screen = (S.firstTurn + ["Command", S.fullRule, "Run this command?", status]).joined(separator: "\n")
+        #expect(messages(screen).hasSuffix("Run this command?"))
+    }
+
     @Test("a reply that mentions the version isn't taken for the banner")
     func versionInReply() {
         let turn = S.firstTurn + ["  Antigravity CLI 1.5.13 is installed.", ""]
@@ -312,7 +347,8 @@ struct AntigravityStylingTests {
     @Test("reply bullets (Claude Code via hc uses `●` too) stay plain bold bullets")
     func replyBullet() {
         for row in ["● Updated the README with the new flags.", "● Done (all tests pass)", "● Found 3 issues:",
-                    "● All 12 tests pass.", "● Updated (and pushed) the branch."] {
+                    "● All 12 tests pass.", "● Updated (and pushed) the branch.",
+                    "● Updated 3 files to use the new API."] {
             let pieces = styled(row)
             #expect(pieces.first?.0 == "●")
             #expect(pieces.first?.1 == OutputStyling.bold)

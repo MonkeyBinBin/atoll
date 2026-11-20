@@ -291,16 +291,18 @@ public enum OutputFilter {
         guard rules.count >= 2 else { return nil }
         let upper = rules[rules.count - 2], lower = rules[rules.count - 1]
         // A message's own rule is shorter, and its `>` row is followed by a blank row before the reply; the
-        // input box's rows (one per typed line) have no blank between its rules.
+        // input box's rows (one per typed line) have no blank between its rules. A choice list's highlighted row
+        // ("> 1. Yes, run command") is a dialog's, not the input box's.
         let inside = lines[(upper + 1)..<lower]
         guard trimmed(lines[upper]).count == trimmed(lines[lower]).count,
               let first = inside.first, first.hasPrefix(">"), inside.count <= 10,
+              first.range(of: #"^>\s+\d+\.\s"#, options: .regularExpression) == nil,
               !inside.contains(where: { trimmed($0).isEmpty }),
               lines[(lower + 1)...].filter({ !trimmed($0).isEmpty }).count <= 3 else { return nil }
         var kept = Array(lines[..<upper])
         peelAntigravityFooter(&kept)
         // A tip: a block of `┃` rows ending in "┃ esc to dismiss" ("┃ Auto is now the default agent mode").
-        if let last = kept.last, trimmed(last) == "┃ esc to dismiss" {
+        if let last = kept.last, trimmed(last).hasPrefix("┃"), last.contains("esc to dismiss") {
             while let last = kept.last, trimmed(last).hasPrefix("┃") { kept.removeLast() }
             peelAntigravityFooter(&kept)
         }
@@ -325,13 +327,13 @@ public enum OutputFilter {
     static func isAntigravityStatusRow(_ line: String) -> Bool {
         let t = trimmed(line)
         if t.hasPrefix("? for shortcuts") || t.hasPrefix("esc to ") { return true }
-        return line.prefix { $0 == " " }.count >= 40 && t.components(separatedBy: " · ").count >= 2
+        return line.prefix { $0 == " " }.count >= 20 && t.components(separatedBy: " · ").count >= 2
     }
 
     /// The start banner and the blank rows after it. Wide, the version, account, model and folder sit beside the
     /// logo ("▄▀▀▄   Antigravity CLI 1.5.13"); narrow (under ~100 columns), they're stacked below it. What sits
     /// above it (the shell's `❯ agy`) isn't the agent's. When the read starts partway into the logo (its first
-    /// row scrolled out), the logo rows at the top still go.
+    /// row scrolled out), the logo rows at the top still go, if a rule (the first message's) follows them.
     static func stripAntigravityBanner(_ lines: [String]) -> [String] {
         let logo: Set<Character> = ["▀", "▄"]
         let isLogo = { (index: Int) in trimmed(lines[index]).first.map(logo.contains) ?? false }
@@ -347,11 +349,15 @@ public enum OutputFilter {
             if isLogo(title) {
                 while end < lines.count, isLogo(end) { end += 1 }
             } else {
-                while end < lines.count, !trimmed(lines[end]).isEmpty { end += 1 }
+                // Version, account, model, folder: stop at a blank row, or at the first message if none came.
+                while end < lines.count, !trimmed(lines[end]).isEmpty, !isRule(lines[end]),
+                      !lines[end].hasPrefix(">") { end += 1 }
             }
         } else if let first = lines.firstIndex(where: { !trimmed($0).isEmpty }), isLogo(first) {
             end = first
             while end < lines.count, isLogo(end) { end += 1 }
+            let next = lines[end...].firstIndex { !trimmed($0).isEmpty }
+            guard let next, isRule(lines[next]) else { return lines }
         } else {
             return lines
         }
