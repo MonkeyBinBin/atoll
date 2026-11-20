@@ -159,6 +159,19 @@ public enum OutputStyling {
 
     private static let diffRow = try! NSRegularExpression(pattern: #"^\s+\d+ +([+-])"#)
     private static let toolCall = try! NSRegularExpression(pattern: #"^[⏺●•] ([A-Z][A-Za-z0-9_]*)\("#)
+    /// Antigravity CLI's tool rows: "● Explored 2 files (…)", "● Ran 9 commands, killed 1 task (…)", "● Ran (go run .)".
+    /// A count right after the verb tells them from a reply bullet ("● Updated the README…"); `(` does too, but only
+    /// after a known tool verb ("● Done (all tests pass)" is a reply).
+    private static let summaryToolRow = try! NSRegularExpression(pattern: #"^● ([A-Z][a-z]+) (\d|\()"#)
+
+    private static func summaryToolMatch(_ row: String, in whole: NSRange) -> NSTextCheckingResult? {
+        guard let match = summaryToolRow.firstMatch(in: row, range: whole) else { return nil }
+        let ns = row as NSString
+        if ns.substring(with: match.range(at: 2)) == "(", !codexToolVerbs.contains(ns.substring(with: match.range(at: 1))) {
+            return nil
+        }
+        return match
+    }
     private static let inlineCode = try! NSRegularExpression(pattern: #"`[^`\n]+`"#)
     private static let url = try! NSRegularExpression(pattern: #"https?://[^\s<>()\[\]"'`]+(?<![.,;:!?])"#)
     /// "Sources/App.swift", "~/x/y.md", "./a/b.ts:12:3", or a bare file with a line: "App.swift:12".
@@ -225,7 +238,13 @@ public enum OutputStyling {
         return false
     }
 
-    /// Colors for Claude Code / Codex / plain markdown rows: the user's prompts, reply bullets and tool names,
+    /// Antigravity CLI's "○ Thought for 13.3s (…)" / "▸ Thought for 5s, 391 tokens".
+    private static func isThoughtRow(_ trimmed: Substring) -> Bool {
+        guard let first = trimmed.first, first == "○" || first == "▸" else { return false }
+        return trimmed.dropFirst().drop { $0 == " " }.hasPrefix("Thought for ")
+    }
+
+    /// Colors for Claude Code / Codex / Antigravity CLI / plain markdown rows: the user's prompts, reply bullets and tool names,
     /// tool output (muted) with its numbered diff rows (green / red), errors, headings, list markers, backtick code,
     /// links, file paths and table borders.
     static func heuristic(_ text: String) -> [StyledRun] {
@@ -266,9 +285,13 @@ public enum OutputStyling {
                 add(whole, muted)
                 continue
             }
+            if indent == 0, isThoughtRow(trimmed) {
+                add(whole, muted)
+                continue
+            }
             if indent == 0, let first = trimmed.first, first == "⏺" || first == "●" || first == "•" {
                 let bullet = NSRange(location: 0, length: (String(first) as NSString).length)
-                if let match = toolCall.firstMatch(in: row, range: whole) {
+                if let match = toolCall.firstMatch(in: row, range: whole) ?? summaryToolMatch(row, in: whole) {
                     add(bullet, green)
                     add(match.range(at: 1), bold)
                 } else if first == "•", let verb = trimmed.dropFirst(2).split(separator: " ").first,
@@ -291,6 +314,8 @@ public enum OutputStyling {
                 continue
             } else if let marker = listMarkerLength(trimmed) {
                 add(NSRange(location: indent, length: marker), listMarker)
+            } else if indent > 0, trimmed.hasPrefix("• ") {
+                add(NSRange(location: indent, length: 1), listMarker)
             }
             inlineRuns(row, add: add)
         }

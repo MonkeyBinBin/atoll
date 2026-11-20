@@ -1164,12 +1164,13 @@ public final class AgentStore {
 
     private func checkNextOutput() {
         guard let ticket = noOutputWatch.takeDue(now: scheduler.now, interval: timing.outputCheckInterval),
-              let tool = agent(ticket.address)?.tool else { return }
+              let watched = agent(ticket.address) else { return }
+        let (tool, app) = (watched.tool, watched.app)
         let lines = timing.outputCheckLines
         Task { [client = client(for: ticket.address)] in
             // The screen text lives only for this hash.
             let hash = (try? await client.read(terminal: ticket.address, lines: lines))
-                .map { OutputFilter.activityFingerprint($0.text, tool: tool) }
+                .map { OutputFilter.activityFingerprint($0.text, tool: tool, app: app) }
             let before = self.noOutputThreshold.flatMap { self.noOutputWatch.quietSince(ticket.address, threshold: $0) }
             self.noOutputWatch.record(ticket, hash: hash, now: self.scheduler.now)
             let after = self.noOutputThreshold.flatMap { self.noOutputWatch.quietSince(ticket.address, threshold: $0) }
