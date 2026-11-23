@@ -44,9 +44,49 @@ struct AgentCLITests {
         #expect(found.searchPath == "/opt/bin:/usr/bin")
     }
 
-    @Test func helpSignatureIgnoresCase() {
+    @Test func helpSignatureIgnoresCaseStylingAndWrapping() {
         #expect(AgentCLI.helpMatches("kilo [project]  Start Kilo TUI  [default]", signature: "kilo tui"))
+        #expect(AgentCLI.helpMatches("Run the Mistral\n    Vibe interactive CLI", signature: "Mistral Vibe"))
+        #expect(AgentCLI.helpMatches("Run the \u{1B}[1mMistral\u{1B}[0m Vibe", signature: "Mistral Vibe"))
         #expect(!AgentCLI.helpMatches("pi - prints digits of pi", signature: "AI coding assistant"))
+    }
+
+    @Test func onlyPathsAreRunAndRelativeOnesResolve() {
+        let cwd = FileManager.default.currentDirectoryPath
+        #expect(AgentCLI.executable("/opt/bin/pi") == "/opt/bin/pi")
+        #expect(AgentCLI.executable("alias pi='npx some/pkg'") == nil)
+        #expect(AgentCLI.executable("pi") == nil)
+        #expect(AgentCLI.executable("~/bin/pi") == NSHomeDirectory() + "/bin/pi")
+        #expect(AgentCLI.executable("./bin/pi") == URL(fileURLWithPath: cwd).appendingPathComponent("bin/pi").standardizedFileURL.path)
+    }
+
+    /// Volta/mise shims link many commands to one binary; each command keeps its own outcome.
+    @Test func helpChecksAreKeptPerCommandPathNotPerBinary() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("atoll-shim-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let shim = dir.appendingPathComponent("shim")
+        try Data().write(to: shim)
+        for name in ["pi", "kilo"] {
+            try FileManager.default.createSymbolicLink(at: dir.appendingPathComponent(name), withDestinationURL: shim)
+        }
+        let cache = HelpCheckCache()
+        #expect(await cache.check(dir.appendingPathComponent("pi").path, signature: "AI coding assistant") { .matched } == .matched)
+        #expect(await cache.check(dir.appendingPathComponent("kilo").path, signature: "kilo tui") { .mismatched } == .mismatched)
+        #expect(await cache.check(dir.appendingPathComponent("pi").path, signature: "AI coding assistant") { .mismatched } == .matched)
+    }
+
+    @Test func anUnknownHelpCheckIsRetriedAfterAWhile() async {
+        final class Clock: @unchecked Sendable { var now = Date(timeIntervalSince1970: 0) }
+        let clock = Clock()
+        let cache = HelpCheckCache(unknownLifetime: 300, now: { clock.now })
+        #expect(await cache.check("/nonexistent/pi", signature: "s") { .unknown } == .unknown)
+        clock.now += 299
+        #expect(await cache.check("/nonexistent/pi", signature: "s") { .matched } == .unknown)
+        clock.now += 2
+        #expect(await cache.check("/nonexistent/pi", signature: "s") { .matched } == .matched)
+        clock.now += 10_000
+        #expect(await cache.check("/nonexistent/pi", signature: "s") { .mismatched } == .matched)
     }
 
     @Test func matchesAnAgentsAppWord() {
@@ -153,6 +193,17 @@ struct AgentCLIProcessTests {
         try bin.install("droid", "exit 1")
         let found = await AgentCLI.detect(signed, shell: try bin.loginShell(), timeout: 5, helpTimeout: 2)
         #expect(found?.map(\.command) == ["vibe", "kilo", "droid"])
+    }
+
+    /// Help checks share the detection's `timeout` with the shell, so a slow shell can't stretch the wait.
+    @Test func helpChecksFitInWhatIsLeftOfTheTimeout() async throws {
+        let bin = try FakeBin()
+        try bin.install("kilo", "exec sleep 30")
+        let shell = try bin.install("slow-shell", "sleep 1; PATH='\(bin.url.path)':/usr/bin:/bin; export PATH; shift; exec /bin/sh -c \"$1\"")
+        let start = Date()
+        let found = await AgentCLI.detect(signed, shell: shell, timeout: 1.5, helpTimeout: 3)
+        #expect(found?.map(\.command) == ["kilo"])
+        #expect(Date().timeIntervalSince(start) < 1.5 + ProcessRunner.terminationGrace + 0.5)
     }
 
     @Test func helpRunsOncePerExecutable() async throws {

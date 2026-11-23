@@ -67,9 +67,8 @@ public struct AgentCLI: Equatable, Sendable {
     /// The catalog CLI an agent's OSC 7501 `app` word names ("opencode", "copilot-cli", "antigravity" …), if any.
     public static func matching(app: String) -> AgentCLI? {
         let word = app.lowercased()
-        return catalog.first { cli in
-            ([cli.command] + cli.appWords).contains { word == $0 || word.hasPrefix($0 + "-") }
-        }
+        func names(_ name: String) -> Bool { word == name || word.hasPrefix(name + "-") }
+        return catalog.first { cli in names(cli.command) || cli.appWords.contains(where: names) }
     }
 
     static let marker = "ATOLL_FOUND:"
@@ -114,35 +113,54 @@ public struct AgentCLI: Equatable, Sendable {
         parseFound(output, from: clis).clis
     }
 
-    /// Whether help text names the CLI: the signature anywhere in it, ignoring case.
+    /// Whether help text names the CLI: the signature anywhere in it, ignoring case, ANSI styling, and how the
+    /// help wrapped its lines.
     static func helpMatches(_ help: String, signature: String) -> Bool {
-        help.range(of: signature, options: .caseInsensitive) != nil
+        func normalized(_ text: String) -> String {
+            text.replacingOccurrences(of: "\u{1B}\\[[0-9;?]*[ -/]*[@-~]", with: "", options: .regularExpression)
+                .split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        }
+        return normalized(help).range(of: normalized(signature), options: .caseInsensitive) != nil
+    }
+
+    /// The file to run for a `command -v` result: absolute as is, relative (a relative or `~` PATH entry) against
+    /// the directory the shell ran in, which is this process's. nil for an alias or function, which only the
+    /// shell can run.
+    static func executable(_ location: String) -> String? {
+        if location.hasPrefix("/") { return location }
+        if location.hasPrefix("alias ") || !location.contains("/") { return nil }
+        if location.hasPrefix("~") { return (location as NSString).expandingTildeInPath }
+        return URL(fileURLWithPath: location, relativeTo: URL(fileURLWithPath: FileManager.default.currentDirectoryPath))
+            .standardizedFileURL.path
     }
 
     /// Asks an interactive login shell — the one launches run in, so nvm/PATH match — which CLIs exist.
     /// nil when the shell fails, doesn't finish within `timeout`, or stops before the end of the script.
     ///
     /// A found CLI with a help signature then has its `--help` run (stdin closed, the shell's PATH so a
-    /// `#!/usr/bin/env node` script finds node), all at once, each limited to `helpTimeout`; a detection can
-    /// therefore take up to `timeout + helpTimeout` plus `ProcessRunner.terminationGrace`. Only help that
-    /// finished without the signature drops a CLI: one that timed out or couldn't start is kept, and an alias
-    /// or function (which can't run outside the shell) is trusted. This runs whatever program has that name;
-    /// `helpChecks` remembers each outcome per executable so it runs once per binary.
+    /// `#!/usr/bin/env node` script finds node), all at once, each limited to `helpTimeout` and to what is left
+    /// of `timeout`, so a detection takes at most `timeout` plus `ProcessRunner.terminationGrace`. Only help
+    /// that finished without the signature drops a CLI: one that timed out or couldn't start is kept, and an
+    /// alias or function (which can't run outside the shell) is trusted. This runs whatever program has that
+    /// name; `helpChecks` remembers outcomes so it doesn't run on every refresh.
     static func detect(_ clis: [AgentCLI], shell: String, timeout: TimeInterval, helpTimeout: TimeInterval = 3,
                        helpChecks: HelpCheckCache = HelpCheckCache()) async -> [AgentCLI]? {
+        let start = Date()
         guard let output = try? await ProcessRunner.run(shell, ["-lic", detectionScript(clis)], timeout: timeout) else { return nil }
         let found = parseFound(output.stdoutText, from: clis)
         guard let searchPath = found.searchPath else { return nil }
+        let budget = min(helpTimeout, timeout - Date().timeIntervalSince(start))
+        guard budget > 0 else { return found.clis }
         var environment = ProcessInfo.processInfo.environment
         environment["PATH"] = searchPath
         let mismatched = await withTaskGroup(of: String?.self) { group in
             for cli in found.clis {
                 guard let signature = cli.helpSignature,
-                      let location = found.locations[cli.command], location.hasPrefix("/") else { continue }
+                      let file = found.locations[cli.command].flatMap(executable) else { continue }
                 group.addTask { [environment] in
-                    let check = await helpChecks.check(location) {
-                        guard let help = try? await ProcessRunner.run(location, ["--help"], environment: environment,
-                                                                      timeout: helpTimeout) else { return .unknown }
+                    let check = await helpChecks.check(file, signature: signature) {
+                        guard let help = try? await ProcessRunner.run(file, ["--help"], environment: environment,
+                                                                      timeout: budget) else { return .unknown }
                         return helpMatches(help.stdoutText + help.stderrText, signature: signature) ? .matched : .mismatched
                     }
                     return check == .mismatched ? cli.command : nil
@@ -163,21 +181,31 @@ enum HelpCheck: Sendable, Equatable {
     case unknown
 }
 
-/// Help check outcomes per executable (resolved path and modification date), so detection runs a program's
-/// `--help` once rather than on every refresh — also bounding what a timed-out check can leave running.
+/// Help check outcomes per executable and signature, so detection doesn't run a program's `--help` on every
+/// refresh. Keyed by the path as found, not where it resolves: version-manager shims (Volta, mise) link many
+/// commands to one binary. The resolved file's modification date is part of the key, so an update checks again.
+/// `.unknown` is kept only for `unknownLifetime`: long enough that a hanging program isn't started (and possibly
+/// orphaned) on every refresh, short enough that one slow start doesn't skip the check for good.
 public actor HelpCheckCache {
-    private var outcomes: [String: HelpCheck] = [:]
+    private var outcomes: [String: (check: HelpCheck, at: Date)] = [:]
+    private let unknownLifetime: TimeInterval
+    private let now: @Sendable () -> Date
 
-    public init() {}
+    public init(unknownLifetime: TimeInterval = 300, now: @escaping @Sendable () -> Date = Date.init) {
+        self.unknownLifetime = unknownLifetime
+        self.now = now
+    }
 
-    func check(_ path: String, run: @Sendable () async -> HelpCheck) async -> HelpCheck {
+    func check(_ path: String, signature: String, run: @Sendable () async -> HelpCheck) async -> HelpCheck {
         let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
         let modified = (try? FileManager.default.attributesOfItem(atPath: resolved)[.modificationDate] as? Date)
             .map { String($0.timeIntervalSince1970) } ?? "?"
-        let key = resolved + "@" + modified
-        if let known = outcomes[key] { return known }
+        let key = [path, modified, signature].joined(separator: "\u{0}")
+        if let known = outcomes[key], known.check != .unknown || now().timeIntervalSince(known.at) < unknownLifetime {
+            return known.check
+        }
         let outcome = await run()
-        outcomes[key] = outcome
+        outcomes[key] = (outcome, now())
         return outcome
     }
 }
