@@ -13,7 +13,7 @@
 
 **Blocked by:** 66
 
-**Status:** claimed
+**Status:** resolved
 
 ## Comments
 
