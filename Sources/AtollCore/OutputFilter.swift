@@ -15,15 +15,17 @@ public enum OutputFilter {
     }
 
     /// Only the messages, for tools whose layout is known; others are returned cleaned. `app` is the agent's
-    /// OSC 7501 word, which tells generic agents with a known layout (OpenCode, Antigravity CLI) apart.
+    /// OSC 7501 word, which tells generic agents with a known layout (OpenCode, Antigravity CLI) apart, looked up
+    /// in `clis` (the catalog with the Settings CLIs, so a Settings `opencode-dev` isn't read as OpenCode).
     /// Falls back to the cleaned full screen if filtering would leave nothing.
-    public static func messages(_ text: String, tool: AgentTool, app: String? = nil) -> String {
+    public static func messages(_ text: String, tool: AgentTool, app: String? = nil,
+                                clis: [AgentCLI] = AgentCLI.catalog) -> String {
         let all = lines(text)
         var kept: [String]
         switch tool {
         case .claudeCode: kept = claudeMessages(all)
         case .codex: kept = codexMessages(all)
-        case .generic: kept = genericMessages(all, app: app) ?? all
+        case .generic: kept = genericMessages(all, app: app, clis: clis) ?? all
         }
         kept = kept.filter { !isDecorationRow($0) }
         kept = trimTrailingBlankLines(kept)
@@ -35,10 +37,11 @@ public enum OutputFilter {
     /// A hash of what the agent has put on screen, for "no output for 10m": the input box, status lines,
     /// spinners, statusline art and elapsed-time / token counters are left out first, or the screen would
     /// always look changed. Only the hash is kept; the text is dropped right away.
-    public static func activityFingerprint(_ text: String, tool: AgentTool, app: String? = nil) -> Int {
+    public static func activityFingerprint(_ text: String, tool: AgentTool, app: String? = nil,
+                                           clis: [AgentCLI] = AgentCLI.catalog) -> Int {
         // FNV-1a: stable across launches, cheap, and nothing but this number is kept.
         var hash: UInt64 = 0xcbf29ce484222325
-        for line in activityLines(text, tool: tool, app: app) {
+        for line in activityLines(text, tool: tool, app: app, clis: clis) {
             for byte in line.utf8 {
                 hash = (hash ^ UInt64(byte)) &* 0x100000001b3
             }
@@ -48,14 +51,15 @@ public enum OutputFilter {
     }
 
     /// The rows the fingerprint is taken over, counters already blanked.
-    static func activityLines(_ text: String, tool: AgentTool, app: String? = nil) -> [String] {
+    static func activityLines(_ text: String, tool: AgentTool, app: String? = nil,
+                              clis: [AgentCLI] = AgentCLI.catalog) -> [String] {
         let all = lines(text)
         var kept: [String]
         switch tool {
         case .claudeCode: kept = withoutToolTitles(claudeMessages(all))
         case .codex: kept = codexMessages(all).filter { !isCodexWorkingRow($0) }
         case .generic:
-            kept = isAntigravity(app: app)
+            kept = isAntigravity(app: app, clis: clis)
                 ? antigravityMessages(all).filter { !isAntigravitySpinnerRow($0) }
                 : all
         }
@@ -259,9 +263,9 @@ public enum OutputFilter {
     // MARK: Generic agents
 
     /// The messages of a generic agent whose layout is known from its OSC 7501 word; nil for the rest.
-    static func genericMessages(_ lines: [String], app: String?) -> [String]? {
-        if isAntigravity(app: app) { return antigravityMessages(lines) }
-        if app.flatMap(AgentCLI.matching(app:))?.command == "opencode" { return openCodeMessages(lines) }
+    static func genericMessages(_ lines: [String], app: String?, clis: [AgentCLI] = AgentCLI.catalog) -> [String]? {
+        if isAntigravity(app: app, clis: clis) { return antigravityMessages(lines) }
+        if app.flatMap({ AgentCLI.matching(app: $0, in: clis) })?.command == "opencode" { return openCodeMessages(lines) }
         return nil
     }
 
@@ -269,8 +273,8 @@ public enum OutputFilter {
 
     /// Antigravity CLI reports `antigravity`; herdr may name it after its command, `agy`. Both are the
     /// catalog entry's words.
-    static func isAntigravity(app: String?) -> Bool {
-        app.flatMap(AgentCLI.matching(app:))?.command == "agy"
+    static func isAntigravity(app: String?, clis: [AgentCLI] = AgentCLI.catalog) -> Bool {
+        app.flatMap { AgentCLI.matching(app: $0, in: clis) }?.command == "agy"
     }
 
     /// Antigravity CLI: like Claude Code, the input box is a pair of full-width `─` rules around `>` with a status

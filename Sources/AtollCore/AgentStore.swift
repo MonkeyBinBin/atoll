@@ -1165,12 +1165,12 @@ public final class AgentStore {
     private func checkNextOutput() {
         guard let ticket = noOutputWatch.takeDue(now: scheduler.now, interval: timing.outputCheckInterval),
               let watched = agent(ticket.address) else { return }
-        let (tool, app) = (watched.tool, watched.app)
+        let (tool, app, clis) = (watched.tool, watched.app, agentCLIs)
         let lines = timing.outputCheckLines
         Task { [client = client(for: ticket.address)] in
             // The screen text lives only for this hash.
             let hash = (try? await client.read(terminal: ticket.address, lines: lines))
-                .map { OutputFilter.activityFingerprint($0.text, tool: tool, app: app) }
+                .map { OutputFilter.activityFingerprint($0.text, tool: tool, app: app, clis: clis) }
             let before = self.noOutputThreshold.flatMap { self.noOutputWatch.quietSince(ticket.address, threshold: $0) }
             self.noOutputWatch.record(ticket, hash: hash, now: self.scheduler.now)
             let after = self.noOutputThreshold.flatMap { self.noOutputWatch.quietSince(ticket.address, threshold: $0) }
@@ -1650,6 +1650,8 @@ public final class AgentStore {
 
     /// Creates worktrees for "New worktree" launches; nil = unavailable.
     public var worktreeCreator: (any WorktreeCreating)?
+    /// The catalog with the Settings CLIs, for telling generic agents' layouts apart.
+    public var agentCLIs: [AgentCLI] = AgentCLI.catalog
     /// The worktree the last launch created, kept on disk even if the launch then failed.
     public private(set) var launchWorktree: String?
     /// A launch created a worktree (its path), e.g. for the recent-folders list.

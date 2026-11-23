@@ -1,7 +1,7 @@
 import Foundation
 
 /// How a tool takes the launch form's starting task.
-public enum TaskPassing: Hashable, Sendable {
+public enum TaskPassing: Hashable, Sendable, Codable {
     /// `tool <task>` (Claude Code, Codex).
     case lastArgument
     /// `tool <flag> <task>`, for CLIs whose positional argument means something else.
@@ -30,8 +30,8 @@ public enum TaskPassing: Hashable, Sendable {
 }
 
 /// A coding-agent CLI the launch form offers only when the login shell finds its command. Claude Code and Codex
-/// are always offered and aren't listed here.
-public struct AgentCLI: Equatable, Sendable {
+/// are always offered and aren't listed here. Codable for the ones users add in Settings.
+public struct AgentCLI: Equatable, Sendable, Codable {
     public var command: String
     public var title: String
     public var taskPassing: TaskPassing
@@ -87,10 +87,106 @@ public struct AgentCLI: Equatable, Sendable {
     ]
 
     /// The catalog CLI an agent's OSC 7501 `app` word names ("opencode", "copilot-cli", "antigravity" …), if any.
-    public static func matching(app: String) -> AgentCLI? {
+    /// Most specific first, each across all of `clis`: a command, then an app word, then a `<name>-…` prefix.
+    /// So a Settings CLI named `opencode-dev` isn't taken for OpenCode, nor one named `antigravity` for agy.
+    public static func matching(app: String, in clis: [AgentCLI] = catalog) -> AgentCLI? {
         let word = app.lowercased()
-        func names(_ name: String) -> Bool { word == name || word.hasPrefix(name + "-") }
-        return catalog.first { cli in names(cli.command) || cli.appWords.contains(where: names) }
+        func names(_ cli: AgentCLI) -> [String] { [cli.command.lowercased()] + cli.appWords.map { $0.lowercased() } }
+        return clis.first { $0.command.lowercased() == word }
+            ?? clis.first { $0.appWords.contains { $0.lowercased() == word } }
+            ?? clis.first { names($0).contains { word.hasPrefix($0 + "-") } }
+    }
+
+    /// Always offered by the launch form (`LaunchOption.builtIns`), so not definable in Settings.
+    public static let reservedCommands: Set<String> = ["claude", "codex"]
+
+    /// A reserved command, or one starting with it, in any case: agents are tracked as Claude Code / Codex by that
+    /// prefix (`AgentTool.from(app:)`), so a `claude-yolo` wrapper couldn't be told apart from the built-in; and
+    /// macOS file systems usually ignore case, so `Claude` runs `claude`.
+    public static func isReserved(_ command: String) -> Bool {
+        let command = command.lowercased()
+        return reservedCommands.contains { command.hasPrefix($0) }
+    }
+
+    /// Whether a command name is safe to put unquoted in the detection script: letters, digits, `.`, `_`, `+`, `-`,
+    /// not starting with a punctuation mark, and not a shell keyword or builtin (which `command -v` always finds).
+    public static func isValidCommand(_ command: String) -> Bool {
+        command.range(of: "^[A-Za-z0-9][A-Za-z0-9._+-]*$", options: .regularExpression) != nil
+            && !shellWords.contains(command.lowercased())
+    }
+
+    static let shellWords: Set<String> = [
+        "if", "then", "else", "elif", "fi", "for", "while", "until", "do", "done", "case", "esac", "function",
+        "select", "time", "in", "test", "echo", "printf", "cd", "pwd", "exit", "export", "source", "alias",
+        "unalias", "type", "command", "builtin", "eval", "exec", "read", "set", "unset", "true", "false", "kill",
+        "jobs", "wait", "trap", "shift", "return", "break", "continue", "let", "local", "declare", "typeset",
+        "hash", "history", "fg", "bg", "umask", "ulimit", "getopts", "which", "where", "whence", "and", "or", "not",
+        "end", "begin", "functions", "set_color", "string", "math", "status", "contains", "count",
+        // zsh
+        "print", "pushd", "popd", "dirs", "disown", "fc", "r", "setopt", "unsetopt", "autoload", "emulate",
+        "bindkey", "zmodload", "rehash", "noglob", "vared", "zle", "sched", "limit", "unlimit", "zstyle",
+        "compdef", "unhash", "integer", "float", "readonly", "enable", "disable", "logout", "suspend", "times",
+        // fish
+        "abbr", "funced", "funcsave", "fish_config", "complete", "argparse", "commandline", "emit", "path",
+        "random", "realpath", "bind", "block", "breakpoint", "isatty", "nextd", "prevd", "dirh", "cdh",
+        // more zsh and bash
+        "repeat", "foreach", "nocorrect", "coproc", "always", "bye", "chdir", "zcompile", "zparseopts", "zformat",
+        "help", "shopt", "compgen", "mapfile", "readarray", "caller",
+    ]
+
+    /// The catalog CLI that would match an agent reporting this name (by app word or `<name>-` prefix), unless
+    /// the name is that CLI's own command. A Settings CLI by such a name would compete with it for those agents
+    /// (which one wins depends on the matching order), so Settings refuses it: built-in and Settings names
+    /// never overlap.
+    public static func catalogClaiming(_ command: String) -> AgentCLI? {
+        guard let owner = matching(app: command), owner.command.lowercased() != command.lowercased() else { return nil }
+        return owner
+    }
+
+    /// Stored Settings CLIs, dropping only entries this version can't read (rather than all of them).
+    public static func decodeList(_ data: Data) -> [AgentCLI] { decodeStored(data).clis }
+
+    /// Stored Settings CLIs, and the stored entries this version can't read, as JSON, to be written back
+    /// unchanged (a newer version's entry isn't lost when this one saves).
+    public static func decodeStored(_ data: Data) -> (clis: [AgentCLI], unreadable: [Data]) {
+        guard let entries = try? JSONSerialization.jsonObject(with: data) as? [Any] else { return ([], []) }
+        var clis: [AgentCLI] = []
+        var unreadable: [Data] = []
+        for entry in entries {
+            guard let json = try? JSONSerialization.data(withJSONObject: entry) else { continue }
+            if let cli = try? JSONDecoder().decode(AgentCLI.self, from: json) {
+                clis.append(cli)
+            } else {
+                unreadable.append(json)
+            }
+        }
+        return (clis, unreadable)
+    }
+
+    /// `clis` followed by the `unreadable` entries kept from `decodeStored`.
+    public static func encodeStored(_ clis: [AgentCLI], unreadable: [Data]) -> Data? {
+        let entries = clis.compactMap { try? JSONSerialization.jsonObject(with: JSONEncoder().encode($0)) }
+            + unreadable.compactMap { try? JSONSerialization.jsonObject(with: $0) }
+        return try? JSONSerialization.data(withJSONObject: entries)
+    }
+
+    /// The catalog with the user's CLIs: one with a catalog command replaces that entry in place, the rest follow
+    /// in order. An invalid or reserved command, or a command already given earlier in `custom`, is skipped.
+    public static func merged(custom: [AgentCLI]) -> [AgentCLI] {
+        // Compared without case: macOS file systems usually ignore it, so `OpenCode` is `opencode`.
+        var seen: Set<String> = []
+        let valid = custom.filter {
+            isValidCommand($0.command) && !isReserved($0.command) && catalogClaiming($0.command) == nil
+                && seen.insert($0.command.lowercased()).inserted
+        }
+        let byCommand = Dictionary(uniqueKeysWithValues: valid.map { ($0.command.lowercased(), $0) })
+        let catalogCommands = Set(catalog.map { $0.command.lowercased() })
+        // An override keeps the catalog's spelling: its option id and the layout checks name that command.
+        return catalog.map { entry in
+            guard var override = byCommand[entry.command.lowercased()] else { return entry }
+            override.command = entry.command
+            return override
+        } + valid.filter { !catalogCommands.contains($0.command.lowercased()) }
     }
 
     static let marker = "ATOLL_FOUND:"
@@ -286,10 +382,14 @@ public actor HelpCheckCache {
 public actor AgentCLIDetector {
     public typealias Detect = @Sendable ([AgentCLI]) async -> [AgentCLI]?
 
-    private let clis: [AgentCLI]
+    private var clis: [AgentCLI]
     private let detect: Detect
     private let onDetected: @Sendable ([String]) -> Void
     private var running: Task<[AgentCLI]?, Never>?
+    /// The list changed while `running` was detecting the old one: it detects again before finishing.
+    private var stale = false
+    /// The newest `update(clis:version:)` applied; older ones arriving late are ignored.
+    private var version = 0
     /// The last successful detection; nil until one succeeds.
     public private(set) var lastKnown: [AgentCLI]?
 
@@ -311,15 +411,66 @@ public actor AgentCLIDetector {
 
     /// Detects again (joining a detection already running). nil when it failed; `lastKnown` is then kept.
     public func refresh() async -> [AgentCLI]? {
-        if let running { return await running.value }
-        let task = Task { [clis, detect] in await detect(clis) }
+        if let running { return await running.value.map(current) }
+        let task = Task { [detect] () -> [AgentCLI]? in
+            while true {
+                let pass = await self.finishPass(await detect(await self.startPass()))
+                if pass.done { return pass.result }
+            }
+        }
         running = task
-        let result = await task.value
+        // An `update(clis:)` after the detection finished may have redefined what it found.
+        return await task.value.map(current)
+    }
+
+    /// Ends a detection pass, or asks for another when the list changed meanwhile. Finishing (clearing `running`,
+    /// keeping the result) happens in one step on the actor, so an update can't slip in between and go unseen.
+    private func finishPass(_ found: [AgentCLI]?) -> (done: Bool, result: [AgentCLI]?) {
+        if stale { return (false, nil) }
         running = nil
+        let result = found.map(current)
         if let result, result != lastKnown {
             lastKnown = result
             onDetected(result.map(\.command))
         }
-        return result
+        return (true, result)
+    }
+
+    /// Detects `clis` from now on. `lastKnown` keeps the commands it had that are still listed, with their new
+    /// definitions, so an edited CLI shows its new settings before the next refresh. A detection running now
+    /// detects again with the new list (a CLI just added isn't missed). `version`, when given, must grow:
+    /// updates sent from separate tasks may arrive out of order, and an older one is dropped.
+    /// `redetect`: with no detection running, start one now, so an edit shows up without waiting for the
+    /// launch form.
+    public func update(clis: [AgentCLI], version: Int? = nil, redetect: Bool = false) {
+        if let version {
+            guard version > self.version else { return }
+            self.version = version
+        }
+        let before = lastKnown?.map(\.command)
+        self.clis = clis
+        lastKnown = lastKnown.map(current)
+        if let lastKnown, lastKnown.map(\.command) != before { onDetected(lastKnown.map(\.command)) }
+        if running != nil {
+            stale = true
+        } else if redetect {
+            Task { _ = await self.refresh() }
+        }
+    }
+
+    /// The list for the next detection pass, which is now current.
+    private func startPass() -> [AgentCLI] {
+        stale = false
+        return clis
+    }
+
+    /// `found` as `clis` defines those commands now, in `clis` order. Commands no longer listed are dropped, and
+    /// so is one whose new definition asks for a help signature it wasn't detected with: the next refresh checks it.
+    private func current(_ found: [AgentCLI]) -> [AgentCLI] {
+        let detected = Dictionary(found.map { ($0.command, $0) }, uniquingKeysWith: { first, _ in first })
+        return clis.filter { cli in
+            guard let old = detected[cli.command] else { return false }
+            return cli.helpSignature == nil || cli.helpSignature == old.helpSignature
+        }
     }
 }

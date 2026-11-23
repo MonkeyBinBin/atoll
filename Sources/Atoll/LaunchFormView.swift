@@ -18,15 +18,16 @@ struct LaunchOption: Identifiable, Hashable {
     ]
 
     static func detected(_ cli: AgentCLI) -> LaunchOption {
-        LaunchOption(id: detectedID(cli), title: cli.title, argv: [cli.command], tool: .from(app: cli.command),
+        // Claude Code and Codex are only the built-ins (Settings can't use those names).
+        LaunchOption(id: detectedID(cli), title: cli.title, argv: [cli.command], tool: .generic,
                      taskPassing: cli.taskPassing)
     }
 
     static func detectedID(_ cli: AgentCLI) -> String { "builtin:\(cli.command)" }
 
-    /// The catalog CLI an option id names, if it's one.
-    static func catalogCLI(id: String) -> AgentCLI? {
-        AgentCLI.catalog.first { detectedID($0) == id }
+    /// The catalog or Settings CLI an option id names, if it's one.
+    static func catalogCLI(id: String, in clis: [AgentCLI]) -> AgentCLI? {
+        clis.first { detectedID($0) == id }
     }
 
     static func template(_ t: TemplateInfo) -> LaunchOption {
@@ -41,7 +42,7 @@ struct LaunchFormView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(\.herdrClient) private var client
 
-    /// Agent CLIs from `AgentCLI.catalog` found on this Mac.
+    /// Agent CLIs from `model.agentCLIs` (the catalog and Settings) found on this Mac.
     @State private var installed: [AgentCLI] = []
     /// The latest detection failed, so `installed` may be missing CLIs: a restored recipe's CLI is trusted.
     @State private var detectionFailed = false
@@ -84,7 +85,20 @@ struct LaunchFormView: View {
     @FocusState private var launchFocused: Bool
 
     private var store: AgentStore { model.store }
-    private var options: [LaunchOption] { LaunchOption.builtIns + installed.map(LaunchOption.detected) + templateOptions }
+    /// Installed CLIs as Settings defines them now: a detection may still carry a definition from before an edit.
+    private var options: [LaunchOption] {
+        // One removed from Settings meanwhile, or now asking for a help signature it wasn't detected with, keeps
+        // the definition it was detected under until the next detection, rather than vanishing under the selection.
+        let all = model.agentCLIs
+        let current = installed.map { cli -> AgentCLI in
+            guard let now = all.first(where: { $0.command == cli.command }),
+                  now.helpSignature == nil || now.helpSignature == cli.helpSignature else { return cli }
+            return now
+        }
+        return LaunchOption.builtIns + current.map(LaunchOption.detected) + templateOptions
+    }
+
+    private func has(_ list: [AgentCLI], _ cli: AgentCLI) -> Bool { list.contains { $0.command == cli.command } }
     private var option: LaunchOption { options.first { $0.id == optionID } ?? options[0] }
     private var taskSupported: Bool { option.taskPassing != .unsupported }
 
@@ -256,6 +270,13 @@ struct LaunchFormView: View {
         }
         .padding(14)
         .task { await load() }
+        // A CLI added or changed in Settings while the form is open: detect again (the detector also does).
+        .onChange(of: model.agentCLIs) { _, _ in
+            Task {
+                guard toolsLoaded, let fresh = await model.agentCLIDetector.refresh() else { return }
+                takeRefreshed(fresh)
+            }
+        }
         .task(id: folder) {
             source = nil
             sourceFolder = nil
@@ -423,9 +444,13 @@ struct LaunchFormView: View {
     /// A newer detection; the selected CLI stays selectable (with a note) even if it's no longer found.
     private func takeRefreshed(_ fresh: [AgentCLI]) {
         var list = fresh
-        if let selected = LaunchOption.catalogCLI(id: optionID), !fresh.contains(selected) {
+        // A CLI removed from Settings meanwhile is only in `installed` now.
+        let selected = LaunchOption.catalogCLI(id: optionID, in: model.agentCLIs)
+            ?? LaunchOption.catalogCLI(id: optionID, in: installed)
+        if let selected, !has(fresh, selected) {
             list.append(selected)
-            restoreNotes.append("\(selected.title) (\(selected.command)) wasn't found on this Mac")
+            let note = "\(selected.title) (\(selected.command)) wasn't found on this Mac"
+            if !restoreNotes.contains(note) { restoreNotes.append(note) }
         }
         installed = list
     }
@@ -533,12 +558,12 @@ struct LaunchFormView: View {
     private func apply(_ recipe: LaunchRecipe) {
         // The tool list isn't complete until templates and installed CLIs arrive, and a CLI missing from the
         // cached list may have been installed since: don't call a tool gone before the list is current.
-        let cli = LaunchOption.catalogCLI(id: recipe.optionID)
-        guard toolsLoaded, !(refreshing && cli.map { !installed.contains($0) } == true) else {
+        let cli = LaunchOption.catalogCLI(id: recipe.optionID, in: model.agentCLIs)
+        guard toolsLoaded, !(refreshing && cli.map { !has(installed, $0) } == true) else {
             deferredRecipe = recipe
             return
         }
-        if detectionFailed, let cli, !installed.contains(cli) { installed.append(cli) }
+        if detectionFailed, let cli, !has(installed, cli) { installed.append(cli) }
         let restored = LaunchHistory.restore(
             recipe,
             folderExists: { path in

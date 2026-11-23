@@ -322,7 +322,8 @@ struct AgentPanelView: View {
         // The store decides when there is one to show (Messages only, not Needs you).
         let transcript = panel?.transcript
         return outputCache.value(output: panel?.output, transcript: transcript, isLoading: panel?.isLoading == true,
-                                 messagesOnly: settings.messagesOnly, tool: agent.tool, app: agent.app)
+                                 messagesOnly: settings.messagesOnly, tool: agent.tool, app: agent.app,
+                                 clis: model.agentCLIs)
     }
 
     // MARK: Reply
@@ -696,6 +697,7 @@ final class RenderedOutputCache {
         var messagesOnly: Bool
         var tool: AgentTool
         var app: String?
+        var clis: [AgentCLI]
     }
 
     private var key: Key?
@@ -703,13 +705,13 @@ final class RenderedOutputCache {
 
     /// The transcript wins when given and not empty; otherwise the terminal output, as before.
     func value(output: ReadOutput?, transcript: TranscriptSnapshot? = nil, isLoading: Bool, messagesOnly: Bool,
-               tool: AgentTool, app: String?) -> Value {
+               tool: AgentTool, app: String?, clis: [AgentCLI] = AgentCLI.catalog) -> Value {
         let transcript = transcript.flatMap { $0.entries.isEmpty ? nil : $0 }
         // Loading only changes what is shown while there is no output yet.
         let key = Key(output: transcript == nil ? output : nil,
                       transcript: transcript?.identity,
                       isLoading: output == nil && transcript == nil && isLoading,
-                      messagesOnly: messagesOnly, tool: tool, app: app)
+                      messagesOnly: messagesOnly, tool: tool, app: app, clis: clis)
         if key == self.key { return cached }
         self.key = key
         if let transcript {
@@ -723,7 +725,7 @@ final class RenderedOutputCache {
             return cached
         }
         let filtered = messagesOnly
-            ? OutputFilter.messages(output.text, tool: tool, app: app)
+            ? OutputFilter.messages(output.text, tool: tool, app: app, clis: clis)
             : OutputFilter.clean(output.text)
         let text = filtered.split(separator: "\n", omittingEmptySubsequences: false).suffix(200).joined(separator: "\n")
         cached = (text, OutputStyling.runs(shown: text, source: output), false)

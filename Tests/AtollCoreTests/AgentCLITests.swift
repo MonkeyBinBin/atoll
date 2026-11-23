@@ -320,3 +320,418 @@ final class SavedDetections: @unchecked Sendable {
         lock.withLock { values.append(commands) }
     }
 }
+
+@Suite("Agent CLIs added in Settings")
+struct CustomAgentCLITests {
+    let aider = AgentCLI(command: "aider", title: "Aider", taskPassing: .unsupported)
+
+    @Test func everyTaskPassingSurvivesSaving() throws {
+        let clis = [
+            AgentCLI(command: "a", title: "A", taskPassing: .lastArgument),
+            AgentCLI(command: "b", title: "B", taskPassing: .flag("-i"), appWords: ["bee"], helpSignature: "Bee CLI"),
+            AgentCLI(command: "c", title: "C", taskPassing: .arguments(withTask: ["run", "-t"], withoutTask: ["session"])),
+            AgentCLI(command: "d", title: "D", taskPassing: .unsupported),
+            AgentCLI(command: "e", title: "E", taskPassing: .verbatim),
+        ]
+        let decoded = try JSONDecoder().decode([AgentCLI].self, from: JSONEncoder().encode(clis))
+        #expect(decoded == clis)
+    }
+
+    @Test func onlyShellSafeCommandsAreValid() {
+        for good in ["aider", "cursor-agent", "kiro-cli", "my.tool", "g++", "x_1"] {
+            #expect(AgentCLI.isValidCommand(good), "\(good)")
+        }
+        for bad in ["", "-x", ".hidden", "a b", "a;rm -rf ~", "$(x)", "a|b", "a`b`", "a'b", "~/bin/x", "a/b"] {
+            #expect(!AgentCLI.isValidCommand(bad), "\(bad)")
+        }
+    }
+
+    @Test func aCustomCLIReplacesTheCatalogEntryInPlaceOrFollowsIt() {
+        let pi = AgentCLI(command: "pi", title: "My Pi", taskPassing: .flag("--prompt"))
+        let merged = AgentCLI.merged(custom: [aider, pi,
+                                              AgentCLI(command: "bad cmd", title: "Bad", taskPassing: .lastArgument),
+                                              AgentCLI(command: "aider", title: "Second", taskPassing: .lastArgument)])
+        let catalogIndex = AgentCLI.catalog.firstIndex { $0.command == "pi" }!
+        #expect(merged.count == AgentCLI.catalog.count + 1)
+        #expect(merged[catalogIndex] == pi)
+        #expect(merged.last == aider)
+        #expect(AgentCLI.merged(custom: []) == AgentCLI.catalog)
+    }
+
+    @Test func appWordsMatchInTheGivenList() {
+        let clis = AgentCLI.merged(custom: [AgentCLI(command: "aider", title: "Aider", taskPassing: .unsupported,
+                                                     appWords: ["aider-chat"])])
+        #expect(AgentCLI.matching(app: "aider-chat", in: clis)?.command == "aider")
+        #expect(AgentCLI.matching(app: "aider-chat") == nil)
+    }
+
+    @Test func updatingTheListRedefinesWhatWasDetected() async {
+        let droid = AgentCLI(command: "droid", title: "Factory Droid", taskPassing: .lastArgument)
+        let opencode = AgentCLI(command: "opencode", title: "OpenCode", taskPassing: .flag("--prompt"))
+        let detector = AgentCLIDetector(clis: [droid, opencode], saved: ["droid", "opencode"], detect: { $0 })
+        let edited = AgentCLI(command: "droid", title: "Droid (mine)", taskPassing: .flag("-p"))
+        await detector.update(clis: [edited, aider])
+        #expect(await detector.lastKnown == [edited])
+        #expect(await detector.refresh() == [edited, aider])
+    }
+
+    /// A detection still running with the old list reports the current definitions.
+    @Test func aDetectionStartedBeforeAnUpdateReportsTheNewDefinitions() async {
+        let droid = AgentCLI(command: "droid", title: "Factory Droid", taskPassing: .lastArgument)
+        let gate = AsyncGate()
+        let detector = AgentCLIDetector(clis: [droid, aider], detect: { clis in await gate.wait(); return clis })
+        let refresh = Task { await detector.refresh() }
+        await gate.waitUntilWaiting()
+        let edited = AgentCLI(command: "aider", title: "Aider", taskPassing: .lastArgument)
+        await detector.update(clis: [edited])
+        await gate.open()
+        #expect(await refresh.value == [edited])
+    }
+
+    @Test func claudeAndCodexCantBeRedefined() {
+        var draft = AgentCLIDraft()
+        draft.command = "claude"
+        draft.title = "Claude (mine)"
+        #expect(draft.problem == .reservedCommand)
+        let merged = AgentCLI.merged(custom: [AgentCLI(command: "codex", title: "Codex", taskPassing: .lastArgument)])
+        #expect(merged == AgentCLI.catalog)
+    }
+
+    /// Names a built-in matches (`<command>-…`, app words) are refused, so built-in and Settings names never
+    /// compete; within a list, an exact name still beats a prefix.
+    @Test func namesABuiltInMatchesAreRefused() {
+        for name in ["opencode-dev", "copilot-cli", "agy-beta", "kiro", "Cursor"] {
+            #expect(AgentCLI.catalogClaiming(name) != nil, "\(name)")
+            #expect(AgentCLI.merged(custom: [AgentCLI(command: name, title: "X", taskPassing: .lastArgument)])
+                == AgentCLI.catalog, "\(name)")
+        }
+        for name in ["kiro-cli", "opencode", "aider", "pixel-agent"] {
+            #expect(AgentCLI.catalogClaiming(name) == nil, "\(name)")
+        }
+        var draft = AgentCLIDraft()
+        draft.command = "copilot-cli"
+        draft.title = "Wrapper"
+        #expect(draft.problem == .claimedByBuiltIn("GitHub Copilot CLI"))
+        let dev = AgentCLI(command: "tool-dev", title: "Dev", taskPassing: .lastArgument)
+        let tool = AgentCLI(command: "tool", title: "Tool", taskPassing: .lastArgument)
+        #expect(AgentCLI.matching(app: "tool-dev", in: [tool, dev]) == dev)
+        #expect(AgentCLI.matching(app: "tool-x", in: [tool, dev]) == tool)
+    }
+
+    @Test func oneUnreadableStoredEntryDropsOnlyItself() throws {
+        let good = AgentCLI(command: "aider", title: "Aider", taskPassing: .unsupported)
+        let stored = try JSONSerialization.jsonObject(with: JSONEncoder().encode([good]))
+        let data = try JSONSerialization.data(withJSONObject: [["command": "x", "title": "X", "taskPassing": ["future": [:]],
+                                                                "appWords": []]] + (stored as! [Any]))
+        #expect(AgentCLI.decodeList(data) == [good])
+        #expect(AgentCLI.decodeList(Data("not json".utf8)) == [])
+    }
+
+    /// A newly required help signature isn't vouched for by a detection made without it.
+    @Test func aNewHelpSignatureWaitsForTheNextDetection() async {
+        let plain = AgentCLI(command: "goose", title: "Goose", taskPassing: .lastArgument)
+        let signed = AgentCLI(command: "goose", title: "Goose", taskPassing: .lastArgument, helpSignature: "interactive chat sessions")
+        let detector = AgentCLIDetector(clis: [plain], saved: ["goose"], detect: { _ in [] })
+        await detector.update(clis: [signed])
+        #expect(await detector.lastKnown == [])
+    }
+
+    @Test func aRefreshJoiningARunningDetectionGetsTheNewDefinitions() async {
+        let gate = AsyncGate()
+        let detector = AgentCLIDetector(clis: [aider], detect: { clis in await gate.wait(); return clis })
+        let first = Task { await detector.refresh() }
+        await gate.waitUntilWaiting()
+        let edited = AgentCLI(command: "aider", title: "Aider (mine)", taskPassing: .lastArgument)
+        await detector.update(clis: [edited])
+        let joined = Task { await detector.refresh() }
+        await Task.yield()
+        await gate.open()
+        #expect(await first.value == [edited])
+        #expect(await joined.value == [edited])
+    }
+
+    @Test func commandsMatchAndReserveInAnyCase() {
+        let upper = AgentCLI(command: "Aider", title: "Aider", taskPassing: .unsupported)
+        #expect(AgentCLI.matching(app: "aider", in: AgentCLI.merged(custom: [upper])) == upper)
+        var draft = AgentCLIDraft()
+        draft.command = "Claude"
+        draft.title = "Mine"
+        #expect(draft.problem == .reservedCommand)
+        draft.command = "claude-yolo"
+        #expect(draft.problem == .reservedCommand)
+        draft.command = "codexx"
+        #expect(draft.problem == .reservedCommand)
+        #expect(AgentCLI.merged(custom: [AgentCLI(command: "CODEX", title: "X", taskPassing: .lastArgument)]) == AgentCLI.catalog)
+    }
+
+    /// Output layouts follow the merged list too: a Settings `opencode-dev` isn't parsed as OpenCode.
+    /// Layout lookups use the list they're given: an override's extra app word reaches the layout.
+    @Test func layoutsAreToldApartWithTheSettingsCLIs() {
+        let clis = AgentCLI.merged(custom: [AgentCLI(command: "agy", title: "Mine", taskPassing: .lastArgument,
+                                                     appWords: ["antigravity", "agnightly"])])
+        #expect(OutputFilter.isAntigravity(app: "agnightly", clis: clis))
+        #expect(!OutputFilter.isAntigravity(app: "agnightly"))
+        #expect(OutputFilter.isAntigravity(app: "antigravity", clis: clis))
+    }
+
+    @Test func aLateOlderUpdateIsIgnored() async {
+        let newer = AgentCLI(command: "aider", title: "Newer", taskPassing: .lastArgument)
+        let older = AgentCLI(command: "aider", title: "Older", taskPassing: .lastArgument)
+        let detector = AgentCLIDetector(clis: [], detect: { $0 })
+        await detector.update(clis: [newer], version: 2)
+        await detector.update(clis: [older], version: 1)
+        #expect(await detector.refresh() == [newer])
+    }
+
+    /// A CLI added while a detection runs is detected before that detection finishes.
+    @Test func aCLIAddedDuringADetectionIsDetected() async {
+        let droid = AgentCLI(command: "droid", title: "Factory Droid", taskPassing: .lastArgument)
+        let gate = AsyncGate()
+        let passes = Counter()
+        let detector = AgentCLIDetector(clis: [droid], detect: { clis in
+            passes.increment()
+            await gate.wait()
+            return clis
+        })
+        let refresh = Task { await detector.refresh() }
+        await gate.waitUntilWaiting()
+        await detector.update(clis: [droid, aider])
+        await gate.open()
+        #expect(await refresh.value == [droid, aider])
+        #expect(passes.value == 2)
+    }
+
+    @Test func aCustomCommandOverridesWhateverItsCase() {
+        let mine = AgentCLI(command: "OpenCode", title: "Mine", taskPassing: .lastArgument)
+        let merged = AgentCLI.merged(custom: [mine, AgentCLI(command: "AIDER", title: "A", taskPassing: .lastArgument),
+                                              AgentCLI(command: "aider", title: "B", taskPassing: .lastArgument)])
+        #expect(merged.count == AgentCLI.catalog.count + 1)
+        // The override keeps the catalog's spelling: option id and layout checks name `opencode`.
+        var expected = mine
+        expected.command = "opencode"
+        #expect(merged[AgentCLI.catalog.firstIndex { $0.command == "opencode" }!] == expected)
+        #expect(OutputFilter.isAntigravity(app: "agy", clis: AgentCLI.merged(custom: [
+            AgentCLI(command: "AGY", title: "Mine", taskPassing: .lastArgument)])))
+        var draft = AgentCLIDraft()
+        draft.command = "MyTool"
+        draft.title = "T"
+        #expect((try? draft.build().get())?.command == "MyTool")
+    }
+
+    @Test func typingABuiltInCommandStartsFromItsDefinition() {
+        let agy = AgentCLI.catalog.first { $0.command == "agy" }!
+        var draft = AgentCLIDraft()
+        draft.command = "agy"
+        draft.followCommand()
+        #expect((try? draft.build().get()) == agy)
+        var titled = AgentCLIDraft()
+        titled.command = "agy"
+        titled.title = "My agy"
+        titled.followCommand()
+        #expect(titled.helpSignature.isEmpty && titled.appWords.isEmpty)
+    }
+
+    @Test func editsAfterAFillInSurviveACommandChange() {
+        var draft = AgentCLIDraft()
+        draft.command = "opencode"
+        draft.followCommand()
+        draft.title = "OpenCode nightly"
+        draft.command = "opencode-nightly"
+        draft.followCommand()
+        #expect(draft.title == "OpenCode nightly" && draft.passing == .flag && draft.flag == "--prompt")
+        draft.command = "opencode"
+        draft.followCommand()
+        #expect(draft.title == "OpenCode nightly")
+    }
+
+    @Test func theEditorSaysWhatAnOverrideLeavesOut() {
+        var draft = AgentCLIDraft()
+        draft.command = "agy"
+        draft.title = "Mine"
+        #expect(draft.builtInLeftOut == "Built-in Antigravity CLI also has app words antigravity")
+        draft.appWords = "Antigravity"
+        #expect(draft.builtInLeftOut == nil)
+        draft.command = "kilo"
+        #expect(draft.builtInLeftOut == "Built-in Kilo Code also has help signature \"kilo tui\"")
+        draft.command = "aider"
+        #expect(draft.builtInLeftOut == nil)
+    }
+
+    /// A Settings CLI named after a built-in's app word would take that CLI's agents: it's refused.
+    @Test func aBuiltInsAppWordIsntACommand() {
+        let mine = AgentCLI(command: "antigravity", title: "Other tool", taskPassing: .lastArgument)
+        #expect(AgentCLI.merged(custom: [mine]) == AgentCLI.catalog)
+        var draft = AgentCLIDraft()
+        draft.command = "Cursor"
+        draft.title = "Cursor editor"
+        #expect(draft.problem == .claimedByBuiltIn("Cursor Agent"))
+        draft.command = "kiro-cli"
+        #expect(draft.problem == nil)
+        // Lookups still try commands before app words: a command elsewhere in the list wins.
+        let other = AgentCLI(command: "agent-x", title: "X", taskPassing: .lastArgument)
+        let named = AgentCLI(command: "x", title: "X2", taskPassing: .lastArgument, appWords: ["agent-x"])
+        #expect(AgentCLI.matching(app: "agent-x", in: [named, other]) == other)
+    }
+
+    @Test func valuesTypedBeforeTheCommandAreKept() {
+        var draft = AgentCLIDraft()
+        draft.passing = .flag
+        draft.flag = "-p"
+        draft.appWords = "myagent"
+        draft.command = "kilo"
+        draft.followCommand()
+        #expect(draft.flag == "-p" && draft.appWords == "myagent" && draft.title.isEmpty)
+    }
+
+    @Test func shellBuiltinsArentCommands() {
+        for word in ["test", "cd", "echo", "If", "source", "r", "print", "setopt", "abbr", "funced"] {
+            #expect(!AgentCLI.isValidCommand(word), "\(word)")
+        }
+        var draft = AgentCLIDraft()
+        draft.command = "vibe"
+        draft.title = "Mine"
+        draft.helpSignature = "mistral vibe"
+        #expect(draft.builtInLeftOut == nil)
+    }
+
+    /// Edited after a fill-in, then typed on past it: the edits stay, the inherited signature doesn't.
+    @Test func anInheritedSignatureIsDroppedWhenTheCommandMovesOn() {
+        var draft = AgentCLIDraft()
+        draft.command = "pi"
+        draft.followCommand()
+        draft.title = "Pixel"
+        draft.command = "pixel-agent"
+        draft.followCommand()
+        #expect(draft.title == "Pixel" && draft.helpSignature.isEmpty)
+    }
+
+    @Test func entriesThisVersionCantReadAreWrittenBack() throws {
+        let good = AgentCLI(command: "aider", title: "Aider", taskPassing: .unsupported)
+        let future: [String: Any] = ["command": "x", "title": "X", "taskPassing": ["future": [:]], "appWords": []]
+        let data = try JSONSerialization.data(withJSONObject:
+            [future] + [try JSONSerialization.jsonObject(with: JSONEncoder().encode(good))])
+        let stored = AgentCLI.decodeStored(data)
+        #expect(stored.clis == [good] && stored.unreadable.count == 1)
+        let saved = try #require(AgentCLI.encodeStored(stored.clis, unreadable: stored.unreadable))
+        let again = AgentCLI.decodeStored(saved)
+        #expect(again.clis == [good] && again.unreadable.count == 1)
+    }
+
+    /// Typing `pixel-agent` passes through `pi`: Pi's definition must not stick.
+    @Test func typingPastABuiltInCommandClearsItsDefinition() {
+        var draft = AgentCLIDraft()
+        for prefix in ["p", "pi", "pix", "pixel-agent"] {
+            draft.command = prefix
+            draft.followCommand()
+        }
+        #expect(draft.title.isEmpty && draft.helpSignature.isEmpty && draft.passing == .lastArgument)
+        draft.command = "gemini"
+        draft.followCommand()
+        #expect(draft.title == "Gemini CLI")
+    }
+
+    @Test func editingKeepsATaskPassingTheEditorCantShow() throws {
+        let cli = AgentCLI(command: "t", title: "T", taskPassing: .verbatim)
+        var draft = AgentCLIDraft(cli)
+        draft.title = "Renamed"
+        #expect(try draft.build().get().taskPassing == .verbatim)
+        draft.passing = .flag
+        draft.flag = "-i"
+        draft.passing = .lastArgument
+        #expect(try draft.build().get().taskPassing == .lastArgument)
+    }
+
+    @Test func anUpdateSavesTheRemappedDetectionAndCanDetectAgain() async {
+        let droid = AgentCLI(command: "droid", title: "Factory Droid", taskPassing: .lastArgument)
+        let saved = SavedDetections()
+        let passes = Counter()
+        let detector = AgentCLIDetector(clis: [droid, aider], saved: ["droid", "aider"], onDetected: saved.record,
+                                        detect: { clis in passes.increment(); return clis })
+        await detector.update(clis: [droid])
+        #expect(saved.all == [["droid"]])
+        #expect(passes.value == 0)
+        await detector.update(clis: [droid, aider], redetect: true)
+        for _ in 0..<100 where passes.value == 0 { await Task.yield() }
+        #expect(passes.value == 1)
+    }
+
+    @Test func aDraftRoundTripsEveryTaskPassing() throws {
+        for cli in [AgentCLI(command: "a", title: "A", taskPassing: .lastArgument),
+                    AgentCLI(command: "b", title: "B", taskPassing: .flag("-i"), appWords: ["bee", "b-cli"],
+                             helpSignature: "Bee CLI"),
+                    AgentCLI(command: "c", title: "C", taskPassing: .arguments(withTask: ["run", "-s", "-t"],
+                                                                                 withoutTask: ["session"])),
+                    AgentCLI(command: "d", title: "D", taskPassing: .unsupported)] {
+            #expect(try AgentCLIDraft(cli).build().get() == cli)
+        }
+    }
+
+    @Test func aDraftCleansUpWhatWasTyped() throws {
+        var draft = AgentCLIDraft()
+        draft.command = " goose "
+        draft.title = " Goose "
+        draft.passing = .subcommand
+        draft.withTask = " run  -s -t "
+        draft.withoutTask = ""
+        draft.appWords = "Goose, goose-ai  GOOSE2"
+        draft.helpSignature = "  "
+        #expect(try draft.build().get() == AgentCLI(
+            command: "goose", title: "Goose", taskPassing: .arguments(withTask: ["run", "-s", "-t"], withoutTask: []),
+            appWords: ["goose", "goose-ai", "goose2"]))
+    }
+
+    @Test func aDraftSaysWhatIsWrong() {
+        var draft = AgentCLIDraft()
+        draft.command = "a;b"
+        draft.title = "T"
+        #expect(draft.problem == .invalidCommand)
+        draft.command = "tool"
+        draft.title = " "
+        #expect(draft.problem == .emptyTitle)
+        draft.title = "Tool"
+        draft.passing = .flag
+        #expect(draft.problem == .invalidFlag)
+        draft.flag = "-i -x"
+        #expect(draft.problem == .invalidFlag)
+        draft.flag = "-i"
+        #expect(draft.problem == nil)
+        draft.passing = .subcommand
+        #expect(draft.problem == .emptySubcommand)
+        draft.withTask = "chat"
+        #expect(draft.problem == nil)
+    }
+}
+
+/// Holds a detection until the test opens it.
+actor AsyncGate {
+    private var opened = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var waitingWatchers: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        if opened { return }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+            waitingWatchers.forEach { $0.resume() }
+            waitingWatchers = []
+        }
+    }
+
+    func waitUntilWaiting() async {
+        if !waiters.isEmpty { return }
+        await withCheckedContinuation { waitingWatchers.append($0) }
+    }
+
+    func open() {
+        opened = true
+        waiters.forEach { $0.resume() }
+        waiters = []
+    }
+}
+
+final class Counter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    var value: Int { lock.withLock { count } }
+    func increment() { lock.withLock { count += 1 } }
+}

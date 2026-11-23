@@ -67,9 +67,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             store.pendingSpaceNames = settings.pendingSpaceNames
             store.onSpacesCached = { [weak self] spaces in self?.settings.herdrSpaceCache = spaces }
             store.onPendingSpaceNamesChanged = { [weak self] names in self?.settings.pendingSpaceNames = names }
-            model.agentCLIDetector = AgentCLIDetector(saved: settings.detectedAgentCLIs, onDetected: { [weak self] commands in
-                Task { @MainActor in self?.settings.detectedAgentCLIs = commands }
+            // Saves what the detector knows when the save runs, not the commands it was called with: these
+            // tasks may run out of order, and an older list must not win.
+            let detector = AgentCLIDetector(clis: model.agentCLIs, saved: settings.detectedAgentCLIs, onDetected: { [weak self] _ in
+                Task { @MainActor in
+                    guard let self, let known = await self.model.agentCLIDetector.lastKnown else { return }
+                    self.settings.detectedAgentCLIs = known.map(\.command)
+                }
             })
+            model.agentCLIDetector = detector
+        }
+        // Demo mode too: the panel already reads Settings CLIs through the model.
+        store.agentCLIs = model.agentCLIs
+        var listVersion = 0
+        if demo {
+            // Demo mode keeps the default detector, made with the catalog only. Versioned like the updates below,
+            // so a Settings change can't be undone by this one arriving late.
+            listVersion += 1
+            let version = listVersion
+            Task { [detector = model.agentCLIDetector, clis = model.agentCLIs] in
+                await detector.update(clis: clis, version: version)
+            }
+        }
+        settings.onCustomAgentCLIsChanged = { [weak self] custom in
+            guard let self else { return }
+            let clis = AgentCLI.merged(custom: custom)
+            model.agentCLIs = clis
+            store.agentCLIs = clis
+            listVersion += 1
+            let version = listVersion
+            let detector = model.agentCLIDetector
+            Task { await detector.update(clis: clis, version: version, redetect: true) }
         }
         store.onWorktreeCreated = { [weak self] path in self?.settings.rememberFolder(path) }
         store.onLaunchFinished = { [weak self] succeeded in

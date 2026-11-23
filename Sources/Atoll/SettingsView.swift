@@ -16,6 +16,14 @@ struct SettingsView: View {
 
     @State private var replyRows: [ReplyRow] = []
     @State private var launchSpaces: [HerdrSpace] = []
+    /// The agent CLI being added (`index` nil) or edited in the sheet.
+    struct CLIEdit: Identifiable {
+        let id = UUID()
+        var index: Int?
+        var draft: AgentCLIDraft
+    }
+
+    @State private var cliEdit: CLIEdit?
 
     var body: some View {
         Form {
@@ -229,6 +237,50 @@ struct SettingsView: View {
                     Task { launchSpaces = await store.launchSpaces() }
                 }
             }
+
+            Section("Agent CLIs") {
+                ForEach(Array(settings.customAgentCLIs.enumerated()), id: \.element.command) { index, cli in
+                    HStack(spacing: 6) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(cli.title)
+                            Text(AgentCLI.catalog.contains { $0.command == cli.command.lowercased() }
+                                 ? "\(cli.command) · replaces built-in" : cli.command)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button { cliEdit = CLIEdit(index: index, draft: AgentCLIDraft(cli)) } label: {
+                            Image(systemName: "pencil")
+                        }
+                        .help("Edit")
+                        Button { settings.customAgentCLIs.remove(at: index) } label: { Image(systemName: "minus.circle") }
+                            .help("Remove")
+                    }
+                    .buttonStyle(.borderless)
+                }
+                Button("Add CLI…") { cliEdit = CLIEdit(index: nil, draft: AgentCLIDraft()) }
+                Text("Offered in the launch form when your login shell finds the command. Using a built-in "
+                    + "command replaces that entry.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .sheet(item: $cliEdit) { edit in
+            AgentCLIEditor(
+                draft: edit.draft,
+                isNew: edit.index == nil,
+                takenCommands: Set(settings.customAgentCLIs.enumerated().filter { $0.offset != edit.index }
+                    .map { $0.element.command.lowercased() }),
+                onSave: { cli in
+                    if let index = edit.index, settings.customAgentCLIs.indices.contains(index) {
+                        // Unchanged: no save, and no new detection.
+                        if settings.customAgentCLIs[index] != cli { settings.customAgentCLIs[index] = cli }
+                    } else {
+                        settings.customAgentCLIs.append(cli)
+                    }
+                    cliEdit = nil
+                },
+                onCancel: { cliEdit = nil })
         }
         .formStyle(.grouped)
         .frame(width: 460)
@@ -422,5 +474,79 @@ private struct PresetRow: View {
 
     private func move(_ offset: Int) {
         settings.launchPresets = LaunchHistory.moving(preset.id, by: offset, in: settings.launchPresets)
+    }
+}
+
+/// Adds or edits an agent CLI for the launch form.
+private struct AgentCLIEditor: View {
+    @State var draft: AgentCLIDraft
+    /// Adding (not editing): typing a built-in command fills in its definition.
+    let isNew: Bool
+    /// Commands other Settings CLIs already use.
+    let takenCommands: Set<String>
+    let onSave: (AgentCLI) -> Void
+    let onCancel: () -> Void
+    /// The problem shows once something was typed, not on a sheet just opened.
+    @State private var edited = false
+
+    private var problem: String? {
+        if takenCommands.contains(draft.command.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) {
+            return "Another CLI in Settings uses this command"
+        }
+        return draft.problem?.message
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Form {
+                TextField("Command", text: $draft.command, prompt: Text("e.g. aider"))
+                    .onChange(of: draft.command) { _, _ in if isNew { draft.followCommand() } }
+                TextField("Title", text: $draft.title, prompt: Text("Shown in the launch form"))
+                Picker("Starting task", selection: $draft.passing) {
+                    Text("Last argument").tag(AgentCLIDraft.Passing.lastArgument)
+                    Text("After a flag").tag(AgentCLIDraft.Passing.flag)
+                    Text("After arguments").tag(AgentCLIDraft.Passing.subcommand)
+                    Text("Not supported").tag(AgentCLIDraft.Passing.unsupported)
+                }
+                switch draft.passing {
+                case .flag:
+                    TextField("Flag", text: $draft.flag, prompt: Text("e.g. -i"))
+                case .subcommand:
+                    TextField("Before the task", text: $draft.withTask, prompt: Text("e.g. run -s -t"))
+                    TextField("Without a task", text: $draft.withoutTask, prompt: Text("e.g. session (optional)"))
+                case .lastArgument, .unsupported:
+                    EmptyView()
+                }
+                TextField("App words", text: $draft.appWords, prompt: Text("Optional, comma-separated"))
+                    .help("Other names the CLI reports to Herdr besides its command, so an agent it runs maps back "
+                        + "to this entry")
+                TextField("Help signature", text: $draft.helpSignature, prompt: Text("Optional"))
+                    .help("Text `<command> --help` must print for the command to count as this CLI; for names other "
+                        + "programs also use")
+            }
+            .formStyle(.grouped)
+            if let leftOut = draft.builtInLeftOut {
+                Text(leftOut)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal)
+            }
+            HStack {
+                if edited, let problem {
+                    Text(problem)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+                Spacer()
+                Button("Cancel", role: .cancel, action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Button("Save") { if case .success(let cli) = draft.build() { onSave(cli) } }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(problem != nil)
+            }
+            .padding([.horizontal, .bottom])
+        }
+        .frame(width: 420)
+        .onChange(of: draft) { _, _ in edited = true }
     }
 }
