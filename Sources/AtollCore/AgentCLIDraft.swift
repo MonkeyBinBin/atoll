@@ -8,12 +8,13 @@ public struct AgentCLIDraft: Equatable, Sendable {
     }
 
     public enum Problem: Error, Equatable, Sendable {
-        case invalidCommand, reservedCommand, emptyTitle, invalidFlag, emptySubcommand
+        case invalidCommand, reservedCommand, builtInAppWord(String), emptyTitle, invalidFlag, emptySubcommand
 
         public var message: String {
             switch self {
             case .invalidCommand: "Command: letters, digits, . _ + - only, starting with a letter or digit; not a shell builtin"
             case .reservedCommand: "Names starting with claude or codex are tracked as Claude Code / Codex"
+            case .builtInAppWord(let title): "\(title) reports this name; it would take that CLI's agents"
             case .emptyTitle: "Title is empty"
             case .invalidFlag: "Flag: one argument, no spaces (use After arguments for several)"
             case .emptySubcommand: "Arguments before the task are empty"
@@ -23,7 +24,10 @@ public struct AgentCLIDraft: Equatable, Sendable {
 
     public var command = ""
     public var title = ""
-    public var passing = Passing.lastArgument
+    public var passing = Passing.lastArgument {
+        // Choosing a passing, even Last argument again, replaces one the editor couldn't show.
+        didSet { unshown = nil }
+    }
     /// For `.flag`.
     public var flag = ""
     /// For `.subcommand`: arguments before the task, and the arguments used when there's no task;
@@ -122,6 +126,7 @@ public struct AgentCLIDraft: Equatable, Sendable {
         let command = command.trimmingCharacters(in: .whitespacesAndNewlines)
         guard AgentCLI.isValidCommand(command) else { return .failure(.invalidCommand) }
         guard !AgentCLI.isReserved(command) else { return .failure(.reservedCommand) }
+        if let owner = AgentCLI.catalogOwningAppWord(command) { return .failure(.builtInAppWord(owner.title)) }
         let title = title.trimmingCharacters(in: .whitespaces)
         guard !title.isEmpty else { return .failure(.emptyTitle) }
         let taskPassing: TaskPassing

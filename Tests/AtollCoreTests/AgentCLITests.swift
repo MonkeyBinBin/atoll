@@ -543,12 +543,20 @@ struct CustomAgentCLITests {
         #expect(draft.builtInLeftOut == nil)
     }
 
-    @Test func aCommandBeatsAnotherCLIsAppWord() {
+    /// A Settings CLI named after a built-in's app word would take that CLI's agents: it's refused.
+    @Test func aBuiltInsAppWordIsntACommand() {
         let mine = AgentCLI(command: "antigravity", title: "Other tool", taskPassing: .lastArgument)
-        let clis = AgentCLI.merged(custom: [mine])
-        #expect(AgentCLI.matching(app: "antigravity", in: clis) == mine)
-        #expect(!OutputFilter.isAntigravity(app: "antigravity", clis: clis))
-        #expect(OutputFilter.isAntigravity(app: "agy", clis: clis))
+        #expect(AgentCLI.merged(custom: [mine]) == AgentCLI.catalog)
+        var draft = AgentCLIDraft()
+        draft.command = "Cursor"
+        draft.title = "Cursor editor"
+        #expect(draft.problem == .builtInAppWord("Cursor Agent"))
+        draft.command = "kiro-cli"
+        #expect(draft.problem == nil)
+        // Lookups still try commands before app words: a command elsewhere in the list wins.
+        let other = AgentCLI(command: "agent-x", title: "X", taskPassing: .lastArgument)
+        let named = AgentCLI(command: "x", title: "X2", taskPassing: .lastArgument, appWords: ["agent-x"])
+        #expect(AgentCLI.matching(app: "agent-x", in: [named, other]) == other)
     }
 
     @Test func valuesTypedBeforeTheCommandAreKept() {
@@ -562,7 +570,7 @@ struct CustomAgentCLITests {
     }
 
     @Test func shellBuiltinsArentCommands() {
-        for word in ["test", "cd", "echo", "If", "source"] {
+        for word in ["test", "cd", "echo", "If", "source", "r", "print", "setopt", "abbr", "funced"] {
             #expect(!AgentCLI.isValidCommand(word), "\(word)")
         }
         var draft = AgentCLIDraft()
@@ -593,7 +601,7 @@ struct CustomAgentCLITests {
         draft.passing = .flag
         draft.flag = "-i"
         draft.passing = .lastArgument
-        #expect(try draft.build().get().taskPassing == .verbatim)
+        #expect(try draft.build().get().taskPassing == .lastArgument)
     }
 
     @Test func anUpdateSavesTheRemappedDetectionAndCanDetectAgain() async {

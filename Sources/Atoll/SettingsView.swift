@@ -489,7 +489,7 @@ private struct AgentCLIEditor: View {
     @State private var edited = false
 
     private var problem: String? {
-        if takenCommands.contains(draft.command.trimmingCharacters(in: .whitespaces).lowercased()) {
+        if takenCommands.contains(draft.command.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) {
             return "Another CLI in Settings uses this command"
         }
         return draft.problem?.message

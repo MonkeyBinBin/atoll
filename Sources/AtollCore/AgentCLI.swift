@@ -122,7 +122,21 @@ public struct AgentCLI: Equatable, Sendable, Codable {
         "jobs", "wait", "trap", "shift", "return", "break", "continue", "let", "local", "declare", "typeset",
         "hash", "history", "fg", "bg", "umask", "ulimit", "getopts", "which", "where", "whence", "and", "or", "not",
         "end", "begin", "functions", "set_color", "string", "math", "status", "contains", "count",
+        // zsh
+        "print", "pushd", "popd", "dirs", "disown", "fc", "r", "setopt", "unsetopt", "autoload", "emulate",
+        "bindkey", "zmodload", "rehash", "noglob", "vared", "zle", "sched", "limit", "unlimit", "zstyle",
+        "compdef", "unhash", "integer", "float", "readonly", "enable", "disable", "logout", "suspend", "times",
+        // fish
+        "abbr", "funced", "funcsave", "fish_config", "complete", "argparse", "commandline", "emit", "path",
+        "random", "realpath", "bind", "block", "breakpoint", "isatty", "nextd", "prevd", "dirh", "cdh",
     ]
+
+    /// The catalog CLI that reports this name as one of its app words, if any (and it isn't that CLI's own
+    /// command): a Settings CLI by that name would take that CLI's running agents.
+    public static func catalogOwningAppWord(_ command: String) -> AgentCLI? {
+        let name = command.lowercased()
+        return catalog.first { $0.command.lowercased() != name && $0.appWords.contains { $0.lowercased() == name } }
+    }
 
     /// Stored Settings CLIs, dropping only entries this version can't read (rather than all of them).
     public static func decodeList(_ data: Data) -> [AgentCLI] {
@@ -139,7 +153,8 @@ public struct AgentCLI: Equatable, Sendable, Codable {
         // Compared without case: macOS file systems usually ignore it, so `OpenCode` is `opencode`.
         var seen: Set<String> = []
         let valid = custom.filter {
-            isValidCommand($0.command) && !isReserved($0.command) && seen.insert($0.command.lowercased()).inserted
+            isValidCommand($0.command) && !isReserved($0.command) && catalogOwningAppWord($0.command) == nil
+                && seen.insert($0.command.lowercased()).inserted
         }
         let byCommand = Dictionary(uniqueKeysWithValues: valid.map { ($0.command.lowercased(), $0) })
         let catalogCommands = Set(catalog.map { $0.command.lowercased() })

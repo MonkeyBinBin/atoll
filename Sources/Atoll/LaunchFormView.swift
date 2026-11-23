@@ -449,7 +449,8 @@ struct LaunchFormView: View {
             ?? LaunchOption.catalogCLI(id: optionID, in: installed)
         if let selected, !has(fresh, selected) {
             list.append(selected)
-            restoreNotes.append("\(selected.title) (\(selected.command)) wasn't found on this Mac")
+            let note = "\(selected.title) (\(selected.command)) wasn't found on this Mac"
+            if !restoreNotes.contains(note) { restoreNotes.append(note) }
         }
         installed = list
     }

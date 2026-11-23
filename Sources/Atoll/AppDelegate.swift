@@ -79,9 +79,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // Demo mode too: the panel already reads Settings CLIs through the model.
         store.agentCLIs = model.agentCLIs
-        // Demo mode keeps the default detector, made with the catalog only.
-        if demo { Task { [detector = model.agentCLIDetector, clis = model.agentCLIs] in await detector.update(clis: clis) } }
         var listVersion = 0
+        if demo {
+            // Demo mode keeps the default detector, made with the catalog only. Versioned like the updates below,
+            // so a Settings change can't be undone by this one arriving late.
+            listVersion += 1
+            let version = listVersion
+            Task { [detector = model.agentCLIDetector, clis = model.agentCLIs] in
+                await detector.update(clis: clis, version: version)
+            }
+        }
         settings.onCustomAgentCLIsChanged = { [weak self] custom in
             guard let self else { return }
             let clis = AgentCLI.merged(custom: custom)
