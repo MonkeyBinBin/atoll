@@ -87,9 +87,13 @@ struct LaunchFormView: View {
     private var store: AgentStore { model.store }
     /// Installed CLIs as Settings defines them now: a detection may still carry a definition from before an edit.
     private var options: [LaunchOption] {
-        // One removed from Settings meanwhile keeps its old definition rather than vanishing under the selection.
+        // One removed from Settings meanwhile keeps its old definition rather than vanishing under the selection;
+        // one now asking for a different help signature waits for a detection to check it (as the detector does).
         let all = model.agentCLIs
-        let current = installed.map { cli in all.first { $0.command == cli.command } ?? cli }
+        let current = installed.compactMap { cli -> AgentCLI? in
+            guard let now = all.first(where: { $0.command == cli.command }) else { return cli }
+            return now.helpSignature == nil || now.helpSignature == cli.helpSignature ? now : nil
+        }
         return LaunchOption.builtIns + current.map(LaunchOption.detected) + templateOptions
     }
 
@@ -432,7 +436,10 @@ struct LaunchFormView: View {
     /// A newer detection; the selected CLI stays selectable (with a note) even if it's no longer found.
     private func takeRefreshed(_ fresh: [AgentCLI]) {
         var list = fresh
-        if let selected = LaunchOption.catalogCLI(id: optionID, in: model.agentCLIs), !has(fresh, selected) {
+        // A CLI removed from Settings meanwhile is only in `installed` now.
+        let selected = LaunchOption.catalogCLI(id: optionID, in: model.agentCLIs)
+            ?? LaunchOption.catalogCLI(id: optionID, in: installed)
+        if let selected, !has(fresh, selected) {
             list.append(selected)
             restoreNotes.append("\(selected.title) (\(selected.command)) wasn't found on this Mac")
         }

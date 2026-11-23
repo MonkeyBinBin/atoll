@@ -492,7 +492,12 @@ struct CustomAgentCLITests {
         let merged = AgentCLI.merged(custom: [mine, AgentCLI(command: "AIDER", title: "A", taskPassing: .lastArgument),
                                               AgentCLI(command: "aider", title: "B", taskPassing: .lastArgument)])
         #expect(merged.count == AgentCLI.catalog.count + 1)
-        #expect(merged[AgentCLI.catalog.firstIndex { $0.command == "opencode" }!] == mine)
+        // The override keeps the catalog's spelling: option id and layout checks name `opencode`.
+        var expected = mine
+        expected.command = "opencode"
+        #expect(merged[AgentCLI.catalog.firstIndex { $0.command == "opencode" }!] == expected)
+        #expect(OutputFilter.isAntigravity(app: "agy", clis: AgentCLI.merged(custom: [
+            AgentCLI(command: "AGY", title: "Mine", taskPassing: .lastArgument)])))
         var draft = AgentCLIDraft()
         draft.command = "MyTool"
         draft.title = "T"
@@ -510,6 +515,32 @@ struct CustomAgentCLITests {
         titled.title = "My agy"
         titled.followCommand()
         #expect(titled.helpSignature.isEmpty && titled.appWords.isEmpty)
+    }
+
+    @Test func editsAfterAFillInSurviveACommandChange() {
+        var draft = AgentCLIDraft()
+        draft.command = "opencode"
+        draft.followCommand()
+        draft.title = "OpenCode nightly"
+        draft.command = "opencode-nightly"
+        draft.followCommand()
+        #expect(draft.title == "OpenCode nightly" && draft.passing == .flag && draft.flag == "--prompt")
+        draft.command = "opencode"
+        draft.followCommand()
+        #expect(draft.title == "OpenCode nightly")
+    }
+
+    @Test func theEditorSaysWhatAnOverrideLeavesOut() {
+        var draft = AgentCLIDraft()
+        draft.command = "agy"
+        draft.title = "Mine"
+        #expect(draft.builtInLeftOut == "Built-in Antigravity CLI also has app words antigravity")
+        draft.appWords = "Antigravity"
+        #expect(draft.builtInLeftOut == nil)
+        draft.command = "kilo"
+        #expect(draft.builtInLeftOut == "Built-in Kilo Code also has help signature \"kilo tui\"")
+        draft.command = "aider"
+        #expect(draft.builtInLeftOut == nil)
     }
 
     /// Typing `pixel-agent` passes through `pi`: Pi's definition must not stick.

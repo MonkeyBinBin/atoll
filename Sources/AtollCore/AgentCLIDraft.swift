@@ -36,8 +36,10 @@ public struct AgentCLIDraft: Equatable, Sendable {
     public var helpSignature = ""
     /// A task passing the editor can't show (`.verbatim`), kept while the picker stays on Last argument.
     private var unshown: TaskPassing?
-    /// The catalog command whose definition `followCommand()` filled in, while it still is the command.
+    /// The catalog command whose definition `followCommand()` filled in, while it still is the command, and the
+    /// draft as filled in (to tell whether anything was edited since).
     private var adoptedFrom: String?
+    private var adoptedFields: [String]?
 
     public init() {}
 
@@ -64,18 +66,48 @@ public struct AgentCLIDraft: Equatable, Sendable {
 
     /// For a new draft, after each change to the command: one naming a catalog CLI, with nothing else typed yet,
     /// takes that entry's definition, so overriding it starts from the built-in app words and help signature
-    /// rather than dropping them. Typing on past it (`pi` → `pixel`) clears what was filled in again.
+    /// rather than dropping them. Typing on past it (`pi` → `pixel`) clears what was filled in again, unless
+    /// another field was edited meanwhile: then the edits stay and the draft stops following.
     public mutating func followCommand() {
-        let typed = command.trimmingCharacters(in: .whitespaces)
+        let typed = command.trimmingCharacters(in: .whitespacesAndNewlines)
         if let adoptedFrom, typed.lowercased() != adoptedFrom {
-            self = AgentCLIDraft()
-            command = typed
+            if fields == adoptedFields {
+                self = AgentCLIDraft()
+                command = typed
+            } else {
+                self.adoptedFrom = nil
+                adoptedFields = nil
+                return
+            }
         }
         guard adoptedFrom == nil, title.trimmingCharacters(in: .whitespaces).isEmpty,
               let entry = AgentCLI.catalog.first(where: { $0.command == typed.lowercased() }) else { return }
         self = AgentCLIDraft(entry)
         command = typed
         adoptedFrom = entry.command
+        adoptedFields = fields
+    }
+
+    /// Everything but the command.
+    private var fields: [String] {
+        [title, passing.rawValue, flag, withTask, withoutTask, appWords, helpSignature]
+    }
+
+    /// For a command that names a catalog CLI: what the built-in defines that this draft leaves out (app words,
+    /// help signature), so the editor can say so before an override drops it. nil when nothing is left out.
+    public var builtInLeftOut: String? {
+        guard let entry = AgentCLI.catalog.first(where: {
+            $0.command == command.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        }) else { return nil }
+        let words = Set(appWords.replacingOccurrences(of: ",", with: " ").split(whereSeparator: \.isWhitespace)
+            .map { $0.lowercased() })
+        let missing = entry.appWords.filter { !words.contains($0) }
+        var parts: [String] = []
+        if !missing.isEmpty { parts.append("app words \(missing.joined(separator: ", "))") }
+        if let signature = entry.helpSignature, helpSignature.trimmingCharacters(in: .whitespaces) != signature {
+            parts.append("help signature \"\(signature)\"")
+        }
+        return parts.isEmpty ? nil : "Built-in \(entry.title) also has " + parts.joined(separator: " and ")
     }
 
     public var problem: Problem? {
@@ -85,7 +117,7 @@ public struct AgentCLIDraft: Equatable, Sendable {
 
     public func build() -> Result<AgentCLI, Problem> {
         // Kept as typed (a case-sensitive volume needs it); duplicates are compared without case elsewhere.
-        let command = command.trimmingCharacters(in: .whitespaces)
+        let command = command.trimmingCharacters(in: .whitespacesAndNewlines)
         guard AgentCLI.isValidCommand(command) else { return .failure(.invalidCommand) }
         guard !AgentCLI.isReserved(command) else { return .failure(.reservedCommand) }
         let title = title.trimmingCharacters(in: .whitespaces)

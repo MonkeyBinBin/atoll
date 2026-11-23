@@ -524,6 +524,12 @@ private struct AgentCLIEditor: View {
                         + "programs also use")
             }
             .formStyle(.grouped)
+            if let leftOut = draft.builtInLeftOut {
+                Text(leftOut)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal)
+            }
             HStack {
                 if edited, let problem {
                     Text(problem)

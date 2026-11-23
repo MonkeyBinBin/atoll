@@ -133,8 +133,12 @@ public struct AgentCLI: Equatable, Sendable, Codable {
         }
         let byCommand = Dictionary(uniqueKeysWithValues: valid.map { ($0.command.lowercased(), $0) })
         let catalogCommands = Set(catalog.map { $0.command.lowercased() })
-        return catalog.map { byCommand[$0.command.lowercased()] ?? $0 }
-            + valid.filter { !catalogCommands.contains($0.command.lowercased()) }
+        // An override keeps the catalog's spelling: its option id and the layout checks name that command.
+        return catalog.map { entry in
+            guard var override = byCommand[entry.command.lowercased()] else { return entry }
+            override.command = entry.command
+            return override
+        } + valid.filter { !catalogCommands.contains($0.command.lowercased()) }
     }
 
     static let marker = "ATOLL_FOUND:"
