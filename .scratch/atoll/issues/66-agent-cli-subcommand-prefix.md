@@ -14,4 +14,12 @@
 
 **Blocked by:** —
 
-**Status:** needs-triage
+**Status:** claimed
+
+## Comments
+
+- 2026-11-23（agent）：沒有另加 `AgentCLI.arguments`，改在 `TaskPassing` 新增 `.arguments(withTask:withoutTask:)`：herdr 把 task 接在 argv 最後，有無 task 的參數本來就不同（Goose 不帶 task 要跑 `goose session`），放在 task passing 一處表達。catalog 加入：
+  - `kiro-cli`：有 task `chat <task>`，沒有 task 跑 bare `kiro-cli`（預設即 `chat`）；`appWords: ["kiro"]`
+  - `hermes`：有 task `chat -q <task>`，沒有 task `chat`。原始碼 `hermes_cli/_parser.py` 的 `-q` 說明：真 TTY 上會 seed 互動 session，`--oneshot`／`-Q`／非 TTY 才答完就結束；0.21 之前 `-q` 是 one-shot。`hermes` 也是 Hermes JS 引擎的指令，加 `helpSignature: "Hermes Agent"`（頂層 parser description）
+  - `goose`：有 task `run -s -t <task>`，沒有 task `session`。原始碼 `crates/goose-cli/src/cli.rs` 確認 `-t/--text`、`-s/--interactive`。`goose` 也是 pressly 的 DB migration 工具，加 `helpSignature: "interactive chat sessions"`（`session` 子指令說明）
+  - 三者本機都沒裝，未實際啟動；app word 只依 herdr-app `programs.json`

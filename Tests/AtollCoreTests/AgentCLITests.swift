@@ -124,6 +124,8 @@ struct AgentCLITests {
         #expect(AgentCLI.matching(app: "qoder")?.command == "qodercli")
         #expect(AgentCLI.matching(app: "pi")?.command == "pi")
         #expect(AgentCLI.matching(app: "pilot") == nil)
+        #expect(AgentCLI.matching(app: "kiro")?.command == "kiro-cli")
+        #expect(AgentCLI.matching(app: "kiro-cli")?.command == "kiro-cli")
         #expect(AgentCLI.matching(app: "droidx") == nil)
         #expect(AgentCLI.matching(app: "claude") == nil)
     }
@@ -167,6 +169,9 @@ struct AgentCLITests {
         #expect(TaskPassing.flag("--prompt").apply(argv: ["opencode"], task: "fix it") == (["opencode", "--prompt"], "fix it"))
         #expect(TaskPassing.flag("--prompt").apply(argv: ["opencode"], task: "") == (["opencode"], ""))
         #expect(TaskPassing.unsupported.apply(argv: ["kimi"], task: "fix it") == (["kimi"], ""))
+        let goose = TaskPassing.arguments(withTask: ["run", "-s", "-t"], withoutTask: ["session"])
+        #expect(goose.apply(argv: ["goose"], task: "fix it") == (["goose", "run", "-s", "-t"], "fix it"))
+        #expect(goose.apply(argv: ["goose"], task: "") == (["goose", "session"], ""))
     }
 }
 
