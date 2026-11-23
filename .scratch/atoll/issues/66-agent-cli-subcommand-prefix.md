@@ -14,7 +14,7 @@
 
 **Blocked by:** —
 
-**Status:** claimed
+**Status:** resolved
 
 ## Comments
 
@@ -23,3 +23,4 @@
   - `hermes`：有 task `chat -q <task>`，沒有 task `chat`。原始碼 `hermes_cli/_parser.py` 的 `-q` 說明：真 TTY 上會 seed 互動 session，`--oneshot`／`-Q`／非 TTY 才答完就結束；0.21 之前 `-q` 是 one-shot。`hermes` 也是 Hermes JS 引擎的指令，加 `helpSignature: "Hermes Agent"`（頂層 parser description）
   - `goose`：有 task `run -s -t <task>`，沒有 task `session`。原始碼 `crates/goose-cli/src/cli.rs` 確認 `-t/--text`、`-s/--interactive`。`goose` 也是 pressly 的 DB migration 工具，加 `helpSignature: "interactive chat sessions"`（`session` 子指令說明）
   - 三者本機都沒裝，未實際啟動；app word 只依 herdr-app `programs.json`
+- 2026-11-23（agent）：依 code review 修正。Goose 的 `-t`（`cli.rs` 未設 `allow_hyphen_values`）與 Kiro 的位置參數由 clap 解析，task 以 `-` 開頭（markdown 條列）會被當成 flag 而報錯；`TaskPassing.apply` 對所有帶 task 的方式，在 `-` 開頭的 task 前補一個空格（Codex 同樣用 clap，一併受惠）。測試改從 catalog 驗證三者有無 task 的 argv。Hermes 0.21 之前 `-q` 為 one-shot 的限制維持，偵測無法可靠判斷版本。

@@ -12,9 +12,11 @@ public enum TaskPassing: Hashable, Sendable {
     /// The CLI has no way to open an interactive session with a first prompt.
     case unsupported
 
-    /// The argv and task to launch with; an empty task adds nothing.
+    /// The argv and task to launch with; an empty task adds nothing. A task starting with `-` (a markdown list)
+    /// gets a leading space, so argument parsers (clap, argparse) take it as a value rather than a flag.
     public func apply(argv: [String], task: String) -> (argv: [String], task: String) {
-        switch self {
+        let task = task.hasPrefix("-") ? " " + task : task
+        return switch self {
         case .lastArgument: (argv, task)
         case .flag(let flag): (task.isEmpty ? argv : argv + [flag], task)
         case .arguments(let withTask, let withoutTask): (argv + (task.isEmpty ? withoutTask : withTask), task)

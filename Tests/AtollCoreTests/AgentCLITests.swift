@@ -169,9 +169,22 @@ struct AgentCLITests {
         #expect(TaskPassing.flag("--prompt").apply(argv: ["opencode"], task: "fix it") == (["opencode", "--prompt"], "fix it"))
         #expect(TaskPassing.flag("--prompt").apply(argv: ["opencode"], task: "") == (["opencode"], ""))
         #expect(TaskPassing.unsupported.apply(argv: ["kimi"], task: "fix it") == (["kimi"], ""))
-        let goose = TaskPassing.arguments(withTask: ["run", "-s", "-t"], withoutTask: ["session"])
-        #expect(goose.apply(argv: ["goose"], task: "fix it") == (["goose", "run", "-s", "-t"], "fix it"))
-        #expect(goose.apply(argv: ["goose"], task: "") == (["goose", "session"], ""))
+        #expect(TaskPassing.lastArgument.apply(argv: ["codex"], task: "- fix A\n- fix B") == (["codex"], " - fix A\n- fix B"))
+    }
+
+    @Test func subcommandCLIsLaunchWithAndWithoutATask() {
+        func launch(_ command: String, _ task: String) -> [String] {
+            let cli = AgentCLI.catalog.first { $0.command == command }!
+            let start = cli.taskPassing.apply(argv: [cli.command], task: task)
+            return start.task.isEmpty ? start.argv : start.argv + [start.task]
+        }
+        #expect(launch("kiro-cli", "fix it") == ["kiro-cli", "chat", "fix it"])
+        #expect(launch("kiro-cli", "") == ["kiro-cli"])
+        #expect(launch("hermes", "fix it") == ["hermes", "chat", "-q", "fix it"])
+        #expect(launch("hermes", "") == ["hermes", "chat"])
+        #expect(launch("goose", "fix it") == ["goose", "run", "-s", "-t", "fix it"])
+        #expect(launch("goose", "") == ["goose", "session"])
+        #expect(launch("goose", "- fix A") == ["goose", "run", "-s", "-t", " - fix A"])
     }
 }
 
