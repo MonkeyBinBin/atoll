@@ -18,7 +18,9 @@ struct LaunchOption: Identifiable, Hashable {
     ]
 
     static func detected(_ cli: AgentCLI) -> LaunchOption {
-        LaunchOption(id: detectedID(cli), title: cli.title, argv: [cli.command], tool: .from(app: cli.command),
+        // Generic even when the name starts with `claude`/`codex` (a wrapper like `claude-yolo`): Claude Code and
+        // Codex are only the built-ins.
+        LaunchOption(id: detectedID(cli), title: cli.title, argv: [cli.command], tool: .generic,
                      taskPassing: cli.taskPassing)
     }
 
@@ -86,7 +88,8 @@ struct LaunchFormView: View {
     private var store: AgentStore { model.store }
     /// Installed CLIs as Settings defines them now: a detection may still carry a definition from before an edit.
     private var options: [LaunchOption] {
-        let current = installed.compactMap { cli in model.agentCLIs.first { $0.command == cli.command } }
+        // One removed from Settings meanwhile keeps its old definition rather than vanishing under the selection.
+        let current = installed.map { cli in model.agentCLIs.first { $0.command == cli.command } ?? cli }
         return LaunchOption.builtIns + current.map(LaunchOption.detected) + templateOptions
     }
 

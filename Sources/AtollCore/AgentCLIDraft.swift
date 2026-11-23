@@ -63,7 +63,7 @@ public struct AgentCLIDraft: Equatable, Sendable {
     public func build() -> Result<AgentCLI, Problem> {
         let command = command.trimmingCharacters(in: .whitespaces)
         guard AgentCLI.isValidCommand(command) else { return .failure(.invalidCommand) }
-        guard !AgentCLI.reservedCommands.contains(command) else { return .failure(.reservedCommand) }
+        guard !AgentCLI.isReserved(command) else { return .failure(.reservedCommand) }
         let title = title.trimmingCharacters(in: .whitespaces)
         guard !title.isEmpty else { return .failure(.emptyTitle) }
         let taskPassing: TaskPassing

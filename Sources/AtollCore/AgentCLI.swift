@@ -91,15 +91,17 @@ public struct AgentCLI: Equatable, Sendable, Codable {
     /// `opencode-dev` isn't taken for OpenCode.
     public static func matching(app: String, in clis: [AgentCLI] = catalog) -> AgentCLI? {
         let word = app.lowercased()
-        func exact(_ cli: AgentCLI) -> Bool { cli.command == word || cli.appWords.contains(word) }
-        func prefixed(_ cli: AgentCLI) -> Bool {
-            ([cli.command] + cli.appWords).contains { word.hasPrefix($0 + "-") }
-        }
+        func names(_ cli: AgentCLI) -> [String] { [cli.command.lowercased()] + cli.appWords.map { $0.lowercased() } }
+        func exact(_ cli: AgentCLI) -> Bool { names(cli).contains(word) }
+        func prefixed(_ cli: AgentCLI) -> Bool { names(cli).contains { word.hasPrefix($0 + "-") } }
         return clis.first(where: exact) ?? clis.first(where: prefixed)
     }
 
     /// Always offered by the launch form (`LaunchOption.builtIns`), so not definable in Settings.
     public static let reservedCommands: Set<String> = ["claude", "codex"]
+
+    /// A reserved command in any case: macOS file systems usually ignore case, so `Claude` runs `claude`.
+    public static func isReserved(_ command: String) -> Bool { reservedCommands.contains(command.lowercased()) }
 
     /// Whether a command name is safe to put unquoted in the detection script: letters, digits, `.`, `_`, `+`, `-`,
     /// not starting with a punctuation mark.
@@ -107,8 +109,6 @@ public struct AgentCLI: Equatable, Sendable, Codable {
         command.range(of: "^[A-Za-z0-9][A-Za-z0-9._+-]*$", options: .regularExpression) != nil
     }
 
-    /// The catalog with the user's CLIs: one with a catalog command replaces that entry in place, the rest follow
-    /// in order. An invalid or reserved command, or a command already given earlier in `custom`, is skipped.
     /// Stored Settings CLIs, dropping only entries this version can't read (rather than all of them).
     public static func decodeList(_ data: Data) -> [AgentCLI] {
         struct Lossy: Decodable {
@@ -118,10 +118,12 @@ public struct AgentCLI: Equatable, Sendable, Codable {
         return ((try? JSONDecoder().decode([Lossy].self, from: data)) ?? []).compactMap(\.cli)
     }
 
+    /// The catalog with the user's CLIs: one with a catalog command replaces that entry in place, the rest follow
+    /// in order. An invalid or reserved command, or a command already given earlier in `custom`, is skipped.
     public static func merged(custom: [AgentCLI]) -> [AgentCLI] {
         var seen: Set<String> = []
         let valid = custom.filter {
-            isValidCommand($0.command) && !reservedCommands.contains($0.command) && seen.insert($0.command).inserted
+            isValidCommand($0.command) && !isReserved($0.command) && seen.insert($0.command).inserted
         }
         let byCommand = Dictionary(uniqueKeysWithValues: valid.map { ($0.command, $0) })
         let catalogCommands = Set(catalog.map(\.command))
@@ -325,6 +327,10 @@ public actor AgentCLIDetector {
     private let detect: Detect
     private let onDetected: @Sendable ([String]) -> Void
     private var running: Task<[AgentCLI]?, Never>?
+    /// The list changed while `running` was detecting the old one: it detects again before finishing.
+    private var stale = false
+    /// The newest `update(clis:version:)` applied; older ones arriving late are ignored.
+    private var version = 0
     /// The last successful detection; nil until one succeeds.
     public private(set) var lastKnown: [AgentCLI]?
 
@@ -347,7 +353,12 @@ public actor AgentCLIDetector {
     /// Detects again (joining a detection already running). nil when it failed; `lastKnown` is then kept.
     public func refresh() async -> [AgentCLI]? {
         if let running { return await running.value.map(current) }
-        let task = Task { [clis, detect] in await detect(clis) }
+        let task = Task { [detect] () -> [AgentCLI]? in
+            while true {
+                let result = await detect(await self.startPass())
+                if await !self.stale { return result }
+            }
+        }
         running = task
         // A detection started before `update(clis:)` reported the old definitions: take the current ones.
         let result = await task.value.map(current)
@@ -360,10 +371,23 @@ public actor AgentCLIDetector {
     }
 
     /// Detects `clis` from now on. `lastKnown` keeps the commands it had that are still listed, with their new
-    /// definitions, so an edited CLI shows its new settings before the next refresh.
-    public func update(clis: [AgentCLI]) {
+    /// definitions, so an edited CLI shows its new settings before the next refresh. A detection running now
+    /// detects again with the new list (a CLI just added isn't missed). `version`, when given, must grow:
+    /// updates sent from separate tasks may arrive out of order, and an older one is dropped.
+    public func update(clis: [AgentCLI], version: Int? = nil) {
+        if let version {
+            guard version > self.version else { return }
+            self.version = version
+        }
         self.clis = clis
         lastKnown = lastKnown.map(current)
+        if running != nil { stale = true }
+    }
+
+    /// The list for the next detection pass, which is now current.
+    private func startPass() -> [AgentCLI] {
+        stale = false
+        return clis
     }
 
     /// `found` as `clis` defines those commands now, in `clis` order. Commands no longer listed are dropped, and

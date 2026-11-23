@@ -71,8 +71,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 Task { @MainActor in self?.settings.detectedAgentCLIs = commands }
             })
             model.agentCLIDetector = detector
-            settings.onCustomAgentCLIsChanged = { custom in
-                Task { await detector.update(clis: AgentCLI.merged(custom: custom)) }
+            store.agentCLIs = model.agentCLIs
+            var listVersion = 0
+            settings.onCustomAgentCLIsChanged = { [weak self] custom in
+                let clis = AgentCLI.merged(custom: custom)
+                self?.store.agentCLIs = clis
+                listVersion += 1
+                let version = listVersion
+                Task { await detector.update(clis: clis, version: version) }
             }
         }
         store.onWorktreeCreated = { [weak self] path in self?.settings.rememberFolder(path) }

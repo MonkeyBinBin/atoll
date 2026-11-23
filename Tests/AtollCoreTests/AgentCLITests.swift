@@ -436,6 +436,53 @@ struct CustomAgentCLITests {
         #expect(await joined.value == [edited])
     }
 
+    @Test func commandsMatchAndReserveInAnyCase() {
+        let upper = AgentCLI(command: "Aider", title: "Aider", taskPassing: .unsupported)
+        #expect(AgentCLI.matching(app: "aider", in: AgentCLI.merged(custom: [upper])) == upper)
+        var draft = AgentCLIDraft()
+        draft.command = "Claude"
+        draft.title = "Mine"
+        #expect(draft.problem == .reservedCommand)
+        #expect(AgentCLI.merged(custom: [AgentCLI(command: "CODEX", title: "X", taskPassing: .lastArgument)]) == AgentCLI.catalog)
+    }
+
+    /// Output layouts follow the merged list too: a Settings `opencode-dev` isn't parsed as OpenCode.
+    @Test func layoutsAreToldApartWithTheSettingsCLIs() {
+        let clis = AgentCLI.merged(custom: [AgentCLI(command: "opencode-dev", title: "Dev", taskPassing: .lastArgument),
+                                            AgentCLI(command: "agy-beta", title: "Beta", taskPassing: .lastArgument)])
+        #expect(OutputFilter.genericMessages(["x"], app: "opencode-dev", clis: clis) == nil)
+        #expect(!OutputFilter.isAntigravity(app: "agy-beta", clis: clis))
+        #expect(OutputFilter.isAntigravity(app: "antigravity", clis: clis))
+        #expect(OutputFilter.isAntigravity(app: "agy-beta"))
+    }
+
+    @Test func aLateOlderUpdateIsIgnored() async {
+        let newer = AgentCLI(command: "aider", title: "Newer", taskPassing: .lastArgument)
+        let older = AgentCLI(command: "aider", title: "Older", taskPassing: .lastArgument)
+        let detector = AgentCLIDetector(clis: [], detect: { $0 })
+        await detector.update(clis: [newer], version: 2)
+        await detector.update(clis: [older], version: 1)
+        #expect(await detector.refresh() == [newer])
+    }
+
+    /// A CLI added while a detection runs is detected before that detection finishes.
+    @Test func aCLIAddedDuringADetectionIsDetected() async {
+        let droid = AgentCLI(command: "droid", title: "Factory Droid", taskPassing: .lastArgument)
+        let gate = AsyncGate()
+        let passes = Counter()
+        let detector = AgentCLIDetector(clis: [droid], detect: { clis in
+            passes.increment()
+            await gate.wait()
+            return clis
+        })
+        let refresh = Task { await detector.refresh() }
+        await gate.waitUntilWaiting()
+        await detector.update(clis: [droid, aider])
+        await gate.open()
+        #expect(await refresh.value == [droid, aider])
+        #expect(passes.value == 2)
+    }
+
     @Test func aDraftRoundTripsEveryTaskPassing() throws {
         for cli in [AgentCLI(command: "a", title: "A", taskPassing: .lastArgument),
                     AgentCLI(command: "b", title: "B", taskPassing: .flag("-i"), appWords: ["bee", "b-cli"],
@@ -508,4 +555,11 @@ actor AsyncGate {
         waiters.forEach { $0.resume() }
         waiters = []
     }
+}
+
+final class Counter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    var value: Int { lock.withLock { count } }
+    func increment() { lock.withLock { count += 1 } }
 }
