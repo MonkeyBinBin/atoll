@@ -267,11 +267,10 @@ public enum OutputFilter {
 
     // MARK: Antigravity CLI
 
-    /// Antigravity CLI reports `antigravity`; herdr may name it after its command, `agy`. Same word rule as
-    /// `AgentCLI.matching(app:)`: the word itself, or it followed by `-`.
+    /// Antigravity CLI reports `antigravity`; herdr may name it after its command, `agy`. Both are the
+    /// catalog entry's words.
     static func isAntigravity(app: String?) -> Bool {
-        guard let app = app?.lowercased() else { return false }
-        return ["antigravity", "agy"].contains { app == $0 || app.hasPrefix($0 + "-") }
+        app.flatMap(AgentCLI.matching(app:))?.command == "agy"
     }
 
     /// Antigravity CLI: like Claude Code, the input box is a pair of full-width `─` rules around `>` with a status

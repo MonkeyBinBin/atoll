@@ -23,6 +23,48 @@ struct AgentCLITests {
         #expect(Set(commands).count == commands.count)
     }
 
+    @Test func appWordsBelongToOneCatalogEntry() {
+        let entries = AgentCLI.catalog.map { [$0.command] + $0.appWords }
+        for (i, words) in entries.enumerated() {
+            for (j, others) in entries.enumerated() where i != j {
+                for word in words {
+                    #expect(!others.contains { word == $0 || word.hasPrefix($0 + "-") },
+                            "\(word) also matches \(others)")
+                }
+            }
+        }
+    }
+
+    @Test func aHelpSignatureTellsTheCLIFromSameNamedPrograms() throws {
+        let bin = FileManager.default.temporaryDirectory.appendingPathComponent("atoll-cli-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: bin) }
+        func install(_ name: String, help: String) throws {
+            let file = bin.appendingPathComponent(name)
+            try "#!/bin/sh\necho '\(help)'\n".write(to: file, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path)
+        }
+        try install("pi", help: "pi - prints digits of pi")
+        try install("vibe", help: "Run the Mistral Vibe interactive CLI")
+        let clis = [AgentCLI(command: "pi", title: "Pi", taskPassing: .lastArgument, helpSignature: "AI coding assistant"),
+                    AgentCLI(command: "vibe", title: "Mistral Vibe", taskPassing: .lastArgument, helpSignature: "Mistral Vibe")]
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", AgentCLI.detectionScript(clis)]
+        process.environment = ["PATH": bin.path + ":/usr/bin:/bin"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        try process.run()
+        process.waitUntilExit()
+        let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        #expect(AgentCLI.parseDetected(output, from: clis).map(\.command) == ["vibe"])
+    }
+
+    @Test func shellQuotingSurvivesQuotes() {
+        #expect(AgentCLI.shellQuoted("it's") == "'it'\\''s'")
+    }
+
     @Test func matchesAnAgentsAppWord() {
         #expect(AgentCLI.matching(app: "OpenCode")?.command == "opencode")
         #expect(AgentCLI.matching(app: "cursor-agent")?.command == "cursor-agent")

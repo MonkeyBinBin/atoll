@@ -27,12 +27,17 @@ public struct AgentCLI: Equatable, Sendable {
     public var taskPassing: TaskPassing
     /// Other OSC 7501 `app` words the CLI reports besides its command name.
     public var appWords: [String]
+    /// Text `<command> --help` must print for the command to count as this CLI, for command names other
+    /// programs also use (`pi`, `vibe` …). nil: finding the command is enough.
+    public var helpSignature: String?
 
-    public init(command: String, title: String, taskPassing: TaskPassing, appWords: [String] = []) {
+    public init(command: String, title: String, taskPassing: TaskPassing, appWords: [String] = [],
+                helpSignature: String? = nil) {
         self.command = command
         self.title = title
         self.taskPassing = taskPassing
         self.appWords = appWords
+        self.helpSignature = helpSignature
     }
 
     /// Herdr-integrated CLIs whose command name and first-prompt syntax were checked against their docs.
@@ -51,11 +56,12 @@ public struct AgentCLI: Equatable, Sendable {
         AgentCLI(command: "gemini", title: "Gemini CLI", taskPassing: .flag("-i")),
         AgentCLI(command: "cline", title: "Cline CLI", taskPassing: .flag("-i")),
         AgentCLI(command: "qodercli", title: "Qoder CLI", taskPassing: .flag("-i"), appWords: ["qoder"]),
-        // Kilo's positional argument is the project path.
-        AgentCLI(command: "kilo", title: "Kilo Code", taskPassing: .flag("--prompt")),
+        // Kilo's positional argument is the project path. The signatures are from each CLI's help text in its
+        // source: Kilo's default command, Vibe's clap `about`, Pi's usage header.
+        AgentCLI(command: "kilo", title: "Kilo Code", taskPassing: .flag("--prompt"), helpSignature: "start kilo tui"),
         AgentCLI(command: "auggie", title: "Auggie", taskPassing: .lastArgument),
-        AgentCLI(command: "vibe", title: "Mistral Vibe", taskPassing: .lastArgument),
-        AgentCLI(command: "pi", title: "Pi", taskPassing: .lastArgument),
+        AgentCLI(command: "vibe", title: "Mistral Vibe", taskPassing: .lastArgument, helpSignature: "Mistral Vibe"),
+        AgentCLI(command: "pi", title: "Pi", taskPassing: .lastArgument, helpSignature: "AI coding assistant"),
     ]
 
     /// The catalog CLI an agent's OSC 7501 `app` word names ("opencode", "copilot-cli", "antigravity" …), if any.
@@ -69,9 +75,20 @@ public struct AgentCLI: Equatable, Sendable {
     static let marker = "ATOLL_FOUND:"
 
     /// Prints a marked line per command found, so shell init chatter on stdout can't be mistaken for a hit.
+    /// A CLI with a help signature also has to print it; stdin is closed so a same-named program can't wait on it.
     static func detectionScript(_ clis: [AgentCLI]) -> String {
-        clis.map { "command -v \($0.command) >/dev/null 2>&1 && printf '\(marker)%s\\n' \($0.command)" }
-            .joined(separator: "; ") + "; true"
+        clis.map { cli in
+            var checks = ["command -v \(cli.command) >/dev/null 2>&1"]
+            if let signature = cli.helpSignature {
+                checks.append("\(cli.command) --help </dev/null 2>&1 | grep -qF \(shellQuoted(signature))")
+            }
+            return (checks + ["printf '\(marker)%s\\n' \(cli.command)"]).joined(separator: " && ")
+        }
+        .joined(separator: "; ") + "; true"
+    }
+
+    static func shellQuoted(_ text: String) -> String {
+        "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
     /// The CLIs whose command the script reported, in `clis` order.
