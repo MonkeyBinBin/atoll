@@ -13,7 +13,7 @@ public struct AgentCLIDraft: Equatable, Sendable {
         public var message: String {
             switch self {
             case .invalidCommand: "Command: letters, digits, . _ + - only, starting with a letter or digit"
-            case .reservedCommand: "Claude Code and Codex are always offered"
+            case .reservedCommand: "Names starting with claude or codex are tracked as Claude Code / Codex"
             case .emptyTitle: "Title is empty"
             case .invalidFlag: "Flag: one argument, no spaces (use After arguments for several)"
             case .emptySubcommand: "Arguments before the task are empty"
@@ -36,6 +36,8 @@ public struct AgentCLIDraft: Equatable, Sendable {
     public var helpSignature = ""
     /// A task passing the editor can't show (`.verbatim`), kept while the picker stays on Last argument.
     private var unshown: TaskPassing?
+    /// The catalog command whose definition `followCommand()` filled in, while it still is the command.
+    private var adoptedFrom: String?
 
     public init() {}
 
@@ -60,15 +62,20 @@ public struct AgentCLIDraft: Equatable, Sendable {
         helpSignature = cli.helpSignature ?? ""
     }
 
-    /// A new draft whose command names a catalog CLI, with nothing else typed yet, takes that entry's definition,
-    /// so overriding it starts from the built-in app words and help signature rather than dropping them.
-    /// Returns whether it did.
-    public mutating func adoptCatalogEntry() -> Bool {
-        let typed = command.trimmingCharacters(in: .whitespaces).lowercased()
-        guard title.trimmingCharacters(in: .whitespaces).isEmpty,
-              let entry = AgentCLI.catalog.first(where: { $0.command == typed }) else { return false }
+    /// For a new draft, after each change to the command: one naming a catalog CLI, with nothing else typed yet,
+    /// takes that entry's definition, so overriding it starts from the built-in app words and help signature
+    /// rather than dropping them. Typing on past it (`pi` → `pixel`) clears what was filled in again.
+    public mutating func followCommand() {
+        let typed = command.trimmingCharacters(in: .whitespaces)
+        if let adoptedFrom, typed.lowercased() != adoptedFrom {
+            self = AgentCLIDraft()
+            command = typed
+        }
+        guard adoptedFrom == nil, title.trimmingCharacters(in: .whitespaces).isEmpty,
+              let entry = AgentCLI.catalog.first(where: { $0.command == typed.lowercased() }) else { return }
         self = AgentCLIDraft(entry)
-        return true
+        command = typed
+        adoptedFrom = entry.command
     }
 
     public var problem: Problem? {
@@ -77,8 +84,8 @@ public struct AgentCLIDraft: Equatable, Sendable {
     }
 
     public func build() -> Result<AgentCLI, Problem> {
-        // Lowercase, as macOS file systems usually ignore case: one spelling per command.
-        let command = command.trimmingCharacters(in: .whitespaces).lowercased()
+        // Kept as typed (a case-sensitive volume needs it); duplicates are compared without case elsewhere.
+        let command = command.trimmingCharacters(in: .whitespaces)
         guard AgentCLI.isValidCommand(command) else { return .failure(.invalidCommand) }
         guard !AgentCLI.isReserved(command) else { return .failure(.reservedCommand) }
         let title = title.trimmingCharacters(in: .whitespaces)

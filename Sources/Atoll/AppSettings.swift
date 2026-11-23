@@ -176,7 +176,10 @@ final class AppSettings {
         recentFolders = defaults.stringArray(forKey: "recentFolders") ?? []
         pinnedFolders = defaults.stringArray(forKey: "pinnedFolders") ?? []
         detectedAgentCLIs = defaults.stringArray(forKey: "detectedAgentCLIs")
-        customAgentCLIs = defaults.data(forKey: "customAgentCLIs").map(AgentCLI.decodeList) ?? []
+        // One entry per command (any case), as the Settings list and `merged` expect.
+        var seen: Set<String> = []
+        customAgentCLIs = (defaults.data(forKey: "customAgentCLIs").map(AgentCLI.decodeList) ?? [])
+            .filter { seen.insert($0.command.lowercased()).inserted }
         herdrSpaceCache = Self.load("herdrSpaceCache", defaults) ?? []
         pendingSpaceNames = defaults.dictionary(forKey: "pendingSpaceNames") as? [String: String] ?? [:]
         recentLaunches = Self.load("recentLaunches", defaults) ?? []

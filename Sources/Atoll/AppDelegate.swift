@@ -71,15 +71,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 Task { @MainActor in self?.settings.detectedAgentCLIs = commands }
             })
             model.agentCLIDetector = detector
-            store.agentCLIs = model.agentCLIs
-            var listVersion = 0
-            settings.onCustomAgentCLIsChanged = { [weak self] custom in
-                let clis = AgentCLI.merged(custom: custom)
-                self?.store.agentCLIs = clis
-                listVersion += 1
-                let version = listVersion
-                Task { await detector.update(clis: clis, version: version, redetect: true) }
-            }
+        }
+        // Demo mode too: the panel already reads Settings CLIs through the model.
+        store.agentCLIs = model.agentCLIs
+        var listVersion = 0
+        settings.onCustomAgentCLIsChanged = { [weak self] custom in
+            guard let self else { return }
+            let clis = AgentCLI.merged(custom: custom)
+            store.agentCLIs = clis
+            listVersion += 1
+            let version = listVersion
+            let detector = model.agentCLIDetector
+            Task { await detector.update(clis: clis, version: version, redetect: true) }
         }
         store.onWorktreeCreated = { [weak self] path in self?.settings.rememberFolder(path) }
         store.onLaunchFinished = { [weak self] succeeded in

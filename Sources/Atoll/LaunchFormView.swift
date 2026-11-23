@@ -18,8 +18,7 @@ struct LaunchOption: Identifiable, Hashable {
     ]
 
     static func detected(_ cli: AgentCLI) -> LaunchOption {
-        // Generic even when the name starts with `claude`/`codex` (a wrapper like `claude-yolo`): Claude Code and
-        // Codex are only the built-ins.
+        // Claude Code and Codex are only the built-ins (Settings can't use those names).
         LaunchOption(id: detectedID(cli), title: cli.title, argv: [cli.command], tool: .generic,
                      taskPassing: cli.taskPassing)
     }

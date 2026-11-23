@@ -100,8 +100,13 @@ public struct AgentCLI: Equatable, Sendable, Codable {
     /// Always offered by the launch form (`LaunchOption.builtIns`), so not definable in Settings.
     public static let reservedCommands: Set<String> = ["claude", "codex"]
 
-    /// A reserved command in any case: macOS file systems usually ignore case, so `Claude` runs `claude`.
-    public static func isReserved(_ command: String) -> Bool { reservedCommands.contains(command.lowercased()) }
+    /// A reserved command, or one starting with it, in any case: agents are tracked as Claude Code / Codex by that
+    /// prefix (`AgentTool.from(app:)`), so a `claude-yolo` wrapper couldn't be told apart from the built-in; and
+    /// macOS file systems usually ignore case, so `Claude` runs `claude`.
+    public static func isReserved(_ command: String) -> Bool {
+        let command = command.lowercased()
+        return reservedCommands.contains { command.hasPrefix($0) }
+    }
 
     /// Whether a command name is safe to put unquoted in the detection script: letters, digits, `.`, `_`, `+`, `-`,
     /// not starting with a punctuation mark.

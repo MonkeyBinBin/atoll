@@ -443,6 +443,10 @@ struct CustomAgentCLITests {
         draft.command = "Claude"
         draft.title = "Mine"
         #expect(draft.problem == .reservedCommand)
+        draft.command = "claude-yolo"
+        #expect(draft.problem == .reservedCommand)
+        draft.command = "codexx"
+        #expect(draft.problem == .reservedCommand)
         #expect(AgentCLI.merged(custom: [AgentCLI(command: "CODEX", title: "X", taskPassing: .lastArgument)]) == AgentCLI.catalog)
     }
 
@@ -492,24 +496,33 @@ struct CustomAgentCLITests {
         var draft = AgentCLIDraft()
         draft.command = "MyTool"
         draft.title = "T"
-        #expect((try? draft.build().get())?.command == "mytool")
+        #expect((try? draft.build().get())?.command == "MyTool")
     }
 
     @Test func typingABuiltInCommandStartsFromItsDefinition() {
+        let agy = AgentCLI.catalog.first { $0.command == "agy" }!
         var draft = AgentCLIDraft()
-        draft.command = "AGY"
-        let adopted = draft.adoptCatalogEntry()
-        #expect(adopted)
-        #expect((try? draft.build().get()) == AgentCLI.catalog.first { $0.command == "agy" })
+        draft.command = "agy"
+        draft.followCommand()
+        #expect((try? draft.build().get()) == agy)
         var titled = AgentCLIDraft()
         titled.command = "agy"
         titled.title = "My agy"
-        let titledAdopted = titled.adoptCatalogEntry()
-        #expect(!titledAdopted)
-        var unknown = AgentCLIDraft()
-        unknown.command = "aider"
-        let unknownAdopted = unknown.adoptCatalogEntry()
-        #expect(!unknownAdopted)
+        titled.followCommand()
+        #expect(titled.helpSignature.isEmpty && titled.appWords.isEmpty)
+    }
+
+    /// Typing `pixel-agent` passes through `pi`: Pi's definition must not stick.
+    @Test func typingPastABuiltInCommandClearsItsDefinition() {
+        var draft = AgentCLIDraft()
+        for prefix in ["p", "pi", "pix", "pixel-agent"] {
+            draft.command = prefix
+            draft.followCommand()
+        }
+        #expect(draft.title.isEmpty && draft.helpSignature.isEmpty && draft.passing == .lastArgument)
+        draft.command = "gemini"
+        draft.followCommand()
+        #expect(draft.title == "Gemini CLI")
     }
 
     @Test func editingKeepsATaskPassingTheEditorCantShow() throws {

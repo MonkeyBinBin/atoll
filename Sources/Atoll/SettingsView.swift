@@ -243,7 +243,7 @@ struct SettingsView: View {
                     HStack(spacing: 6) {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(cli.title)
-                            Text(AgentCLI.catalog.contains { $0.command == cli.command }
+                            Text(AgentCLI.catalog.contains { $0.command == cli.command.lowercased() }
                                  ? "\(cli.command) · replaces built-in" : cli.command)
                                 .font(.caption.monospaced())
                                 .foregroundStyle(.secondary)
@@ -485,6 +485,8 @@ private struct AgentCLIEditor: View {
     let takenCommands: Set<String>
     let onSave: (AgentCLI) -> Void
     let onCancel: () -> Void
+    /// The problem shows once something was typed, not on a sheet just opened.
+    @State private var edited = false
 
     private var problem: String? {
         if takenCommands.contains(draft.command.trimmingCharacters(in: .whitespaces).lowercased()) {
@@ -497,7 +499,7 @@ private struct AgentCLIEditor: View {
         VStack(alignment: .leading, spacing: 12) {
             Form {
                 TextField("Command", text: $draft.command, prompt: Text("e.g. aider"))
-                    .onChange(of: draft.command) { _, _ in if isNew { _ = draft.adoptCatalogEntry() } }
+                    .onChange(of: draft.command) { _, _ in if isNew { draft.followCommand() } }
                 TextField("Title", text: $draft.title, prompt: Text("Shown in the launch form"))
                 Picker("Starting task", selection: $draft.passing) {
                     Text("Last argument").tag(AgentCLIDraft.Passing.lastArgument)
@@ -523,7 +525,7 @@ private struct AgentCLIEditor: View {
             }
             .formStyle(.grouped)
             HStack {
-                if let problem {
+                if edited, let problem {
                     Text(problem)
                         .font(.caption)
                         .foregroundStyle(.red)
@@ -538,5 +540,6 @@ private struct AgentCLIEditor: View {
             .padding([.horizontal, .bottom])
         }
         .frame(width: 420)
+        .onChange(of: draft) { _, _ in edited = true }
     }
 }
