@@ -35,34 +35,17 @@ struct AgentCLITests {
         }
     }
 
-    @Test func aHelpSignatureTellsTheCLIFromSameNamedPrograms() throws {
-        let bin = FileManager.default.temporaryDirectory.appendingPathComponent("atoll-cli-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: bin) }
-        func install(_ name: String, help: String) throws {
-            let file = bin.appendingPathComponent(name)
-            try "#!/bin/sh\necho '\(help)'\n".write(to: file, atomically: true, encoding: .utf8)
-            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path)
-        }
-        try install("pi", help: "pi - prints digits of pi")
-        try install("vibe", help: "Run the Mistral Vibe interactive CLI")
-        let clis = [AgentCLI(command: "pi", title: "Pi", taskPassing: .lastArgument, helpSignature: "AI coding assistant"),
-                    AgentCLI(command: "vibe", title: "Mistral Vibe", taskPassing: .lastArgument, helpSignature: "Mistral Vibe")]
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", AgentCLI.detectionScript(clis)]
-        process.environment = ["PATH": bin.path + ":/usr/bin:/bin"]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        try process.run()
-        process.waitUntilExit()
-        let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        #expect(AgentCLI.parseDetected(output, from: clis).map(\.command) == ["vibe"])
+    @Test func parsesWhereEachCommandResolvesAndTheShellPath() {
+        let output = "chatter\nATOLL_FOUND:droid\t/opt/bin/droid\nATOLL_FOUND:opencode\talias opencode=oc\nATOLL_PATH:/opt/bin:/usr/bin\n"
+        let found = AgentCLI.parseFound(output, from: clis)
+        #expect(found.clis.map(\.command) == ["droid", "opencode"])
+        #expect(found.locations == ["droid": "/opt/bin/droid", "opencode": "alias opencode=oc"])
+        #expect(found.searchPath == "/opt/bin:/usr/bin")
     }
 
-    @Test func shellQuotingSurvivesQuotes() {
-        #expect(AgentCLI.shellQuoted("it's") == "'it'\\''s'")
+    @Test func helpSignatureIgnoresCase() {
+        #expect(AgentCLI.helpMatches("kilo [project]  Start Kilo TUI  [default]", signature: "kilo tui"))
+        #expect(!AgentCLI.helpMatches("pi - prints digits of pi", signature: "AI coding assistant"))
     }
 
     @Test func matchesAnAgentsAppWord() {
@@ -133,6 +116,31 @@ struct AgentCLIProcessTests {
                                            AgentCLI(command: "atoll-no-such-cmd", title: "none", taskPassing: .lastArgument)],
                                           shell: "/bin/sh", timeout: 5)
         #expect(found?.map(\.command) == ["ls"])
+    }
+
+    /// A same-named program is dropped; one that hangs drops only itself; the shell's PATH reaches the checks.
+    @Test func helpSignaturesAreCheckedPerCommand() async throws {
+        let bin = FileManager.default.temporaryDirectory.appendingPathComponent("atoll-cli-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: bin) }
+        func install(_ name: String, _ body: String) throws {
+            let file = bin.appendingPathComponent(name)
+            try "#!/bin/sh\n\(body)\n".write(to: file, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path)
+        }
+        try install("pi", "echo 'pi - prints digits of pi'")
+        try install("vibe", "echo 'Run the MISTRAL VIBE interactive CLI'")
+        try install("kilo", "exec sleep 30")
+        try install("droid", "exit 1")
+        // Stands in for the login shell: puts the fake commands on PATH, then runs the script.
+        try install("shell", "PATH='\(bin.path)':/usr/bin:/bin; export PATH; shift; exec /bin/sh -c \"$1\"")
+        let clis = [AgentCLI(command: "pi", title: "Pi", taskPassing: .lastArgument, helpSignature: "AI coding assistant"),
+                    AgentCLI(command: "vibe", title: "Mistral Vibe", taskPassing: .lastArgument, helpSignature: "Mistral Vibe"),
+                    AgentCLI(command: "kilo", title: "Kilo Code", taskPassing: .lastArgument, helpSignature: "kilo tui"),
+                    AgentCLI(command: "droid", title: "Factory Droid", taskPassing: .lastArgument)]
+        let found = await AgentCLI.detect(clis, shell: bin.appendingPathComponent("shell").path, timeout: 5,
+                                          helpTimeout: 0.5)
+        #expect(found?.map(\.command) == ["vibe", "droid"])
     }
 
     @Test func detectorRemembersOnlySuccessfulDetections() async {

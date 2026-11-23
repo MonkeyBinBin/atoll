@@ -27,8 +27,8 @@ public struct AgentCLI: Equatable, Sendable {
     public var taskPassing: TaskPassing
     /// Other OSC 7501 `app` words the CLI reports besides its command name.
     public var appWords: [String]
-    /// Text `<command> --help` must print for the command to count as this CLI, for command names other
-    /// programs also use (`pi`, `vibe` …). nil: finding the command is enough.
+    /// Text `<command> --help` must print (any case) for the command to count as this CLI, for command names
+    /// other programs also use (`pi`, `vibe` …). nil: finding the command is enough.
     public var helpSignature: String?
 
     public init(command: String, title: String, taskPassing: TaskPassing, appWords: [String] = [],
@@ -57,8 +57,8 @@ public struct AgentCLI: Equatable, Sendable {
         AgentCLI(command: "cline", title: "Cline CLI", taskPassing: .flag("-i")),
         AgentCLI(command: "qodercli", title: "Qoder CLI", taskPassing: .flag("-i"), appWords: ["qoder"]),
         // Kilo's positional argument is the project path. The signatures are from each CLI's help text in its
-        // source: Kilo's default command, Vibe's clap `about`, Pi's usage header.
-        AgentCLI(command: "kilo", title: "Kilo Code", taskPassing: .flag("--prompt"), helpSignature: "start kilo tui"),
+        // source: Kilo's default command ("start kilo tui"), Vibe's clap `about`, Pi's usage header.
+        AgentCLI(command: "kilo", title: "Kilo Code", taskPassing: .flag("--prompt"), helpSignature: "kilo tui"),
         AgentCLI(command: "auggie", title: "Auggie", taskPassing: .lastArgument),
         AgentCLI(command: "vibe", title: "Mistral Vibe", taskPassing: .lastArgument, helpSignature: "Mistral Vibe"),
         AgentCLI(command: "pi", title: "Pi", taskPassing: .lastArgument, helpSignature: "AI coding assistant"),
@@ -73,38 +73,79 @@ public struct AgentCLI: Equatable, Sendable {
     }
 
     static let marker = "ATOLL_FOUND:"
+    static let pathMarker = "ATOLL_PATH:"
 
-    /// Prints a marked line per command found, so shell init chatter on stdout can't be mistaken for a hit.
-    /// A CLI with a help signature also has to print it; stdin is closed so a same-named program can't wait on it.
+    /// Prints a marked line per command found, with where it resolves, and the shell's PATH, so shell init chatter
+    /// on stdout can't be mistaken for a hit.
     static func detectionScript(_ clis: [AgentCLI]) -> String {
-        clis.map { cli in
-            var checks = ["command -v \(cli.command) >/dev/null 2>&1"]
-            if let signature = cli.helpSignature {
-                checks.append("\(cli.command) --help </dev/null 2>&1 | grep -qF \(shellQuoted(signature))")
-            }
-            return (checks + ["printf '\(marker)%s\\n' \(cli.command)"]).joined(separator: " && ")
-        }
-        .joined(separator: "; ") + "; true"
+        (clis.map { "p=$(command -v \($0.command) 2>/dev/null) && printf '\(marker)%s\\t%s\\n' \($0.command) \"$p\"" }
+            + ["printf '\(pathMarker)%s\\n' \"$PATH\""])
+            .joined(separator: "; ") + "; true"
     }
 
-    static func shellQuoted(_ text: String) -> String {
-        "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    struct Found: Equatable {
+        /// The CLIs whose command the script reported, in `clis` order.
+        var clis: [AgentCLI]
+        /// Where each found command resolves (`command -v`: a path, or an alias/function's definition).
+        var locations: [String: String]
+        /// The login shell's PATH.
+        var searchPath: String?
+    }
+
+    static func parseFound(_ output: String, from clis: [AgentCLI]) -> Found {
+        var locations: [String: String] = [:]
+        var searchPath: String?
+        for line in output.split(whereSeparator: \.isNewline) {
+            let line = line.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix(marker) {
+                let fields = line.dropFirst(marker.count).split(separator: "\t", maxSplits: 1)
+                guard let command = fields.first else { continue }
+                locations[String(command)] = fields.count > 1 ? String(fields[1]) : ""
+            } else if line.hasPrefix(pathMarker) {
+                searchPath = String(line.dropFirst(pathMarker.count))
+            }
+        }
+        return Found(clis: clis.filter { locations[$0.command] != nil }, locations: locations, searchPath: searchPath)
     }
 
     /// The CLIs whose command the script reported, in `clis` order.
     static func parseDetected(_ output: String, from clis: [AgentCLI]) -> [AgentCLI] {
-        let found = Set(output.split(whereSeparator: \.isNewline).compactMap { line -> String? in
-            let line = line.trimmingCharacters(in: .whitespaces)
-            return line.hasPrefix(marker) ? String(line.dropFirst(marker.count)) : nil
-        })
-        return clis.filter { found.contains($0.command) }
+        parseFound(output, from: clis).clis
+    }
+
+    /// Whether help text names the CLI: the signature anywhere in it, ignoring case.
+    static func helpMatches(_ help: String, signature: String) -> Bool {
+        help.range(of: signature, options: .caseInsensitive) != nil
     }
 
     /// Asks an interactive login shell — the one launches run in, so nvm/PATH match — which CLIs exist.
     /// nil when the shell fails or doesn't finish within `timeout`.
-    static func detect(_ clis: [AgentCLI], shell: String, timeout: TimeInterval) async -> [AgentCLI]? {
+    ///
+    /// A found CLI with a help signature then has its `--help` run (stdin closed, the shell's PATH so a
+    /// `#!/usr/bin/env node` script finds node), all at once, each limited to `helpTimeout`: one that hangs or
+    /// streams only drops itself. This runs whatever program has that name, on every detection.
+    static func detect(_ clis: [AgentCLI], shell: String, timeout: TimeInterval,
+                       helpTimeout: TimeInterval = 3) async -> [AgentCLI]? {
         guard let output = try? await ProcessRunner.run(shell, ["-lic", detectionScript(clis)], timeout: timeout) else { return nil }
-        return parseDetected(output.stdoutText, from: clis)
+        let found = parseFound(output.stdoutText, from: clis)
+        var environment = ProcessInfo.processInfo.environment
+        if let searchPath = found.searchPath { environment["PATH"] = searchPath }
+        let confirmed = await withTaskGroup(of: String?.self) { group in
+            for cli in found.clis {
+                guard let signature = cli.helpSignature else { continue }
+                // An alias or function can't be run without the shell; only a path is checked.
+                guard let location = found.locations[cli.command], location.hasPrefix("/") else { continue }
+                group.addTask { [environment] in
+                    guard let help = try? await ProcessRunner.run(location, ["--help"], environment: environment,
+                                                                  timeout: helpTimeout) else { return nil }
+                    return helpMatches(help.stdoutText + help.stderrText, signature: signature) ? cli.command : nil
+                }
+            }
+            var confirmed: Set<String> = []
+            for await command in group { if let command { confirmed.insert(command) } }
+            return confirmed
+        }
+        return found.clis.filter { $0.helpSignature == nil || confirmed.contains($0.command) }
     }
 }
 
