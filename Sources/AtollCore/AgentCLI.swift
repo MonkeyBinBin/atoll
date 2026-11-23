@@ -25,28 +25,45 @@ public struct AgentCLI: Equatable, Sendable {
     public var command: String
     public var title: String
     public var taskPassing: TaskPassing
+    /// Other OSC 7501 `app` words the CLI reports besides its command name.
+    public var appWords: [String]
 
-    public init(command: String, title: String, taskPassing: TaskPassing) {
+    public init(command: String, title: String, taskPassing: TaskPassing, appWords: [String] = []) {
         self.command = command
         self.title = title
         self.taskPassing = taskPassing
+        self.appWords = appWords
     }
 
     /// Herdr-integrated CLIs whose command name and first-prompt syntax were checked against their docs.
-    /// Atoll has no screen parser for them, so they appear as generic agents.
+    /// They appear as generic agents; OutputFilter has a layout for some of them (OpenCode, Antigravity CLI).
     public static let catalog: [AgentCLI] = [
         AgentCLI(command: "opencode", title: "OpenCode", taskPassing: .flag("--prompt")),
         AgentCLI(command: "copilot", title: "GitHub Copilot CLI", taskPassing: .flag("-i")),
         AgentCLI(command: "droid", title: "Factory Droid", taskPassing: .lastArgument),
         AgentCLI(command: "qwen", title: "Qwen Code", taskPassing: .flag("-i")),
-        AgentCLI(command: "cursor-agent", title: "Cursor Agent", taskPassing: .lastArgument),
+        // Cursor's primary command is now `agent`; `cursor-agent` is its compatibility alias and, unlike the
+        // generic `agent`, can't be mistaken for another program.
+        AgentCLI(command: "cursor-agent", title: "Cursor Agent", taskPassing: .lastArgument, appWords: ["cursor"]),
         AgentCLI(command: "kimi", title: "Kimi Code CLI", taskPassing: .unsupported),
+        AgentCLI(command: "agy", title: "Antigravity CLI", taskPassing: .flag("-i"), appWords: ["antigravity"]),
+        // A bare positional prompt is one-shot for Gemini (outside a TTY), Cline (yolo mode) and Qoder.
+        AgentCLI(command: "gemini", title: "Gemini CLI", taskPassing: .flag("-i")),
+        AgentCLI(command: "cline", title: "Cline CLI", taskPassing: .flag("-i")),
+        AgentCLI(command: "qodercli", title: "Qoder CLI", taskPassing: .flag("-i"), appWords: ["qoder"]),
+        // Kilo's positional argument is the project path.
+        AgentCLI(command: "kilo", title: "Kilo Code", taskPassing: .flag("--prompt")),
+        AgentCLI(command: "auggie", title: "Auggie", taskPassing: .lastArgument),
+        AgentCLI(command: "vibe", title: "Mistral Vibe", taskPassing: .lastArgument),
+        AgentCLI(command: "pi", title: "Pi", taskPassing: .lastArgument),
     ]
 
-    /// The catalog CLI an agent's OSC 7501 `app` word names ("opencode", "copilot-cli" …), if any.
+    /// The catalog CLI an agent's OSC 7501 `app` word names ("opencode", "copilot-cli", "antigravity" …), if any.
     public static func matching(app: String) -> AgentCLI? {
         let word = app.lowercased()
-        return catalog.first { word == $0.command || word.hasPrefix($0.command + "-") }
+        return catalog.first { cli in
+            ([cli.command] + cli.appWords).contains { word == $0 || word.hasPrefix($0 + "-") }
+        }
     }
 
     static let marker = "ATOLL_FOUND:"

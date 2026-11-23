@@ -26,6 +26,12 @@ struct AgentCLITests {
     @Test func matchesAnAgentsAppWord() {
         #expect(AgentCLI.matching(app: "OpenCode")?.command == "opencode")
         #expect(AgentCLI.matching(app: "cursor-agent")?.command == "cursor-agent")
+        #expect(AgentCLI.matching(app: "antigravity")?.command == "agy")
+        #expect(AgentCLI.matching(app: "agy")?.command == "agy")
+        #expect(AgentCLI.matching(app: "cursor")?.command == "cursor-agent")
+        #expect(AgentCLI.matching(app: "qoder")?.command == "qodercli")
+        #expect(AgentCLI.matching(app: "pi")?.command == "pi")
+        #expect(AgentCLI.matching(app: "pilot") == nil)
         #expect(AgentCLI.matching(app: "droidx") == nil)
         #expect(AgentCLI.matching(app: "claude") == nil)
     }
