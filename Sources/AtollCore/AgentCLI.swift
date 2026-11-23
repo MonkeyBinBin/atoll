@@ -414,7 +414,9 @@ public actor AgentCLIDetector {
         if let running { return await running.value.map(current) }
         let task = Task { [detect] () -> [AgentCLI]? in
             while true {
-                let pass = await self.finishPass(await detect(await self.startPass()))
+                // The task inherits actor isolation, so only `detect` (which runs off the actor) suspends.
+                let found = await detect(self.startPass())
+                let pass = self.finishPass(found)
                 if pass.done { return pass.result }
             }
         }
