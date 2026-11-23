@@ -78,7 +78,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.store.agentCLIs = clis
                 listVersion += 1
                 let version = listVersion
-                Task { await detector.update(clis: clis, version: version) }
+                Task { await detector.update(clis: clis, version: version, redetect: true) }
             }
         }
         store.onWorktreeCreated = { [weak self] path in self?.settings.rememberFolder(path) }

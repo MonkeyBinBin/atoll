@@ -239,7 +239,7 @@ struct SettingsView: View {
             }
 
             Section("Agent CLIs") {
-                ForEach(Array(settings.customAgentCLIs.enumerated()), id: \.offset) { index, cli in
+                ForEach(Array(settings.customAgentCLIs.enumerated()), id: \.element.command) { index, cli in
                     HStack(spacing: 6) {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(cli.title)
@@ -268,7 +268,9 @@ struct SettingsView: View {
         .sheet(item: $cliEdit) { edit in
             AgentCLIEditor(
                 draft: edit.draft,
-                takenCommands: Set(settings.customAgentCLIs.enumerated().filter { $0.offset != edit.index }.map(\.element.command)),
+                isNew: edit.index == nil,
+                takenCommands: Set(settings.customAgentCLIs.enumerated().filter { $0.offset != edit.index }
+                    .map { $0.element.command.lowercased() }),
                 onSave: { cli in
                     if let index = edit.index, settings.customAgentCLIs.indices.contains(index) {
                         settings.customAgentCLIs[index] = cli
@@ -477,13 +479,15 @@ private struct PresetRow: View {
 /// Adds or edits an agent CLI for the launch form.
 private struct AgentCLIEditor: View {
     @State var draft: AgentCLIDraft
+    /// Adding (not editing): typing a built-in command fills in its definition.
+    let isNew: Bool
     /// Commands other Settings CLIs already use.
     let takenCommands: Set<String>
     let onSave: (AgentCLI) -> Void
     let onCancel: () -> Void
 
     private var problem: String? {
-        if takenCommands.contains(draft.command.trimmingCharacters(in: .whitespaces)) {
+        if takenCommands.contains(draft.command.trimmingCharacters(in: .whitespaces).lowercased()) {
             return "Another CLI in Settings uses this command"
         }
         return draft.problem?.message
@@ -493,6 +497,7 @@ private struct AgentCLIEditor: View {
         VStack(alignment: .leading, spacing: 12) {
             Form {
                 TextField("Command", text: $draft.command, prompt: Text("e.g. aider"))
+                    .onChange(of: draft.command) { _, _ in if isNew { _ = draft.adoptCatalogEntry() } }
                 TextField("Title", text: $draft.title, prompt: Text("Shown in the launch form"))
                 Picker("Starting task", selection: $draft.passing) {
                     Text("Last argument").tag(AgentCLIDraft.Passing.lastArgument)

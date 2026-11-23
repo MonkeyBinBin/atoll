@@ -121,13 +121,15 @@ public struct AgentCLI: Equatable, Sendable, Codable {
     /// The catalog with the user's CLIs: one with a catalog command replaces that entry in place, the rest follow
     /// in order. An invalid or reserved command, or a command already given earlier in `custom`, is skipped.
     public static func merged(custom: [AgentCLI]) -> [AgentCLI] {
+        // Compared without case: macOS file systems usually ignore it, so `OpenCode` is `opencode`.
         var seen: Set<String> = []
         let valid = custom.filter {
-            isValidCommand($0.command) && !isReserved($0.command) && seen.insert($0.command).inserted
+            isValidCommand($0.command) && !isReserved($0.command) && seen.insert($0.command.lowercased()).inserted
         }
-        let byCommand = Dictionary(uniqueKeysWithValues: valid.map { ($0.command, $0) })
-        let catalogCommands = Set(catalog.map(\.command))
-        return catalog.map { byCommand[$0.command] ?? $0 } + valid.filter { !catalogCommands.contains($0.command) }
+        let byCommand = Dictionary(uniqueKeysWithValues: valid.map { ($0.command.lowercased(), $0) })
+        let catalogCommands = Set(catalog.map { $0.command.lowercased() })
+        return catalog.map { byCommand[$0.command.lowercased()] ?? $0 }
+            + valid.filter { !catalogCommands.contains($0.command.lowercased()) }
     }
 
     static let marker = "ATOLL_FOUND:"
@@ -355,33 +357,48 @@ public actor AgentCLIDetector {
         if let running { return await running.value.map(current) }
         let task = Task { [detect] () -> [AgentCLI]? in
             while true {
-                let result = await detect(await self.startPass())
-                if await !self.stale { return result }
+                let pass = await self.finishPass(await detect(await self.startPass()))
+                if pass.done { return pass.result }
             }
         }
         running = task
-        // A detection started before `update(clis:)` reported the old definitions: take the current ones.
-        let result = await task.value.map(current)
+        // An `update(clis:)` after the detection finished may have redefined what it found.
+        return await task.value.map(current)
+    }
+
+    /// Ends a detection pass, or asks for another when the list changed meanwhile. Finishing (clearing `running`,
+    /// keeping the result) happens in one step on the actor, so an update can't slip in between and go unseen.
+    private func finishPass(_ found: [AgentCLI]?) -> (done: Bool, result: [AgentCLI]?) {
+        if stale { return (false, nil) }
         running = nil
+        let result = found.map(current)
         if let result, result != lastKnown {
             lastKnown = result
             onDetected(result.map(\.command))
         }
-        return result
+        return (true, result)
     }
 
     /// Detects `clis` from now on. `lastKnown` keeps the commands it had that are still listed, with their new
     /// definitions, so an edited CLI shows its new settings before the next refresh. A detection running now
     /// detects again with the new list (a CLI just added isn't missed). `version`, when given, must grow:
     /// updates sent from separate tasks may arrive out of order, and an older one is dropped.
-    public func update(clis: [AgentCLI], version: Int? = nil) {
+    /// `redetect`: with no detection running, start one now, so an edit shows up without waiting for the
+    /// launch form.
+    public func update(clis: [AgentCLI], version: Int? = nil, redetect: Bool = false) {
         if let version {
             guard version > self.version else { return }
             self.version = version
         }
+        let before = lastKnown?.map(\.command)
         self.clis = clis
         lastKnown = lastKnown.map(current)
-        if running != nil { stale = true }
+        if let lastKnown, lastKnown.map(\.command) != before { onDetected(lastKnown.map(\.command)) }
+        if running != nil {
+            stale = true
+        } else if redetect {
+            Task { _ = await self.refresh() }
+        }
     }
 
     /// The list for the next detection pass, which is now current.

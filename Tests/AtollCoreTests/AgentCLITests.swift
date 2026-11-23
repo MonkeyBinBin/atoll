@@ -483,6 +483,60 @@ struct CustomAgentCLITests {
         #expect(passes.value == 2)
     }
 
+    @Test func aCustomCommandOverridesWhateverItsCase() {
+        let mine = AgentCLI(command: "OpenCode", title: "Mine", taskPassing: .lastArgument)
+        let merged = AgentCLI.merged(custom: [mine, AgentCLI(command: "AIDER", title: "A", taskPassing: .lastArgument),
+                                              AgentCLI(command: "aider", title: "B", taskPassing: .lastArgument)])
+        #expect(merged.count == AgentCLI.catalog.count + 1)
+        #expect(merged[AgentCLI.catalog.firstIndex { $0.command == "opencode" }!] == mine)
+        var draft = AgentCLIDraft()
+        draft.command = "MyTool"
+        draft.title = "T"
+        #expect((try? draft.build().get())?.command == "mytool")
+    }
+
+    @Test func typingABuiltInCommandStartsFromItsDefinition() {
+        var draft = AgentCLIDraft()
+        draft.command = "AGY"
+        let adopted = draft.adoptCatalogEntry()
+        #expect(adopted)
+        #expect((try? draft.build().get()) == AgentCLI.catalog.first { $0.command == "agy" })
+        var titled = AgentCLIDraft()
+        titled.command = "agy"
+        titled.title = "My agy"
+        let titledAdopted = titled.adoptCatalogEntry()
+        #expect(!titledAdopted)
+        var unknown = AgentCLIDraft()
+        unknown.command = "aider"
+        let unknownAdopted = unknown.adoptCatalogEntry()
+        #expect(!unknownAdopted)
+    }
+
+    @Test func editingKeepsATaskPassingTheEditorCantShow() throws {
+        let cli = AgentCLI(command: "t", title: "T", taskPassing: .verbatim)
+        var draft = AgentCLIDraft(cli)
+        draft.title = "Renamed"
+        #expect(try draft.build().get().taskPassing == .verbatim)
+        draft.passing = .flag
+        draft.flag = "-i"
+        draft.passing = .lastArgument
+        #expect(try draft.build().get().taskPassing == .verbatim)
+    }
+
+    @Test func anUpdateSavesTheRemappedDetectionAndCanDetectAgain() async {
+        let droid = AgentCLI(command: "droid", title: "Factory Droid", taskPassing: .lastArgument)
+        let saved = SavedDetections()
+        let passes = Counter()
+        let detector = AgentCLIDetector(clis: [droid, aider], saved: ["droid", "aider"], onDetected: saved.record,
+                                        detect: { clis in passes.increment(); return clis })
+        await detector.update(clis: [droid])
+        #expect(saved.all == [["droid"]])
+        #expect(passes.value == 0)
+        await detector.update(clis: [droid, aider], redetect: true)
+        for _ in 0..<100 where passes.value == 0 { await Task.yield() }
+        #expect(passes.value == 1)
+    }
+
     @Test func aDraftRoundTripsEveryTaskPassing() throws {
         for cli in [AgentCLI(command: "a", title: "A", taskPassing: .lastArgument),
                     AgentCLI(command: "b", title: "B", taskPassing: .flag("-i"), appWords: ["bee", "b-cli"],

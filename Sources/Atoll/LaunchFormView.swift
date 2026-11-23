@@ -89,7 +89,8 @@ struct LaunchFormView: View {
     /// Installed CLIs as Settings defines them now: a detection may still carry a definition from before an edit.
     private var options: [LaunchOption] {
         // One removed from Settings meanwhile keeps its old definition rather than vanishing under the selection.
-        let current = installed.map { cli in model.agentCLIs.first { $0.command == cli.command } ?? cli }
+        let all = model.agentCLIs
+        let current = installed.map { cli in all.first { $0.command == cli.command } ?? cli }
         return LaunchOption.builtIns + current.map(LaunchOption.detected) + templateOptions
     }
 

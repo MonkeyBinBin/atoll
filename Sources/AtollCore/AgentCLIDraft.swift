@@ -34,6 +34,8 @@ public struct AgentCLIDraft: Equatable, Sendable {
     public var appWords = ""
     /// Empty: finding the command is enough.
     public var helpSignature = ""
+    /// A task passing the editor can't show (`.verbatim`), kept while the picker stays on Last argument.
+    private var unshown: TaskPassing?
 
     public init() {}
 
@@ -41,7 +43,10 @@ public struct AgentCLIDraft: Equatable, Sendable {
         command = cli.command
         title = cli.title
         switch cli.taskPassing {
-        case .lastArgument, .verbatim: passing = .lastArgument
+        case .lastArgument: passing = .lastArgument
+        case .verbatim:
+            passing = .lastArgument
+            unshown = .verbatim
         case .flag(let flag):
             passing = .flag
             self.flag = flag
@@ -55,20 +60,32 @@ public struct AgentCLIDraft: Equatable, Sendable {
         helpSignature = cli.helpSignature ?? ""
     }
 
+    /// A new draft whose command names a catalog CLI, with nothing else typed yet, takes that entry's definition,
+    /// so overriding it starts from the built-in app words and help signature rather than dropping them.
+    /// Returns whether it did.
+    public mutating func adoptCatalogEntry() -> Bool {
+        let typed = command.trimmingCharacters(in: .whitespaces).lowercased()
+        guard title.trimmingCharacters(in: .whitespaces).isEmpty,
+              let entry = AgentCLI.catalog.first(where: { $0.command == typed }) else { return false }
+        self = AgentCLIDraft(entry)
+        return true
+    }
+
     public var problem: Problem? {
         if case .failure(let problem) = build() { return problem }
         return nil
     }
 
     public func build() -> Result<AgentCLI, Problem> {
-        let command = command.trimmingCharacters(in: .whitespaces)
+        // Lowercase, as macOS file systems usually ignore case: one spelling per command.
+        let command = command.trimmingCharacters(in: .whitespaces).lowercased()
         guard AgentCLI.isValidCommand(command) else { return .failure(.invalidCommand) }
         guard !AgentCLI.isReserved(command) else { return .failure(.reservedCommand) }
         let title = title.trimmingCharacters(in: .whitespaces)
         guard !title.isEmpty else { return .failure(.emptyTitle) }
         let taskPassing: TaskPassing
         switch passing {
-        case .lastArgument: taskPassing = .lastArgument
+        case .lastArgument: taskPassing = unshown ?? .lastArgument
         case .flag:
             let flag = flag.trimmingCharacters(in: .whitespaces)
             guard !flag.isEmpty, !flag.contains(where: \.isWhitespace) else { return .failure(.invalidFlag) }
