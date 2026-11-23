@@ -2,7 +2,7 @@ import Foundation
 
 /// How a tool takes the launch form's starting task.
 public enum TaskPassing: Hashable, Sendable {
-    /// `tool <task>` (Claude Code, Codex, templates).
+    /// `tool <task>` (Claude Code, Codex).
     case lastArgument
     /// `tool <flag> <task>`, for CLIs whose positional argument means something else.
     case flag(String)
