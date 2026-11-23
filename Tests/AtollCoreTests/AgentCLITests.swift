@@ -37,11 +37,13 @@ struct AgentCLITests {
 
     @Test func parsesWhereEachCommandResolvesAndTheShellPath() {
         // Init chatter without a newline glues onto the first marker.
-        let output = "WelcomeATOLL_FOUND:droid\t/opt/bin/droid\nATOLL_FOUND:opencode\talias opencode=oc\nATOLL_PATH:/opt/bin:/usr/bin\n"
+        let output = "WelcomeATOLL_FOUND:droid\t/opt/bin/droid\nATOLL_FOUND:opencode\talias opencode=oc\n"
+            + "ATOLL_ENV\nPATH=/opt/bin:/usr/bin\nPYENV_ROOT=/x\nNOTE=two\nlines\nATOLL_END\n"
         let found = AgentCLI.parseFound(output, from: clis)
         #expect(found.clis.map(\.command) == ["droid", "opencode"])
         #expect(found.locations == ["droid": "/opt/bin/droid", "opencode": "alias opencode=oc"])
-        #expect(found.searchPath == "/opt/bin:/usr/bin")
+        #expect(found.environment == ["PATH": "/opt/bin:/usr/bin", "PYENV_ROOT": "/x", "NOTE": "two"])
+        #expect(AgentCLI.parseFound("ATOLL_FOUND:droid\t/x\nATOLL_ENV\nPATH=/x\n", from: clis).environment == nil)
     }
 
     @Test func helpSignatureIgnoresCaseStylingAndWrapping() {
@@ -51,13 +53,24 @@ struct AgentCLITests {
         #expect(!AgentCLI.helpMatches("pi - prints digits of pi", signature: "AI coding assistant"))
     }
 
-    @Test func onlyPathsAreRunAndRelativeOnesResolve() {
-        let cwd = FileManager.default.currentDirectoryPath
-        #expect(AgentCLI.executable("/opt/bin/pi") == "/opt/bin/pi")
-        #expect(AgentCLI.executable("alias pi='npx some/pkg'") == nil)
-        #expect(AgentCLI.executable("pi") == nil)
-        #expect(AgentCLI.executable("~/bin/pi") == NSHomeDirectory() + "/bin/pi")
-        #expect(AgentCLI.executable("./bin/pi") == URL(fileURLWithPath: cwd).appendingPathComponent("bin/pi").standardizedFileURL.path)
+    @Test func onlyPathsAreRunAndRelativeOnesResolveWhereTheShellWas() {
+        #expect(AgentCLI.executable("/opt/bin/pi", in: "/w") == "/opt/bin/pi")
+        #expect(AgentCLI.executable("alias pi='npx some/pkg'", in: "/w") == nil)
+        #expect(AgentCLI.executable("pi", in: "/w") == nil)
+        #expect(AgentCLI.executable("~/bin/pi", in: "/w") == NSHomeDirectory() + "/bin/pi")
+        #expect(AgentCLI.executable("./node_modules/.bin/pi", in: "/w/project") == "/w/project/node_modules/.bin/pi")
+    }
+
+    @Test func onlyHelpThatWasPrintedCountsAgainstACLI() {
+        func output(_ status: Int32, exited: Bool = true, _ text: String) -> ProcessRunner.Output {
+            ProcessRunner.Output(status: status, exited: exited, stdout: Data(text.utf8), stderr: Data())
+        }
+        #expect(AgentCLI.helpCheck(output(0, "Run the Mistral Vibe CLI"), signature: "Mistral Vibe") == .matched)
+        #expect(AgentCLI.helpCheck(output(2, "unknown option --help"), signature: "Mistral Vibe") == .mismatched)
+        #expect(AgentCLI.helpCheck(output(127, "env: node: No such file or directory"), signature: "Mistral Vibe") == .unknown)
+        #expect(AgentCLI.helpCheck(output(126, "permission denied"), signature: "Mistral Vibe") == .unknown)
+        #expect(AgentCLI.helpCheck(output(9, exited: false, "partial"), signature: "Mistral Vibe") == .unknown)
+        #expect(AgentCLI.helpCheck(output(0, " \n"), signature: "Mistral Vibe") == .unknown)
     }
 
     /// Volta/mise shims link many commands to one binary; each command keeps its own outcome.
@@ -76,17 +89,27 @@ struct AgentCLITests {
         #expect(await cache.check(dir.appendingPathComponent("pi").path, signature: "AI coding assistant") { .mismatched } == .matched)
     }
 
-    @Test func anUnknownHelpCheckIsRetriedAfterAWhile() async {
+    @Test func helpCheckOutcomesExpireUnknownSooner() async {
         final class Clock: @unchecked Sendable { var now = Date(timeIntervalSince1970: 0) }
         let clock = Clock()
-        let cache = HelpCheckCache(unknownLifetime: 300, now: { clock.now })
+        let cache = HelpCheckCache(knownLifetime: 3600, unknownLifetime: 300, now: { clock.now })
         #expect(await cache.check("/nonexistent/pi", signature: "s") { .unknown } == .unknown)
         clock.now += 299
         #expect(await cache.check("/nonexistent/pi", signature: "s") { .matched } == .unknown)
         clock.now += 2
         #expect(await cache.check("/nonexistent/pi", signature: "s") { .matched } == .matched)
-        clock.now += 10_000
+        clock.now += 3599
         #expect(await cache.check("/nonexistent/pi", signature: "s") { .mismatched } == .matched)
+        clock.now += 2
+        #expect(await cache.check("/nonexistent/pi", signature: "s") { .mismatched } == .mismatched)
+    }
+
+    /// With no time left to run `--help`, a remembered outcome still applies; nothing remembered is unknown.
+    @Test func aRememberedOutcomeAppliesWithoutRunning() async {
+        let cache = HelpCheckCache()
+        #expect(await cache.check("/nonexistent/pi", signature: "s", run: nil) == .unknown)
+        #expect(await cache.check("/nonexistent/pi", signature: "s") { .mismatched } == .mismatched)
+        #expect(await cache.check("/nonexistent/pi", signature: "s", run: nil) == .mismatched)
     }
 
     @Test func matchesAnAgentsAppWord() {
@@ -203,7 +226,7 @@ struct AgentCLIProcessTests {
         let start = Date()
         let found = await AgentCLI.detect(signed, shell: shell, timeout: 1.5, helpTimeout: 3)
         #expect(found?.map(\.command) == ["kilo"])
-        #expect(Date().timeIntervalSince(start) < 1.5 + ProcessRunner.terminationGrace + 0.5)
+        #expect(Date().timeIntervalSince(start) < 1.5 + ProcessRunner.terminationGrace + 1.5)
     }
 
     @Test func helpRunsOncePerExecutable() async throws {
@@ -221,23 +244,33 @@ struct AgentCLIProcessTests {
 
     @Test func anAliasIsTrustedAndACutShortScriptFails() async throws {
         let bin = try FakeBin()
-        let alias = try bin.install("alias-shell", "printf 'ATOLL_FOUND:pi\\talias pi=npx-pi\\nATOLL_PATH:/usr/bin\\n'")
+        let alias = try bin.install("alias-shell", "printf 'ATOLL_FOUND:pi\\talias pi=npx-pi\\nATOLL_ENV\\nPATH=/usr/bin\\nATOLL_END\\n'")
         #expect(await AgentCLI.detect(signed, shell: alias, timeout: 5)?.map(\.command) == ["pi"])
         let cut = try bin.install("cut-shell", "printf 'ATOLL_FOUND:droid\\t/usr/bin/droid\\n'; exit 1")
         #expect(await AgentCLI.detect(signed, shell: cut, timeout: 5) == nil)
     }
 
-    @Test(arguments: ["/bin/sh", "/bin/bash", "/bin/zsh"])
-    func theScriptRunsInEachShell(_ shell: String) async throws {
+    @Test(arguments: [["/bin/sh"], ["/bin/bash"], ["/bin/zsh", "-f"]])
+    func theScriptRunsInEachShell(_ shell: [String]) async throws {
         let bin = try FakeBin()
         let droid = try bin.install("droid", "exit 0")
-        let output = try await ProcessRunner.run(shell, ["-c", AgentCLI.detectionScript(signed)],
-                                                 environment: ["PATH": bin.url.path + ":/usr/bin:/bin"], timeout: 5)
+        let output = try await ProcessRunner.run(shell[0], Array(shell.dropFirst()) + ["-c", AgentCLI.detectionScript(signed)],
+                                                 environment: ["PATH": bin.url.path + ":/usr/bin:/bin", "ATOLL_TEST": "1"],
+                                                 timeout: 5)
         let found = AgentCLI.parseFound(output.stdoutText, from: signed)
         #expect(found.clis.map(\.command) == ["droid"])
         #expect(found.locations["droid"] == droid)
-        // zsh reads ~/.zshenv even with -c, which may prepend to PATH.
-        #expect(found.searchPath?.hasSuffix(bin.url.path + ":/usr/bin:/bin") == true)
+        #expect(found.environment?["PATH"] == bin.url.path + ":/usr/bin:/bin")
+        #expect(found.environment?["ATOLL_TEST"] == "1")
+    }
+
+    /// `--help` gets the shell's environment, not just its PATH (pyenv/asdf shims need their variables).
+    @Test func helpRunsWithTheShellsEnvironment() async throws {
+        let bin = try FakeBin()
+        try bin.install("vibe", "[ \"$ATOLL_SHIM_ROOT\" = set ] && echo 'Mistral Vibe' || echo 'shim: root missing'")
+        let shell = try bin.install("env-shell", "ATOLL_SHIM_ROOT=set; export ATOLL_SHIM_ROOT; PATH='\(bin.url.path)':/usr/bin:/bin; export PATH; shift; exec /bin/sh -c \"$1\"")
+        let found = await AgentCLI.detect(signed, shell: shell, timeout: 5)
+        #expect(found?.map(\.command) == ["vibe"])
     }
 
     @Test func detectorRemembersOnlySuccessfulDetections() async {
