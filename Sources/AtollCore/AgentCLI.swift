@@ -75,12 +75,14 @@ public struct AgentCLI: Equatable, Sendable {
     static let marker = "ATOLL_FOUND:"
     static let pathMarker = "ATOLL_PATH:"
 
-    /// Prints a marked line per command found, with where it resolves, and the shell's PATH, so shell init chatter
-    /// on stdout can't be mistaken for a hit.
+    /// Prints a marked line per command found, with where it resolves, then the shell's PATH last, so shell init
+    /// chatter on stdout can't be mistaken for a hit and a script cut short is told apart from one that found
+    /// nothing. No variables or `$(…)`, so fish runs it as well as POSIX shells; `printenv` gives PATH
+    /// colon-separated in fish too. Each marker starts on a new line in case init chatter left one open.
     static func detectionScript(_ clis: [AgentCLI]) -> String {
-        (clis.map { "p=$(command -v \($0.command) 2>/dev/null) && printf '\(marker)%s\\t%s\\n' \($0.command) \"$p\"" }
-            + ["printf '\(pathMarker)%s\\n' \"$PATH\""])
-            .joined(separator: "; ") + "; true"
+        (clis.map { "command -v \($0.command) >/dev/null 2>&1 && printf '\\n\(marker)%s\\t' \($0.command) && command -v \($0.command)" }
+            + ["printf '\\n\(pathMarker)'; printenv PATH; true"])
+            .joined(separator: "; ")
     }
 
     struct Found: Equatable {
@@ -88,7 +90,7 @@ public struct AgentCLI: Equatable, Sendable {
         var clis: [AgentCLI]
         /// Where each found command resolves (`command -v`: a path, or an alias/function's definition).
         var locations: [String: String]
-        /// The login shell's PATH.
+        /// The login shell's PATH; nil when the script didn't get to its end.
         var searchPath: String?
     }
 
@@ -96,13 +98,12 @@ public struct AgentCLI: Equatable, Sendable {
         var locations: [String: String] = [:]
         var searchPath: String?
         for line in output.split(whereSeparator: \.isNewline) {
-            let line = line.trimmingCharacters(in: .whitespaces)
-            if line.hasPrefix(marker) {
-                let fields = line.dropFirst(marker.count).split(separator: "\t", maxSplits: 1)
+            if let range = line.range(of: marker) {
+                let fields = line[range.upperBound...].split(separator: "\t", maxSplits: 1)
                 guard let command = fields.first else { continue }
-                locations[String(command)] = fields.count > 1 ? String(fields[1]) : ""
-            } else if line.hasPrefix(pathMarker) {
-                searchPath = String(line.dropFirst(pathMarker.count))
+                locations[String(command)] = fields.count > 1 ? fields[1].trimmingCharacters(in: .whitespaces) : ""
+            } else if let range = line.range(of: pathMarker) {
+                searchPath = String(line[range.upperBound...]).trimmingCharacters(in: .whitespaces)
             }
         }
         return Found(clis: clis.filter { locations[$0.command] != nil }, locations: locations, searchPath: searchPath)
@@ -119,33 +120,65 @@ public struct AgentCLI: Equatable, Sendable {
     }
 
     /// Asks an interactive login shell — the one launches run in, so nvm/PATH match — which CLIs exist.
-    /// nil when the shell fails or doesn't finish within `timeout`.
+    /// nil when the shell fails, doesn't finish within `timeout`, or stops before the end of the script.
     ///
     /// A found CLI with a help signature then has its `--help` run (stdin closed, the shell's PATH so a
-    /// `#!/usr/bin/env node` script finds node), all at once, each limited to `helpTimeout`: one that hangs or
-    /// streams only drops itself. This runs whatever program has that name, on every detection.
-    static func detect(_ clis: [AgentCLI], shell: String, timeout: TimeInterval,
-                       helpTimeout: TimeInterval = 3) async -> [AgentCLI]? {
+    /// `#!/usr/bin/env node` script finds node), all at once, each limited to `helpTimeout`; a detection can
+    /// therefore take up to `timeout + helpTimeout` plus `ProcessRunner.terminationGrace`. Only help that
+    /// finished without the signature drops a CLI: one that timed out or couldn't start is kept, and an alias
+    /// or function (which can't run outside the shell) is trusted. This runs whatever program has that name;
+    /// `helpChecks` remembers each outcome per executable so it runs once per binary.
+    static func detect(_ clis: [AgentCLI], shell: String, timeout: TimeInterval, helpTimeout: TimeInterval = 3,
+                       helpChecks: HelpCheckCache = HelpCheckCache()) async -> [AgentCLI]? {
         guard let output = try? await ProcessRunner.run(shell, ["-lic", detectionScript(clis)], timeout: timeout) else { return nil }
         let found = parseFound(output.stdoutText, from: clis)
+        guard let searchPath = found.searchPath else { return nil }
         var environment = ProcessInfo.processInfo.environment
-        if let searchPath = found.searchPath { environment["PATH"] = searchPath }
-        let confirmed = await withTaskGroup(of: String?.self) { group in
+        environment["PATH"] = searchPath
+        let mismatched = await withTaskGroup(of: String?.self) { group in
             for cli in found.clis {
-                guard let signature = cli.helpSignature else { continue }
-                // An alias or function can't be run without the shell; only a path is checked.
-                guard let location = found.locations[cli.command], location.hasPrefix("/") else { continue }
+                guard let signature = cli.helpSignature,
+                      let location = found.locations[cli.command], location.hasPrefix("/") else { continue }
                 group.addTask { [environment] in
-                    guard let help = try? await ProcessRunner.run(location, ["--help"], environment: environment,
-                                                                  timeout: helpTimeout) else { return nil }
-                    return helpMatches(help.stdoutText + help.stderrText, signature: signature) ? cli.command : nil
+                    let check = await helpChecks.check(location) {
+                        guard let help = try? await ProcessRunner.run(location, ["--help"], environment: environment,
+                                                                      timeout: helpTimeout) else { return .unknown }
+                        return helpMatches(help.stdoutText + help.stderrText, signature: signature) ? .matched : .mismatched
+                    }
+                    return check == .mismatched ? cli.command : nil
                 }
             }
-            var confirmed: Set<String> = []
-            for await command in group { if let command { confirmed.insert(command) } }
-            return confirmed
+            var mismatched: Set<String> = []
+            for await command in group { if let command { mismatched.insert(command) } }
+            return mismatched
         }
-        return found.clis.filter { $0.helpSignature == nil || confirmed.contains($0.command) }
+        return found.clis.filter { !mismatched.contains($0.command) }
+    }
+}
+
+/// What a CLI's `--help` said about its help signature.
+enum HelpCheck: Sendable, Equatable {
+    case matched, mismatched
+    /// Timed out or couldn't start: no evidence either way.
+    case unknown
+}
+
+/// Help check outcomes per executable (resolved path and modification date), so detection runs a program's
+/// `--help` once rather than on every refresh — also bounding what a timed-out check can leave running.
+public actor HelpCheckCache {
+    private var outcomes: [String: HelpCheck] = [:]
+
+    public init() {}
+
+    func check(_ path: String, run: @Sendable () async -> HelpCheck) async -> HelpCheck {
+        let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+        let modified = (try? FileManager.default.attributesOfItem(atPath: resolved)[.modificationDate] as? Date)
+            .map { String($0.timeIntervalSince1970) } ?? "?"
+        let key = resolved + "@" + modified
+        if let known = outcomes[key] { return known }
+        let outcome = await run()
+        outcomes[key] = outcome
+        return outcome
     }
 }
 
@@ -169,7 +202,10 @@ public actor AgentCLIDetector {
         self.clis = clis
         self.onDetected = onDetected
         let shell = shell ?? ProcessRunner.loginShell()
-        self.detect = detect ?? { clis in await AgentCLI.detect(clis, shell: shell, timeout: timeout) }
+        let helpChecks = HelpCheckCache()
+        self.detect = detect ?? { clis in
+            await AgentCLI.detect(clis, shell: shell, timeout: timeout, helpChecks: helpChecks)
+        }
         lastKnown = saved.map { commands in clis.filter { commands.contains($0.command) } }
     }
 

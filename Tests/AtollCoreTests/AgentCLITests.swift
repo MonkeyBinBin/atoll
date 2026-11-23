@@ -36,7 +36,8 @@ struct AgentCLITests {
     }
 
     @Test func parsesWhereEachCommandResolvesAndTheShellPath() {
-        let output = "chatter\nATOLL_FOUND:droid\t/opt/bin/droid\nATOLL_FOUND:opencode\talias opencode=oc\nATOLL_PATH:/opt/bin:/usr/bin\n"
+        // Init chatter without a newline glues onto the first marker.
+        let output = "WelcomeATOLL_FOUND:droid\t/opt/bin/droid\nATOLL_FOUND:opencode\talias opencode=oc\nATOLL_PATH:/opt/bin:/usr/bin\n"
         let found = AgentCLI.parseFound(output, from: clis)
         #expect(found.clis.map(\.command) == ["droid", "opencode"])
         #expect(found.locations == ["droid": "/opt/bin/droid", "opencode": "alias opencode=oc"])
@@ -118,29 +119,74 @@ struct AgentCLIProcessTests {
         #expect(found?.map(\.command) == ["ls"])
     }
 
-    /// A same-named program is dropped; one that hangs drops only itself; the shell's PATH reaches the checks.
-    @Test func helpSignaturesAreCheckedPerCommand() async throws {
-        let bin = FileManager.default.temporaryDirectory.appendingPathComponent("atoll-cli-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: bin) }
-        func install(_ name: String, _ body: String) throws {
-            let file = bin.appendingPathComponent(name)
+    /// A directory of fake commands, removed when the test ends.
+    final class FakeBin {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("atoll-cli-\(UUID().uuidString)")
+        init() throws { try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true) }
+        deinit { try? FileManager.default.removeItem(at: url) }
+
+        @discardableResult
+        func install(_ name: String, _ body: String) throws -> String {
+            let file = url.appendingPathComponent(name)
             try "#!/bin/sh\n\(body)\n".write(to: file, atomically: true, encoding: .utf8)
             try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path)
+            return file.path
         }
-        try install("pi", "echo 'pi - prints digits of pi'")
-        try install("vibe", "echo 'Run the MISTRAL VIBE interactive CLI'")
-        try install("kilo", "exec sleep 30")
-        try install("droid", "exit 1")
-        // Stands in for the login shell: puts the fake commands on PATH, then runs the script.
-        try install("shell", "PATH='\(bin.path)':/usr/bin:/bin; export PATH; shift; exec /bin/sh -c \"$1\"")
-        let clis = [AgentCLI(command: "pi", title: "Pi", taskPassing: .lastArgument, helpSignature: "AI coding assistant"),
-                    AgentCLI(command: "vibe", title: "Mistral Vibe", taskPassing: .lastArgument, helpSignature: "Mistral Vibe"),
-                    AgentCLI(command: "kilo", title: "Kilo Code", taskPassing: .lastArgument, helpSignature: "kilo tui"),
-                    AgentCLI(command: "droid", title: "Factory Droid", taskPassing: .lastArgument)]
-        let found = await AgentCLI.detect(clis, shell: bin.appendingPathComponent("shell").path, timeout: 5,
-                                          helpTimeout: 0.5)
-        #expect(found?.map(\.command) == ["vibe", "droid"])
+
+        /// Stands in for the login shell: puts the fake commands on PATH, then runs the script with `shell`.
+        func loginShell(_ shell: String = "/bin/sh") throws -> String {
+            try install("login-shell", "PATH='\(url.path)':/usr/bin:/bin; export PATH; shift; exec \(shell) -c \"$1\"")
+        }
+    }
+
+    let signed = [AgentCLI(command: "pi", title: "Pi", taskPassing: .lastArgument, helpSignature: "AI coding assistant"),
+                  AgentCLI(command: "vibe", title: "Mistral Vibe", taskPassing: .lastArgument, helpSignature: "Mistral Vibe"),
+                  AgentCLI(command: "kilo", title: "Kilo Code", taskPassing: .lastArgument, helpSignature: "kilo tui"),
+                  AgentCLI(command: "droid", title: "Factory Droid", taskPassing: .lastArgument)]
+
+    /// Help without the signature drops a CLI; a hang keeps it (no evidence) and holds up nothing else.
+    @Test func onlyAMismatchedHelpDropsACLI() async throws {
+        let bin = try FakeBin()
+        try bin.install("pi", "echo 'pi - prints digits of pi'")
+        try bin.install("vibe", "echo 'Run the MISTRAL VIBE interactive CLI'")
+        try bin.install("kilo", "exec sleep 30")
+        try bin.install("droid", "exit 1")
+        let found = await AgentCLI.detect(signed, shell: try bin.loginShell(), timeout: 5, helpTimeout: 2)
+        #expect(found?.map(\.command) == ["vibe", "kilo", "droid"])
+    }
+
+    @Test func helpRunsOncePerExecutable() async throws {
+        let bin = try FakeBin()
+        let log = bin.url.appendingPathComponent("runs").path
+        try bin.install("vibe", "echo run >> '\(log)'; echo 'Mistral Vibe'")
+        let shell = try bin.loginShell()
+        let cache = HelpCheckCache()
+        for _ in 0..<2 {
+            let found = await AgentCLI.detect(signed, shell: shell, timeout: 5, helpChecks: cache)
+            #expect(found?.map(\.command) == ["vibe"])
+        }
+        #expect(try String(contentsOfFile: log, encoding: .utf8) == "run\n")
+    }
+
+    @Test func anAliasIsTrustedAndACutShortScriptFails() async throws {
+        let bin = try FakeBin()
+        let alias = try bin.install("alias-shell", "printf 'ATOLL_FOUND:pi\\talias pi=npx-pi\\nATOLL_PATH:/usr/bin\\n'")
+        #expect(await AgentCLI.detect(signed, shell: alias, timeout: 5)?.map(\.command) == ["pi"])
+        let cut = try bin.install("cut-shell", "printf 'ATOLL_FOUND:droid\\t/usr/bin/droid\\n'; exit 1")
+        #expect(await AgentCLI.detect(signed, shell: cut, timeout: 5) == nil)
+    }
+
+    @Test(arguments: ["/bin/sh", "/bin/bash", "/bin/zsh"])
+    func theScriptRunsInEachShell(_ shell: String) async throws {
+        let bin = try FakeBin()
+        let droid = try bin.install("droid", "exit 0")
+        let output = try await ProcessRunner.run(shell, ["-c", AgentCLI.detectionScript(signed)],
+                                                 environment: ["PATH": bin.url.path + ":/usr/bin:/bin"], timeout: 5)
+        let found = AgentCLI.parseFound(output.stdoutText, from: signed)
+        #expect(found.clis.map(\.command) == ["droid"])
+        #expect(found.locations["droid"] == droid)
+        // zsh reads ~/.zshenv even with -c, which may prepend to PATH.
+        #expect(found.searchPath?.hasSuffix(bin.url.path + ":/usr/bin:/bin") == true)
     }
 
     @Test func detectorRemembersOnlySuccessfulDetections() async {
