@@ -388,6 +388,54 @@ struct CustomAgentCLITests {
         #expect(await refresh.value == [edited])
     }
 
+    @Test func claudeAndCodexCantBeRedefined() {
+        var draft = AgentCLIDraft()
+        draft.command = "claude"
+        draft.title = "Claude (mine)"
+        #expect(draft.problem == .reservedCommand)
+        let merged = AgentCLI.merged(custom: [AgentCLI(command: "codex", title: "Codex", taskPassing: .lastArgument)])
+        #expect(merged == AgentCLI.catalog)
+    }
+
+    @Test func anExactNameBeatsAPrefixedOne() {
+        let dev = AgentCLI(command: "opencode-dev", title: "OpenCode dev", taskPassing: .lastArgument)
+        let clis = AgentCLI.merged(custom: [dev])
+        #expect(AgentCLI.matching(app: "opencode-dev", in: clis) == dev)
+        #expect(AgentCLI.matching(app: "opencode-tui", in: clis)?.command == "opencode")
+    }
+
+    @Test func oneUnreadableStoredEntryDropsOnlyItself() throws {
+        let good = AgentCLI(command: "aider", title: "Aider", taskPassing: .unsupported)
+        let stored = try JSONSerialization.jsonObject(with: JSONEncoder().encode([good]))
+        let data = try JSONSerialization.data(withJSONObject: [["command": "x", "title": "X", "taskPassing": ["future": [:]],
+                                                                "appWords": []]] + (stored as! [Any]))
+        #expect(AgentCLI.decodeList(data) == [good])
+        #expect(AgentCLI.decodeList(Data("not json".utf8)) == [])
+    }
+
+    /// A newly required help signature isn't vouched for by a detection made without it.
+    @Test func aNewHelpSignatureWaitsForTheNextDetection() async {
+        let plain = AgentCLI(command: "goose", title: "Goose", taskPassing: .lastArgument)
+        let signed = AgentCLI(command: "goose", title: "Goose", taskPassing: .lastArgument, helpSignature: "interactive chat sessions")
+        let detector = AgentCLIDetector(clis: [plain], saved: ["goose"], detect: { _ in [] })
+        await detector.update(clis: [signed])
+        #expect(await detector.lastKnown == [])
+    }
+
+    @Test func aRefreshJoiningARunningDetectionGetsTheNewDefinitions() async {
+        let gate = AsyncGate()
+        let detector = AgentCLIDetector(clis: [aider], detect: { clis in await gate.wait(); return clis })
+        let first = Task { await detector.refresh() }
+        await gate.waitUntilWaiting()
+        let edited = AgentCLI(command: "aider", title: "Aider (mine)", taskPassing: .lastArgument)
+        await detector.update(clis: [edited])
+        let joined = Task { await detector.refresh() }
+        await Task.yield()
+        await gate.open()
+        #expect(await first.value == [edited])
+        #expect(await joined.value == [edited])
+    }
+
     @Test func aDraftRoundTripsEveryTaskPassing() throws {
         for cli in [AgentCLI(command: "a", title: "A", taskPassing: .lastArgument),
                     AgentCLI(command: "b", title: "B", taskPassing: .flag("-i"), appWords: ["bee", "b-cli"],

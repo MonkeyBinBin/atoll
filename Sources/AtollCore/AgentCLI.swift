@@ -87,11 +87,19 @@ public struct AgentCLI: Equatable, Sendable, Codable {
     ]
 
     /// The catalog CLI an agent's OSC 7501 `app` word names ("opencode", "copilot-cli", "antigravity" …), if any.
+    /// An exact command or app word anywhere in `clis` wins over a `<name>-…` prefix, so a Settings CLI named
+    /// `opencode-dev` isn't taken for OpenCode.
     public static func matching(app: String, in clis: [AgentCLI] = catalog) -> AgentCLI? {
         let word = app.lowercased()
-        func names(_ name: String) -> Bool { word == name || word.hasPrefix(name + "-") }
-        return clis.first { cli in names(cli.command) || cli.appWords.contains(where: names) }
+        func exact(_ cli: AgentCLI) -> Bool { cli.command == word || cli.appWords.contains(word) }
+        func prefixed(_ cli: AgentCLI) -> Bool {
+            ([cli.command] + cli.appWords).contains { word.hasPrefix($0 + "-") }
+        }
+        return clis.first(where: exact) ?? clis.first(where: prefixed)
     }
+
+    /// Always offered by the launch form (`LaunchOption.builtIns`), so not definable in Settings.
+    public static let reservedCommands: Set<String> = ["claude", "codex"]
 
     /// Whether a command name is safe to put unquoted in the detection script: letters, digits, `.`, `_`, `+`, `-`,
     /// not starting with a punctuation mark.
@@ -100,10 +108,21 @@ public struct AgentCLI: Equatable, Sendable, Codable {
     }
 
     /// The catalog with the user's CLIs: one with a catalog command replaces that entry in place, the rest follow
-    /// in order. An invalid command, or a command already given earlier in `custom`, is skipped.
+    /// in order. An invalid or reserved command, or a command already given earlier in `custom`, is skipped.
+    /// Stored Settings CLIs, dropping only entries this version can't read (rather than all of them).
+    public static func decodeList(_ data: Data) -> [AgentCLI] {
+        struct Lossy: Decodable {
+            let cli: AgentCLI?
+            init(from decoder: Decoder) throws { cli = try? AgentCLI(from: decoder) }
+        }
+        return ((try? JSONDecoder().decode([Lossy].self, from: data)) ?? []).compactMap(\.cli)
+    }
+
     public static func merged(custom: [AgentCLI]) -> [AgentCLI] {
         var seen: Set<String> = []
-        let valid = custom.filter { isValidCommand($0.command) && seen.insert($0.command).inserted }
+        let valid = custom.filter {
+            isValidCommand($0.command) && !reservedCommands.contains($0.command) && seen.insert($0.command).inserted
+        }
         let byCommand = Dictionary(uniqueKeysWithValues: valid.map { ($0.command, $0) })
         let catalogCommands = Set(catalog.map(\.command))
         return catalog.map { byCommand[$0.command] ?? $0 } + valid.filter { !catalogCommands.contains($0.command) }
@@ -327,7 +346,7 @@ public actor AgentCLIDetector {
 
     /// Detects again (joining a detection already running). nil when it failed; `lastKnown` is then kept.
     public func refresh() async -> [AgentCLI]? {
-        if let running { return await running.value }
+        if let running { return await running.value.map(current) }
         let task = Task { [clis, detect] in await detect(clis) }
         running = task
         // A detection started before `update(clis:)` reported the old definitions: take the current ones.
@@ -347,9 +366,13 @@ public actor AgentCLIDetector {
         lastKnown = lastKnown.map(current)
     }
 
-    /// `found` as `clis` defines those commands now, in `clis` order; commands no longer listed are dropped.
+    /// `found` as `clis` defines those commands now, in `clis` order. Commands no longer listed are dropped, and
+    /// so is one whose new definition asks for a help signature it wasn't detected with: the next refresh checks it.
     private func current(_ found: [AgentCLI]) -> [AgentCLI] {
-        let commands = Set(found.map(\.command))
-        return clis.filter { commands.contains($0.command) }
+        let detected = Dictionary(found.map { ($0.command, $0) }, uniquingKeysWith: { first, _ in first })
+        return clis.filter { cli in
+            guard let old = detected[cli.command] else { return false }
+            return cli.helpSignature == nil || cli.helpSignature == old.helpSignature
+        }
     }
 }

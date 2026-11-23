@@ -24,3 +24,4 @@
   - `AgentCLIDetector.update(clis:)`：Settings 變更時換清單，`lastKnown` 與進行中的偵測結果都依 command 對應到新定義
   - `AgentCLIDraft`：Settings 編輯器的字串欄位與驗證，`IslandModel.agentCLIs` 給 `matching(app:in:)` 與啟動表單使用
   - Settings 新增「Agent CLIs」：列表、Add／Edit sheet（task 方式：Last argument／After a flag／After arguments／Not supported）、與內建同名時標 `replaces built-in`
+- 2026-11-23（agent）：依 code review 修正。`claude`／`codex` 列為保留字（option id 會與內建重複），編輯器擋下、`merged` 略過；`matching(app:in:)` 先找整份清單的完全相符，再退回 `<name>-` 前綴，避免 `opencode-dev` 被 OpenCode 搶走；加入進行中偵測的 refresh 也對應到新定義；新定義要求不同的 help signature 時不沿用舊偵測結果；啟動表單以 command 比對，選項一律用 `model.agentCLIs` 的現行定義；儲存資料逐筆解碼（`AgentCLI.decodeList`），壞一筆只丟那一筆。輸出版面解析（`OutputFilter`）仍只認 catalog 的 app word：要把合併清單傳進多個靜態呼叫，只影響覆蓋 opencode／agy 又加新 app word 的情況，不處理。

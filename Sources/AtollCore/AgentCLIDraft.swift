@@ -8,13 +8,14 @@ public struct AgentCLIDraft: Equatable, Sendable {
     }
 
     public enum Problem: Error, Equatable, Sendable {
-        case invalidCommand, emptyTitle, invalidFlag, emptySubcommand
+        case invalidCommand, reservedCommand, emptyTitle, invalidFlag, emptySubcommand
 
         public var message: String {
             switch self {
             case .invalidCommand: "Command: letters, digits, . _ + - only, starting with a letter or digit"
+            case .reservedCommand: "Claude Code and Codex are always offered"
             case .emptyTitle: "Title is empty"
-            case .invalidFlag: "Flag: one argument, no spaces (use Subcommand for several)"
+            case .invalidFlag: "Flag: one argument, no spaces (use After arguments for several)"
             case .emptySubcommand: "Arguments before the task are empty"
             }
         }
@@ -62,6 +63,7 @@ public struct AgentCLIDraft: Equatable, Sendable {
     public func build() -> Result<AgentCLI, Problem> {
         let command = command.trimmingCharacters(in: .whitespaces)
         guard AgentCLI.isValidCommand(command) else { return .failure(.invalidCommand) }
+        guard !AgentCLI.reservedCommands.contains(command) else { return .failure(.reservedCommand) }
         let title = title.trimmingCharacters(in: .whitespaces)
         guard !title.isEmpty else { return .failure(.emptyTitle) }
         let taskPassing: TaskPassing

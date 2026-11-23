@@ -84,7 +84,13 @@ struct LaunchFormView: View {
     @FocusState private var launchFocused: Bool
 
     private var store: AgentStore { model.store }
-    private var options: [LaunchOption] { LaunchOption.builtIns + installed.map(LaunchOption.detected) + templateOptions }
+    /// Installed CLIs as Settings defines them now: a detection may still carry a definition from before an edit.
+    private var options: [LaunchOption] {
+        let current = installed.compactMap { cli in model.agentCLIs.first { $0.command == cli.command } }
+        return LaunchOption.builtIns + current.map(LaunchOption.detected) + templateOptions
+    }
+
+    private func has(_ list: [AgentCLI], _ cli: AgentCLI) -> Bool { list.contains { $0.command == cli.command } }
     private var option: LaunchOption { options.first { $0.id == optionID } ?? options[0] }
     private var taskSupported: Bool { option.taskPassing != .unsupported }
 
@@ -423,7 +429,7 @@ struct LaunchFormView: View {
     /// A newer detection; the selected CLI stays selectable (with a note) even if it's no longer found.
     private func takeRefreshed(_ fresh: [AgentCLI]) {
         var list = fresh
-        if let selected = LaunchOption.catalogCLI(id: optionID, in: model.agentCLIs), !fresh.contains(selected) {
+        if let selected = LaunchOption.catalogCLI(id: optionID, in: model.agentCLIs), !has(fresh, selected) {
             list.append(selected)
             restoreNotes.append("\(selected.title) (\(selected.command)) wasn't found on this Mac")
         }
@@ -534,11 +540,11 @@ struct LaunchFormView: View {
         // The tool list isn't complete until templates and installed CLIs arrive, and a CLI missing from the
         // cached list may have been installed since: don't call a tool gone before the list is current.
         let cli = LaunchOption.catalogCLI(id: recipe.optionID, in: model.agentCLIs)
-        guard toolsLoaded, !(refreshing && cli.map { !installed.contains($0) } == true) else {
+        guard toolsLoaded, !(refreshing && cli.map { !has(installed, $0) } == true) else {
             deferredRecipe = recipe
             return
         }
-        if detectionFailed, let cli, !installed.contains(cli) { installed.append(cli) }
+        if detectionFailed, let cli, !has(installed, cli) { installed.append(cli) }
         let restored = LaunchHistory.restore(
             recipe,
             folderExists: { path in
