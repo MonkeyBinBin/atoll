@@ -527,6 +527,14 @@ struct TranscriptPanelTests {
         return nil
     }
 
+    /// Waits until every transcript read started so far (and any it queued after itself) has been handled.
+    func drainTranscriptReads(_ h: Harness) async {
+        while let chain = h.store.transcriptChain {
+            await chain.value
+            if h.store.transcriptChain == chain { return }
+        }
+    }
+
     @Test("the open panel reads the agent's transcript found through its session label")
     func panelReads() async throws {
         let home = FakeHome()
@@ -588,13 +596,14 @@ struct TranscriptPanelTests {
         try FileManager.default.removeItem(at: home.url.appendingPathComponent(".claude/projects/-x/11111111-1111-4111-8111-111111111111.jsonl"))
         let screenReads = h.client.commands.filter { $0 == .read("t1", 200) }.count
         // The first miss starts the 6 s grace; misses within it keep the transcript.
+        // Each read is handled before time moves on, so the grace starts at the first tick's time.
         for _ in 0..<3 {
             h.scheduler.advance(by: 2)
-            try? await Task.sleep(for: .milliseconds(30))
+            await drainTranscriptReads(h)
         }
         #expect(h.store.panel?.transcript != nil)
         h.scheduler.advance(by: 2)
-        for _ in 0..<100 where h.store.panel?.transcript != nil { try? await Task.sleep(for: .milliseconds(5)) }
+        await drainTranscriptReads(h)
         #expect(h.store.panel?.transcript == nil)
         await settle()
         #expect(h.client.commands.filter { $0 == .read("t1", 200) }.count == screenReads + 1)
