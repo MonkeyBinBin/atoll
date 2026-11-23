@@ -37,13 +37,14 @@ struct AgentCLITests {
 
     @Test func parsesWhereEachCommandResolvesAndTheShellPath() {
         // Init chatter without a newline glues onto the first marker.
-        let output = "WelcomeATOLL_FOUND:droid\t/opt/bin/droid\nATOLL_FOUND:opencode\talias opencode=oc\n"
-            + "ATOLL_ENV\nPATH=/opt/bin:/usr/bin\nPYENV_ROOT=/x\nNOTE=two\nlines\nATOLL_END\n"
+        // Chatter merely ending in the start marker doesn't start the environment.
+        let output = "WelcomeATOLL_FOUND:droid\t/opt/bin/droid\nsee ATOLL_ENV\nATOLL_FOUND:opencode\talias opencode=oc\n"
+            + "ATOLL_ENV\nPATH=/opt/bin:/usr/bin\0PEM=line1\nPATH=/tmp/x\0=nameless\0PYENV_ROOT=/x\0\nATOLL_END\n"
         let found = AgentCLI.parseFound(output, from: clis)
         #expect(found.clis.map(\.command) == ["droid", "opencode"])
         #expect(found.locations == ["droid": "/opt/bin/droid", "opencode": "alias opencode=oc"])
-        #expect(found.environment == ["PATH": "/opt/bin:/usr/bin", "PYENV_ROOT": "/x", "NOTE": "two"])
-        #expect(AgentCLI.parseFound("ATOLL_FOUND:droid\t/x\nATOLL_ENV\nPATH=/x\n", from: clis).environment == nil)
+        #expect(found.environment == ["PATH": "/opt/bin:/usr/bin", "PEM": "line1\nPATH=/tmp/x", "PYENV_ROOT": "/x"])
+        #expect(AgentCLI.parseFound("ATOLL_FOUND:droid\t/x\nATOLL_ENV\nPATH=/x\0", from: clis).environment == nil)
     }
 
     @Test func helpSignatureIgnoresCaseStylingAndWrapping() {
@@ -71,6 +72,8 @@ struct AgentCLITests {
         #expect(AgentCLI.helpCheck(output(126, "permission denied"), signature: "Mistral Vibe") == .unknown)
         #expect(AgentCLI.helpCheck(output(9, exited: false, "partial"), signature: "Mistral Vibe") == .unknown)
         #expect(AgentCLI.helpCheck(output(0, " \n"), signature: "Mistral Vibe") == .unknown)
+        #expect(AgentCLI.helpCheck(output(1, "SyntaxError: Unexpected token '?'"), signature: "AI coding assistant") == .unknown)
+        #expect(AgentCLI.helpCheck(output(0, "SyntaxError is a word in this other tool's help"), signature: "AI coding assistant") == .mismatched)
     }
 
     /// Volta/mise shims link many commands to one binary; each command keeps its own outcome.
@@ -244,7 +247,7 @@ struct AgentCLIProcessTests {
 
     @Test func anAliasIsTrustedAndACutShortScriptFails() async throws {
         let bin = try FakeBin()
-        let alias = try bin.install("alias-shell", "printf 'ATOLL_FOUND:pi\\talias pi=npx-pi\\nATOLL_ENV\\nPATH=/usr/bin\\nATOLL_END\\n'")
+        let alias = try bin.install("alias-shell", "printf 'ATOLL_FOUND:pi\\talias pi=npx-pi\\nATOLL_ENV\\nPATH=/usr/bin\\0\\nATOLL_END\\n'")
         #expect(await AgentCLI.detect(signed, shell: alias, timeout: 5)?.map(\.command) == ["pi"])
         let cut = try bin.install("cut-shell", "printf 'ATOLL_FOUND:droid\\t/usr/bin/droid\\n'; exit 1")
         #expect(await AgentCLI.detect(signed, shell: cut, timeout: 5) == nil)

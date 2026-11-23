@@ -75,13 +75,13 @@ public struct AgentCLI: Equatable, Sendable {
     static let environmentStart = "ATOLL_ENV"
     static let environmentEnd = "ATOLL_END"
 
-    /// Prints a marked line per command found, with where it resolves, then the shell's environment between two
-    /// markers, last, so shell init chatter on stdout can't be mistaken for a hit and a script cut short is told
+    /// Prints a marked line per command found, with where it resolves, then the shell's environment
+    /// (NUL-separated, so multi-line values stay whole) between two markers, last, so shell init chatter on stdout can't be mistaken for a hit and a script cut short is told
     /// apart from one that found nothing. No variables or `$(…)`, so fish runs it as well as POSIX shells.
     /// Each marker starts on a new line in case init chatter left one open.
     static func detectionScript(_ clis: [AgentCLI]) -> String {
         (clis.map { "command -v \($0.command) >/dev/null 2>&1 && printf '\\n\(marker)%s\\t' \($0.command) && command -v \($0.command)" }
-            + ["printf '\\n%s\\n' \(environmentStart); env; printf '\\n%s\\n' \(environmentEnd); true"])
+            + ["printf '\\n%s\\n' \(environmentStart); env -0; printf '\\n%s\\n' \(environmentEnd); true"])
             .joined(separator: "; ")
     }
 
@@ -95,29 +95,37 @@ public struct AgentCLI: Equatable, Sendable {
     }
 
     static func parseFound(_ output: String, from clis: [AgentCLI]) -> Found {
+        // The environment starts at a line that is exactly the start marker and ends at the last end marker.
+        let lines = output.split(separator: "\n", omittingEmptySubsequences: false)
+        let start = lines.firstIndex { $0.trimmingCharacters(in: .whitespacesAndNewlines) == environmentStart }
         var locations: [String: String] = [:]
-        var environment: [String: String] = [:]
-        var inEnvironment = false
-        var complete = false
-        for line in output.split(whereSeparator: \.isNewline) {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if inEnvironment {
-                if trimmed == environmentEnd { complete = true; break }
-                // A value spanning lines leaves continuation lines without `NAME=`; they're skipped.
-                guard let equals = line.firstIndex(of: "="),
-                      line[..<equals].allSatisfy({ $0 == "_" || $0.isLetter || $0.isNumber }),
-                      line.first.map({ !$0.isNumber }) == true else { continue }
-                environment[String(line[..<equals])] = String(line[line.index(after: equals)...])
-            } else if trimmed.hasSuffix(environmentStart) {
-                inEnvironment = true
-            } else if let range = line.range(of: marker) {
-                let fields = line[range.upperBound...].split(separator: "\t", maxSplits: 1)
-                guard let command = fields.first else { continue }
-                locations[String(command)] = fields.count > 1 ? fields[1].trimmingCharacters(in: .whitespaces) : ""
+        for line in lines[..<(start ?? lines.endIndex)] {
+            guard let range = line.range(of: marker) else { continue }
+            let fields = line[range.upperBound...].split(separator: "\t", maxSplits: 1)
+            guard let command = fields.first else { continue }
+            locations[String(command)] = fields.count > 1 ? fields[1].trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        }
+        var environment: [String: String]?
+        if let start {
+            let rest = lines[(start + 1)...].joined(separator: "\n")
+            if let end = rest.range(of: "\n" + environmentEnd, options: .backwards) {
+                environment = parseEnvironment(String(rest[..<end.lowerBound]))
             }
         }
-        return Found(clis: clis.filter { locations[$0.command] != nil }, locations: locations,
-                     environment: complete ? environment : nil)
+        return Found(clis: clis.filter { locations[$0.command] != nil }, locations: locations, environment: environment)
+    }
+
+    /// `env -0` output: `NAME=value` entries separated by NUL; entries without a valid name are dropped.
+    static func parseEnvironment(_ block: String) -> [String: String] {
+        var environment: [String: String] = [:]
+        for entry in block.split(separator: "\0") {
+            guard let equals = entry.firstIndex(of: "=") else { continue }
+            let name = entry[..<equals]
+            guard let first = name.first, !first.isNumber,
+                  name.allSatisfy({ $0 == "_" || ($0.isASCII && ($0.isLetter || $0.isNumber)) }) else { continue }
+            environment[String(name)] = String(entry[entry.index(after: equals)...])
+        }
+        return environment
     }
 
     /// The CLIs whose command the script reported, in `clis` order.
@@ -136,13 +144,20 @@ public struct AgentCLI: Equatable, Sendable {
     }
 
     /// What a finished `--help` says. Only help the program actually printed counts against it: killed by a
-    /// signal, not runnable (126) or missing its interpreter (127), or silent is no evidence either way.
+    /// signal, not runnable (126) or missing its interpreter (127), silent, or crashing is no evidence either way.
     static func helpCheck(_ output: ProcessRunner.Output, signature: String) -> HelpCheck {
         let help = output.stdoutText + output.stderrText
         guard output.exited, output.status != 126, output.status != 127,
               !help.allSatisfy(\.isWhitespace) else { return .unknown }
-        return helpMatches(help, signature: signature) ? .matched : .mismatched
+        if helpMatches(help, signature: signature) { return .matched }
+        // A failing run that reads as a crash (wrong runtime version, broken install) says nothing about which
+        // program it is.
+        if output.status != 0, crashMarkers.contains(where: help.contains) { return .unknown }
+        return .mismatched
     }
+
+    static let crashMarkers = ["Traceback (most recent call last)", "SyntaxError", "ModuleNotFoundError", "ImportError",
+                               "Cannot find module", "node:internal", "panicked at", "dyld"]
 
     /// The file to run for a `command -v` result: absolute as is, `~` against home, relative (a relative PATH
     /// entry) against `directory`, where the shell was. nil for an alias or function, which only the shell can run.
@@ -153,13 +168,17 @@ public struct AgentCLI: Equatable, Sendable {
         return URL(fileURLWithPath: location, relativeTo: URL(fileURLWithPath: directory, isDirectory: true)).standardizedFileURL.path
     }
 
+    /// Less time than this left for `--help` (a slow login shell) isn't worth a run whose likely timeout would
+    /// be remembered as `.unknown`; remembered outcomes still apply.
+    static let minimumHelpTime: TimeInterval = 0.5
+
     /// Asks an interactive login shell — the one launches run in, so nvm/PATH match — which CLIs exist.
     /// nil when the shell fails, doesn't finish within `timeout`, or stops before the end of the script.
     ///
     /// A found CLI with a help signature then has its `--help` checked, with the shell's environment (PATH,
     /// version-manager variables) and stdin closed. Checks run all at once, each limited to `helpTimeout` and to
     /// what is left of `timeout`, so a detection takes at most `timeout` plus `ProcessRunner.terminationGrace`;
-    /// with nothing left only remembered outcomes apply. Only help that came back without the signature drops a
+    /// with less than `minimumHelpTime` left only remembered outcomes apply. Only help that came back without the signature drops a
     /// CLI: anything inconclusive keeps it, and an alias or function (which can't run outside the shell) is
     /// trusted. This runs whatever program has that name; `helpChecks` remembers outcomes for a while.
     static func detect(_ clis: [AgentCLI], shell: String, timeout: TimeInterval, helpTimeout: TimeInterval = 3,
@@ -176,7 +195,7 @@ public struct AgentCLI: Equatable, Sendable {
                 guard let signature = cli.helpSignature,
                       let file = found.locations[cli.command].flatMap({ executable($0, in: directory) }) else { continue }
                 let run: (@Sendable () async -> HelpCheck)?
-                if budget > 0 {
+                if budget >= minimumHelpTime {
                     run = {
                         guard let help = try? await ProcessRunner.run(file, ["--help"], environment: environment,
                                                                       timeout: budget) else { return HelpCheck.unknown }
