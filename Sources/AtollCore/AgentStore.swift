@@ -338,7 +338,8 @@ public final class AgentStore {
     private var transcriptLoading = false
     private var transcriptAgain = false
     /// Reader calls (loads and forgets) run one after another, in the order they were made.
-    private var transcriptChain: Task<Void, Never>?
+    /// Readable so tests can wait for a read to be handled instead of sleeping.
+    private(set) var transcriptChain: Task<Void, Never>?
     /// The app shows the transcript only with Messages only on: off, it isn't read and the panel drops it.
     @ObservationIgnored public var wantsTranscript = true {
         didSet { if wantsTranscript != oldValue { refreshTranscript() } }
