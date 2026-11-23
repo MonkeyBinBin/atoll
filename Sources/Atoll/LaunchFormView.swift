@@ -31,7 +31,8 @@ struct LaunchOption: Identifiable, Hashable {
 
     static func template(_ t: TemplateInfo) -> LaunchOption {
         // argv[0] naming a template makes core start its command and send its body.
-        LaunchOption(id: "template:\(t.name)", title: "\(t.name) (template)", argv: [t.name], tool: .from(app: t.command))
+        LaunchOption(id: "template:\(t.name)", title: "\(t.name) (template)", argv: [t.name], tool: .from(app: t.command),
+                     taskPassing: .verbatim)
     }
 }
 

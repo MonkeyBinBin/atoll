@@ -170,13 +170,17 @@ struct AgentCLITests {
         #expect(TaskPassing.flag("--prompt").apply(argv: ["opencode"], task: "") == (["opencode"], ""))
         #expect(TaskPassing.unsupported.apply(argv: ["kimi"], task: "fix it") == (["kimi"], ""))
         #expect(TaskPassing.lastArgument.apply(argv: ["codex"], task: "- fix A\n- fix B") == (["codex"], " - fix A\n- fix B"))
+        #expect(TaskPassing.verbatim.apply(argv: ["reviewer"], task: "- check A") == (["reviewer"], "- check A"))
     }
 
     @Test func subcommandCLIsLaunchWithAndWithoutATask() {
+        // What the program gets, through the same argv building a real launch uses.
         func launch(_ command: String, _ task: String) -> [String] {
             let cli = AgentCLI.catalog.first { $0.command == command }!
             let start = cli.taskPassing.apply(argv: [cli.command], task: task)
-            return start.task.isEmpty ? start.argv : start.argv + [start.task]
+            let args = CoreRPCAdapter.hcRunArguments(LaunchRequest(argv: start.argv, folder: "/p", task: start.task, space: "sp"),
+                                                     shell: "/bin/zsh", newID: { $0 })
+            return Array(args.drop { $0 != "/bin/zsh" }.dropFirst(4))
         }
         #expect(launch("kiro-cli", "fix it") == ["kiro-cli", "chat", "fix it"])
         #expect(launch("kiro-cli", "") == ["kiro-cli"])

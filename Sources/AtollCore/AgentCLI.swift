@@ -11,13 +11,17 @@ public enum TaskPassing: Hashable, Sendable {
     case arguments(withTask: [String], withoutTask: [String])
     /// The CLI has no way to open an interactive session with a first prompt.
     case unsupported
+    /// A herdr-core template: core sends the task to the program itself, so it reaches it as written.
+    case verbatim
 
-    /// The argv and task to launch with; an empty task adds nothing. A task starting with `-` (a markdown list)
-    /// gets a leading space, so argument parsers (clap, argparse) take it as a value rather than a flag.
+    /// The argv and task to launch with; an empty task adds nothing. A task passed as an argument that starts
+    /// with `-` (a markdown list) gets a leading space, so argument parsers (clap, argparse) take it as a value
+    /// rather than a flag.
     public func apply(argv: [String], task: String) -> (argv: [String], task: String) {
+        if case .verbatim = self { return (argv, task) }
         let task = task.hasPrefix("-") ? " " + task : task
         return switch self {
-        case .lastArgument: (argv, task)
+        case .lastArgument, .verbatim: (argv, task)
         case .flag(let flag): (task.isEmpty ? argv : argv + [flag], task)
         case .arguments(let withTask, let withoutTask): (argv + (task.isEmpty ? withoutTask : withTask), task)
         case .unsupported: (argv, "")
