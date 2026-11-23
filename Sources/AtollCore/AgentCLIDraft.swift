@@ -8,13 +8,13 @@ public struct AgentCLIDraft: Equatable, Sendable {
     }
 
     public enum Problem: Error, Equatable, Sendable {
-        case invalidCommand, reservedCommand, builtInAppWord(String), emptyTitle, invalidFlag, emptySubcommand
+        case invalidCommand, reservedCommand, claimedByBuiltIn(String), emptyTitle, invalidFlag, emptySubcommand
 
         public var message: String {
             switch self {
             case .invalidCommand: "Command: letters, digits, . _ + - only, starting with a letter or digit; not a shell builtin"
             case .reservedCommand: "Names starting with claude or codex are tracked as Claude Code / Codex"
-            case .builtInAppWord(let title): "\(title) reports this name; it would take that CLI's agents"
+            case .claimedByBuiltIn(let title): "\(title) matches agents by this name; pick a name it doesn't"
             case .emptyTitle: "Title is empty"
             case .invalidFlag: "Flag: one argument, no spaces (use After arguments for several)"
             case .emptySubcommand: "Arguments before the task are empty"
@@ -79,6 +79,12 @@ public struct AgentCLIDraft: Equatable, Sendable {
                 self = AgentCLIDraft()
                 command = typed
             } else {
+                // Edits stay, but app words and help signature only inherited from the built-in would make this
+                // other command undetectable or misattributed: drop them unless they were edited too.
+                if let adopted = adoptedFields {
+                    if appWords == adopted[5] { appWords = "" }
+                    if helpSignature == adopted[6] { helpSignature = "" }
+                }
                 self.adoptedFrom = nil
                 adoptedFields = nil
                 return
@@ -126,7 +132,7 @@ public struct AgentCLIDraft: Equatable, Sendable {
         let command = command.trimmingCharacters(in: .whitespacesAndNewlines)
         guard AgentCLI.isValidCommand(command) else { return .failure(.invalidCommand) }
         guard !AgentCLI.isReserved(command) else { return .failure(.reservedCommand) }
-        if let owner = AgentCLI.catalogOwningAppWord(command) { return .failure(.builtInAppWord(owner.title)) }
+        if let owner = AgentCLI.catalogClaiming(command) { return .failure(.claimedByBuiltIn(owner.title)) }
         let title = title.trimmingCharacters(in: .whitespaces)
         guard !title.isEmpty else { return .failure(.emptyTitle) }
         let taskPassing: TaskPassing

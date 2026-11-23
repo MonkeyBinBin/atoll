@@ -129,22 +129,45 @@ public struct AgentCLI: Equatable, Sendable, Codable {
         // fish
         "abbr", "funced", "funcsave", "fish_config", "complete", "argparse", "commandline", "emit", "path",
         "random", "realpath", "bind", "block", "breakpoint", "isatty", "nextd", "prevd", "dirh", "cdh",
+        // more zsh and bash
+        "repeat", "foreach", "nocorrect", "coproc", "always", "bye", "chdir", "zcompile", "zparseopts", "zformat",
+        "help", "shopt", "compgen", "mapfile", "readarray", "caller",
     ]
 
-    /// The catalog CLI that reports this name as one of its app words, if any (and it isn't that CLI's own
-    /// command): a Settings CLI by that name would take that CLI's running agents.
-    public static func catalogOwningAppWord(_ command: String) -> AgentCLI? {
-        let name = command.lowercased()
-        return catalog.first { $0.command.lowercased() != name && $0.appWords.contains { $0.lowercased() == name } }
+    /// The catalog CLI that would match an agent reporting this name (by app word or `<name>-` prefix), unless
+    /// the name is that CLI's own command. A Settings CLI by such a name would compete with it for those agents
+    /// (which one wins depends on the matching order), so Settings refuses it: built-in and Settings names
+    /// never overlap.
+    public static func catalogClaiming(_ command: String) -> AgentCLI? {
+        guard let owner = matching(app: command), owner.command.lowercased() != command.lowercased() else { return nil }
+        return owner
     }
 
     /// Stored Settings CLIs, dropping only entries this version can't read (rather than all of them).
-    public static func decodeList(_ data: Data) -> [AgentCLI] {
-        struct Lossy: Decodable {
-            let cli: AgentCLI?
-            init(from decoder: Decoder) throws { cli = try? AgentCLI(from: decoder) }
+    public static func decodeList(_ data: Data) -> [AgentCLI] { decodeStored(data).clis }
+
+    /// Stored Settings CLIs, and the stored entries this version can't read, as JSON, to be written back
+    /// unchanged (a newer version's entry isn't lost when this one saves).
+    public static func decodeStored(_ data: Data) -> (clis: [AgentCLI], unreadable: [Data]) {
+        guard let entries = try? JSONSerialization.jsonObject(with: data) as? [Any] else { return ([], []) }
+        var clis: [AgentCLI] = []
+        var unreadable: [Data] = []
+        for entry in entries {
+            guard let json = try? JSONSerialization.data(withJSONObject: entry) else { continue }
+            if let cli = try? JSONDecoder().decode(AgentCLI.self, from: json) {
+                clis.append(cli)
+            } else {
+                unreadable.append(json)
+            }
         }
-        return ((try? JSONDecoder().decode([Lossy].self, from: data)) ?? []).compactMap(\.cli)
+        return (clis, unreadable)
+    }
+
+    /// `clis` followed by the `unreadable` entries kept from `decodeStored`.
+    public static func encodeStored(_ clis: [AgentCLI], unreadable: [Data]) -> Data? {
+        let entries = clis.compactMap { try? JSONSerialization.jsonObject(with: JSONEncoder().encode($0)) }
+            + unreadable.compactMap { try? JSONSerialization.jsonObject(with: $0) }
+        return try? JSONSerialization.data(withJSONObject: entries)
     }
 
     /// The catalog with the user's CLIs: one with a catalog command replaces that entry in place, the rest follow
@@ -153,7 +176,7 @@ public struct AgentCLI: Equatable, Sendable, Codable {
         // Compared without case: macOS file systems usually ignore it, so `OpenCode` is `opencode`.
         var seen: Set<String> = []
         let valid = custom.filter {
-            isValidCommand($0.command) && !isReserved($0.command) && catalogOwningAppWord($0.command) == nil
+            isValidCommand($0.command) && !isReserved($0.command) && catalogClaiming($0.command) == nil
                 && seen.insert($0.command.lowercased()).inserted
         }
         let byCommand = Dictionary(uniqueKeysWithValues: valid.map { ($0.command.lowercased(), $0) })

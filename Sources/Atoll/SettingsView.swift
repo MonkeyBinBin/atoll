@@ -273,7 +273,8 @@ struct SettingsView: View {
                     .map { $0.element.command.lowercased() }),
                 onSave: { cli in
                     if let index = edit.index, settings.customAgentCLIs.indices.contains(index) {
-                        settings.customAgentCLIs[index] = cli
+                        // Unchanged: no save, and no new detection.
+                        if settings.customAgentCLIs[index] != cli { settings.customAgentCLIs[index] = cli }
                     } else {
                         settings.customAgentCLIs.append(cli)
                     }

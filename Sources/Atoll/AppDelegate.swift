@@ -92,6 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings.onCustomAgentCLIsChanged = { [weak self] custom in
             guard let self else { return }
             let clis = AgentCLI.merged(custom: custom)
+            model.agentCLIs = clis
             store.agentCLIs = clis
             listVersion += 1
             let version = listVersion

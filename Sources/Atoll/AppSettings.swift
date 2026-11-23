@@ -93,10 +93,12 @@ final class AppSettings {
     /// Agent CLIs added in Settings; one with a catalog command replaces that entry (`AgentCLI.merged`).
     var customAgentCLIs: [AgentCLI] {
         didSet {
-            save(customAgentCLIs, "customAgentCLIs")
+            defaults.set(AgentCLI.encodeStored(customAgentCLIs, unreadable: keptAgentCLIEntries), forKey: "customAgentCLIs")
             onCustomAgentCLIsChanged?(customAgentCLIs)
         }
     }
+    /// Stored entries this version can't use (unreadable, or refused by a rule): not shown, written back as is.
+    @ObservationIgnored private var keptAgentCLIEntries: [Data] = []
     @ObservationIgnored var onCustomAgentCLIsChanged: (([AgentCLI]) -> Void)?
     /// The last spaces read from the Herdr app, for launches while it isn't running.
     var herdrSpaceCache: [HerdrSpace] { didSet { save(herdrSpaceCache, "herdrSpaceCache") } }
@@ -176,13 +178,22 @@ final class AppSettings {
         recentFolders = defaults.stringArray(forKey: "recentFolders") ?? []
         pinnedFolders = defaults.stringArray(forKey: "pinnedFolders") ?? []
         detectedAgentCLIs = defaults.stringArray(forKey: "detectedAgentCLIs")
-        // Only entries `merged` uses (valid, not reserved, one per command in any case), so the Settings list
-        // shows nothing that silently does nothing.
+        // Only entries `merged` uses (valid, not reserved or claimed, one per command in any case), so the Settings
+        // list shows nothing that silently does nothing; the rest is kept aside and saved back unchanged.
         var seen: Set<String> = []
-        customAgentCLIs = (defaults.data(forKey: "customAgentCLIs").map(AgentCLI.decodeList) ?? []).filter {
-            AgentCLI.isValidCommand($0.command) && !AgentCLI.isReserved($0.command)
-                && AgentCLI.catalogOwningAppWord($0.command) == nil && seen.insert($0.command.lowercased()).inserted
+        let stored = defaults.data(forKey: "customAgentCLIs").map(AgentCLI.decodeStored) ?? (clis: [], unreadable: [])
+        var usable: [AgentCLI] = []
+        var kept = stored.unreadable
+        for cli in stored.clis {
+            if AgentCLI.isValidCommand(cli.command) && !AgentCLI.isReserved(cli.command)
+                && AgentCLI.catalogClaiming(cli.command) == nil && seen.insert(cli.command.lowercased()).inserted {
+                usable.append(cli)
+            } else if let json = try? JSONEncoder().encode(cli) {
+                kept.append(json)
+            }
         }
+        keptAgentCLIEntries = kept
+        customAgentCLIs = usable
         herdrSpaceCache = Self.load("herdrSpaceCache", defaults) ?? []
         pendingSpaceNames = defaults.dictionary(forKey: "pendingSpaceNames") as? [String: String] ?? [:]
         recentLaunches = Self.load("recentLaunches", defaults) ?? []

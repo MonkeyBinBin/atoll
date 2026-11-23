@@ -154,8 +154,9 @@ final class IslandModel {
     let settings: AppSettings
     /// Finds installed agent CLIs for the launch form; the app replaces it with one that saves its results.
     var agentCLIDetector = AgentCLIDetector()
-    /// The catalog with the CLIs added in Settings.
-    var agentCLIs: [AgentCLI] { AgentCLI.merged(custom: settings.customAgentCLIs) }
+    /// The catalog with the CLIs added in Settings; kept rather than computed (the panel reads it on every
+    /// render), and updated by the app when Settings changes.
+    var agentCLIs: [AgentCLI]
     var mode: Mode = .collapsed {
         didSet {
             guard mode != oldValue else { return }
@@ -359,6 +360,7 @@ final class IslandModel {
     init(store: AgentStore, settings: AppSettings) {
         self.store = store
         self.settings = settings
+        agentCLIs = AgentCLI.merged(custom: settings.customAgentCLIs)
     }
 
     var isExpanded: Bool { mode != .collapsed }

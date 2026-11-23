@@ -397,11 +397,25 @@ struct CustomAgentCLITests {
         #expect(merged == AgentCLI.catalog)
     }
 
-    @Test func anExactNameBeatsAPrefixedOne() {
-        let dev = AgentCLI(command: "opencode-dev", title: "OpenCode dev", taskPassing: .lastArgument)
-        let clis = AgentCLI.merged(custom: [dev])
-        #expect(AgentCLI.matching(app: "opencode-dev", in: clis) == dev)
-        #expect(AgentCLI.matching(app: "opencode-tui", in: clis)?.command == "opencode")
+    /// Names a built-in matches (`<command>-…`, app words) are refused, so built-in and Settings names never
+    /// compete; within a list, an exact name still beats a prefix.
+    @Test func namesABuiltInMatchesAreRefused() {
+        for name in ["opencode-dev", "copilot-cli", "agy-beta", "kiro", "Cursor"] {
+            #expect(AgentCLI.catalogClaiming(name) != nil, "\(name)")
+            #expect(AgentCLI.merged(custom: [AgentCLI(command: name, title: "X", taskPassing: .lastArgument)])
+                == AgentCLI.catalog, "\(name)")
+        }
+        for name in ["kiro-cli", "opencode", "aider", "pixel-agent"] {
+            #expect(AgentCLI.catalogClaiming(name) == nil, "\(name)")
+        }
+        var draft = AgentCLIDraft()
+        draft.command = "copilot-cli"
+        draft.title = "Wrapper"
+        #expect(draft.problem == .claimedByBuiltIn("GitHub Copilot CLI"))
+        let dev = AgentCLI(command: "tool-dev", title: "Dev", taskPassing: .lastArgument)
+        let tool = AgentCLI(command: "tool", title: "Tool", taskPassing: .lastArgument)
+        #expect(AgentCLI.matching(app: "tool-dev", in: [tool, dev]) == dev)
+        #expect(AgentCLI.matching(app: "tool-x", in: [tool, dev]) == tool)
     }
 
     @Test func oneUnreadableStoredEntryDropsOnlyItself() throws {
@@ -451,13 +465,13 @@ struct CustomAgentCLITests {
     }
 
     /// Output layouts follow the merged list too: a Settings `opencode-dev` isn't parsed as OpenCode.
+    /// Layout lookups use the list they're given: an override's extra app word reaches the layout.
     @Test func layoutsAreToldApartWithTheSettingsCLIs() {
-        let clis = AgentCLI.merged(custom: [AgentCLI(command: "opencode-dev", title: "Dev", taskPassing: .lastArgument),
-                                            AgentCLI(command: "agy-beta", title: "Beta", taskPassing: .lastArgument)])
-        #expect(OutputFilter.genericMessages(["x"], app: "opencode-dev", clis: clis) == nil)
-        #expect(!OutputFilter.isAntigravity(app: "agy-beta", clis: clis))
+        let clis = AgentCLI.merged(custom: [AgentCLI(command: "agy", title: "Mine", taskPassing: .lastArgument,
+                                                     appWords: ["antigravity", "agnightly"])])
+        #expect(OutputFilter.isAntigravity(app: "agnightly", clis: clis))
+        #expect(!OutputFilter.isAntigravity(app: "agnightly"))
         #expect(OutputFilter.isAntigravity(app: "antigravity", clis: clis))
-        #expect(OutputFilter.isAntigravity(app: "agy-beta"))
     }
 
     @Test func aLateOlderUpdateIsIgnored() async {
@@ -550,7 +564,7 @@ struct CustomAgentCLITests {
         var draft = AgentCLIDraft()
         draft.command = "Cursor"
         draft.title = "Cursor editor"
-        #expect(draft.problem == .builtInAppWord("Cursor Agent"))
+        #expect(draft.problem == .claimedByBuiltIn("Cursor Agent"))
         draft.command = "kiro-cli"
         #expect(draft.problem == nil)
         // Lookups still try commands before app words: a command elsewhere in the list wins.
@@ -578,6 +592,29 @@ struct CustomAgentCLITests {
         draft.title = "Mine"
         draft.helpSignature = "mistral vibe"
         #expect(draft.builtInLeftOut == nil)
+    }
+
+    /// Edited after a fill-in, then typed on past it: the edits stay, the inherited signature doesn't.
+    @Test func anInheritedSignatureIsDroppedWhenTheCommandMovesOn() {
+        var draft = AgentCLIDraft()
+        draft.command = "pi"
+        draft.followCommand()
+        draft.title = "Pixel"
+        draft.command = "pixel-agent"
+        draft.followCommand()
+        #expect(draft.title == "Pixel" && draft.helpSignature.isEmpty)
+    }
+
+    @Test func entriesThisVersionCantReadAreWrittenBack() throws {
+        let good = AgentCLI(command: "aider", title: "Aider", taskPassing: .unsupported)
+        let future: [String: Any] = ["command": "x", "title": "X", "taskPassing": ["future": [:]], "appWords": []]
+        let data = try JSONSerialization.data(withJSONObject:
+            [future] + [try JSONSerialization.jsonObject(with: JSONEncoder().encode(good))])
+        let stored = AgentCLI.decodeStored(data)
+        #expect(stored.clis == [good] && stored.unreadable.count == 1)
+        let saved = try #require(AgentCLI.encodeStored(stored.clis, unreadable: stored.unreadable))
+        let again = AgentCLI.decodeStored(saved)
+        #expect(again.clis == [good] && again.unreadable.count == 1)
     }
 
     /// Typing `pixel-agent` passes through `pi`: Pi's definition must not stick.
