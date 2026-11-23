@@ -67,9 +67,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             store.pendingSpaceNames = settings.pendingSpaceNames
             store.onSpacesCached = { [weak self] spaces in self?.settings.herdrSpaceCache = spaces }
             store.onPendingSpaceNamesChanged = { [weak self] names in self?.settings.pendingSpaceNames = names }
-            model.agentCLIDetector = AgentCLIDetector(saved: settings.detectedAgentCLIs, onDetected: { [weak self] commands in
+            let detector = AgentCLIDetector(clis: model.agentCLIs, saved: settings.detectedAgentCLIs, onDetected: { [weak self] commands in
                 Task { @MainActor in self?.settings.detectedAgentCLIs = commands }
             })
+            model.agentCLIDetector = detector
+            settings.onCustomAgentCLIsChanged = { custom in
+                Task { await detector.update(clis: AgentCLI.merged(custom: custom)) }
+            }
         }
         store.onWorktreeCreated = { [weak self] path in self?.settings.rememberFolder(path) }
         store.onLaunchFinished = { [weak self] succeeded in

@@ -1,7 +1,7 @@
 import Foundation
 
 /// How a tool takes the launch form's starting task.
-public enum TaskPassing: Hashable, Sendable {
+public enum TaskPassing: Hashable, Sendable, Codable {
     /// `tool <task>` (Claude Code, Codex).
     case lastArgument
     /// `tool <flag> <task>`, for CLIs whose positional argument means something else.
@@ -30,8 +30,8 @@ public enum TaskPassing: Hashable, Sendable {
 }
 
 /// A coding-agent CLI the launch form offers only when the login shell finds its command. Claude Code and Codex
-/// are always offered and aren't listed here.
-public struct AgentCLI: Equatable, Sendable {
+/// are always offered and aren't listed here. Codable for the ones users add in Settings.
+public struct AgentCLI: Equatable, Sendable, Codable {
     public var command: String
     public var title: String
     public var taskPassing: TaskPassing
@@ -87,10 +87,26 @@ public struct AgentCLI: Equatable, Sendable {
     ]
 
     /// The catalog CLI an agent's OSC 7501 `app` word names ("opencode", "copilot-cli", "antigravity" …), if any.
-    public static func matching(app: String) -> AgentCLI? {
+    public static func matching(app: String, in clis: [AgentCLI] = catalog) -> AgentCLI? {
         let word = app.lowercased()
         func names(_ name: String) -> Bool { word == name || word.hasPrefix(name + "-") }
-        return catalog.first { cli in names(cli.command) || cli.appWords.contains(where: names) }
+        return clis.first { cli in names(cli.command) || cli.appWords.contains(where: names) }
+    }
+
+    /// Whether a command name is safe to put unquoted in the detection script: letters, digits, `.`, `_`, `+`, `-`,
+    /// not starting with a punctuation mark.
+    public static func isValidCommand(_ command: String) -> Bool {
+        command.range(of: "^[A-Za-z0-9][A-Za-z0-9._+-]*$", options: .regularExpression) != nil
+    }
+
+    /// The catalog with the user's CLIs: one with a catalog command replaces that entry in place, the rest follow
+    /// in order. An invalid command, or a command already given earlier in `custom`, is skipped.
+    public static func merged(custom: [AgentCLI]) -> [AgentCLI] {
+        var seen: Set<String> = []
+        let valid = custom.filter { isValidCommand($0.command) && seen.insert($0.command).inserted }
+        let byCommand = Dictionary(uniqueKeysWithValues: valid.map { ($0.command, $0) })
+        let catalogCommands = Set(catalog.map(\.command))
+        return catalog.map { byCommand[$0.command] ?? $0 } + valid.filter { !catalogCommands.contains($0.command) }
     }
 
     static let marker = "ATOLL_FOUND:"
@@ -286,7 +302,7 @@ public actor HelpCheckCache {
 public actor AgentCLIDetector {
     public typealias Detect = @Sendable ([AgentCLI]) async -> [AgentCLI]?
 
-    private let clis: [AgentCLI]
+    private var clis: [AgentCLI]
     private let detect: Detect
     private let onDetected: @Sendable ([String]) -> Void
     private var running: Task<[AgentCLI]?, Never>?
@@ -314,12 +330,26 @@ public actor AgentCLIDetector {
         if let running { return await running.value }
         let task = Task { [clis, detect] in await detect(clis) }
         running = task
-        let result = await task.value
+        // A detection started before `update(clis:)` reported the old definitions: take the current ones.
+        let result = await task.value.map(current)
         running = nil
         if let result, result != lastKnown {
             lastKnown = result
             onDetected(result.map(\.command))
         }
         return result
+    }
+
+    /// Detects `clis` from now on. `lastKnown` keeps the commands it had that are still listed, with their new
+    /// definitions, so an edited CLI shows its new settings before the next refresh.
+    public func update(clis: [AgentCLI]) {
+        self.clis = clis
+        lastKnown = lastKnown.map(current)
+    }
+
+    /// `found` as `clis` defines those commands now, in `clis` order; commands no longer listed are dropped.
+    private func current(_ found: [AgentCLI]) -> [AgentCLI] {
+        let commands = Set(found.map(\.command))
+        return clis.filter { commands.contains($0.command) }
     }
 }

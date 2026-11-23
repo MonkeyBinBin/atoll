@@ -154,6 +154,8 @@ final class IslandModel {
     let settings: AppSettings
     /// Finds installed agent CLIs for the launch form; the app replaces it with one that saves its results.
     var agentCLIDetector = AgentCLIDetector()
+    /// The catalog with the CLIs added in Settings.
+    var agentCLIs: [AgentCLI] { AgentCLI.merged(custom: settings.customAgentCLIs) }
     var mode: Mode = .collapsed {
         didSet {
             guard mode != oldValue else { return }
@@ -415,7 +417,7 @@ final class IslandModel {
         let toolID: String? = switch agent.tool {
         case .claudeCode: "builtin:claude"
         case .codex: "builtin:codex"
-        case .generic: agent.app.flatMap(AgentCLI.matching(app:)).map(LaunchOption.detectedID)
+        case .generic: agent.app.flatMap { AgentCLI.matching(app: $0, in: agentCLIs) }.map(LaunchOption.detectedID)
         }
         openLaunch(prefill: LaunchPrefill(folder: agent.projectPath, optionID: toolID, worktree: true, space: agent.spaceID))
     }

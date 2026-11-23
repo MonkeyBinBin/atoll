@@ -90,6 +90,14 @@ final class AppSettings {
     var pinnedFolders: [String] { didSet { defaults.set(pinnedFolders, forKey: "pinnedFolders") } }
     /// The agent CLI commands last found on this Mac (nil before the first detection), shown at once next launch.
     var detectedAgentCLIs: [String]? { didSet { defaults.set(detectedAgentCLIs, forKey: "detectedAgentCLIs") } }
+    /// Agent CLIs added in Settings; one with a catalog command replaces that entry (`AgentCLI.merged`).
+    var customAgentCLIs: [AgentCLI] {
+        didSet {
+            save(customAgentCLIs, "customAgentCLIs")
+            onCustomAgentCLIsChanged?(customAgentCLIs)
+        }
+    }
+    @ObservationIgnored var onCustomAgentCLIsChanged: (([AgentCLI]) -> Void)?
     /// The last spaces read from the Herdr app, for launches while it isn't running.
     var herdrSpaceCache: [HerdrSpace] { didSet { save(herdrSpaceCache, "herdrSpaceCache") } }
     /// Names waiting for spaces that launches without the Herdr app made (space id → name).
@@ -168,6 +176,7 @@ final class AppSettings {
         recentFolders = defaults.stringArray(forKey: "recentFolders") ?? []
         pinnedFolders = defaults.stringArray(forKey: "pinnedFolders") ?? []
         detectedAgentCLIs = defaults.stringArray(forKey: "detectedAgentCLIs")
+        customAgentCLIs = Self.load("customAgentCLIs", defaults) ?? []
         herdrSpaceCache = Self.load("herdrSpaceCache", defaults) ?? []
         pendingSpaceNames = defaults.dictionary(forKey: "pendingSpaceNames") as? [String: String] ?? [:]
         recentLaunches = Self.load("recentLaunches", defaults) ?? []

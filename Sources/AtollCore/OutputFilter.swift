@@ -261,7 +261,7 @@ public enum OutputFilter {
     /// The messages of a generic agent whose layout is known from its OSC 7501 word; nil for the rest.
     static func genericMessages(_ lines: [String], app: String?) -> [String]? {
         if isAntigravity(app: app) { return antigravityMessages(lines) }
-        if app.flatMap(AgentCLI.matching(app:))?.command == "opencode" { return openCodeMessages(lines) }
+        if app.flatMap { AgentCLI.matching(app: $0) }?.command == "opencode" { return openCodeMessages(lines) }
         return nil
     }
 
@@ -270,7 +270,7 @@ public enum OutputFilter {
     /// Antigravity CLI reports `antigravity`; herdr may name it after its command, `agy`. Both are the
     /// catalog entry's words.
     static func isAntigravity(app: String?) -> Bool {
-        app.flatMap(AgentCLI.matching(app:))?.command == "agy"
+        app.flatMap { AgentCLI.matching(app: $0) }?.command == "agy"
     }
 
     /// Antigravity CLI: like Claude Code, the input box is a pair of full-width `─` rules around `>` with a status

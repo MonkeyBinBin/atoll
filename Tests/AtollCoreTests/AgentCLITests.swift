@@ -320,3 +320,144 @@ final class SavedDetections: @unchecked Sendable {
         lock.withLock { values.append(commands) }
     }
 }
+
+@Suite("Agent CLIs added in Settings")
+struct CustomAgentCLITests {
+    let aider = AgentCLI(command: "aider", title: "Aider", taskPassing: .unsupported)
+
+    @Test func everyTaskPassingSurvivesSaving() throws {
+        let clis = [
+            AgentCLI(command: "a", title: "A", taskPassing: .lastArgument),
+            AgentCLI(command: "b", title: "B", taskPassing: .flag("-i"), appWords: ["bee"], helpSignature: "Bee CLI"),
+            AgentCLI(command: "c", title: "C", taskPassing: .arguments(withTask: ["run", "-t"], withoutTask: ["session"])),
+            AgentCLI(command: "d", title: "D", taskPassing: .unsupported),
+            AgentCLI(command: "e", title: "E", taskPassing: .verbatim),
+        ]
+        let decoded = try JSONDecoder().decode([AgentCLI].self, from: JSONEncoder().encode(clis))
+        #expect(decoded == clis)
+    }
+
+    @Test func onlyShellSafeCommandsAreValid() {
+        for good in ["aider", "cursor-agent", "kiro-cli", "my.tool", "g++", "x_1"] {
+            #expect(AgentCLI.isValidCommand(good), "\(good)")
+        }
+        for bad in ["", "-x", ".hidden", "a b", "a;rm -rf ~", "$(x)", "a|b", "a`b`", "a'b", "~/bin/x", "a/b"] {
+            #expect(!AgentCLI.isValidCommand(bad), "\(bad)")
+        }
+    }
+
+    @Test func aCustomCLIReplacesTheCatalogEntryInPlaceOrFollowsIt() {
+        let pi = AgentCLI(command: "pi", title: "My Pi", taskPassing: .flag("--prompt"))
+        let merged = AgentCLI.merged(custom: [aider, pi,
+                                              AgentCLI(command: "bad cmd", title: "Bad", taskPassing: .lastArgument),
+                                              AgentCLI(command: "aider", title: "Second", taskPassing: .lastArgument)])
+        let catalogIndex = AgentCLI.catalog.firstIndex { $0.command == "pi" }!
+        #expect(merged.count == AgentCLI.catalog.count + 1)
+        #expect(merged[catalogIndex] == pi)
+        #expect(merged.last == aider)
+        #expect(AgentCLI.merged(custom: []) == AgentCLI.catalog)
+    }
+
+    @Test func appWordsMatchInTheGivenList() {
+        let clis = AgentCLI.merged(custom: [AgentCLI(command: "aider", title: "Aider", taskPassing: .unsupported,
+                                                     appWords: ["aider-chat"])])
+        #expect(AgentCLI.matching(app: "aider-chat", in: clis)?.command == "aider")
+        #expect(AgentCLI.matching(app: "aider-chat") == nil)
+    }
+
+    @Test func updatingTheListRedefinesWhatWasDetected() async {
+        let droid = AgentCLI(command: "droid", title: "Factory Droid", taskPassing: .lastArgument)
+        let opencode = AgentCLI(command: "opencode", title: "OpenCode", taskPassing: .flag("--prompt"))
+        let detector = AgentCLIDetector(clis: [droid, opencode], saved: ["droid", "opencode"], detect: { $0 })
+        let edited = AgentCLI(command: "droid", title: "Droid (mine)", taskPassing: .flag("-p"))
+        await detector.update(clis: [edited, aider])
+        #expect(await detector.lastKnown == [edited])
+        #expect(await detector.refresh() == [edited, aider])
+    }
+
+    /// A detection still running with the old list reports the current definitions.
+    @Test func aDetectionStartedBeforeAnUpdateReportsTheNewDefinitions() async {
+        let droid = AgentCLI(command: "droid", title: "Factory Droid", taskPassing: .lastArgument)
+        let gate = AsyncGate()
+        let detector = AgentCLIDetector(clis: [droid, aider], detect: { clis in await gate.wait(); return clis })
+        let refresh = Task { await detector.refresh() }
+        await gate.waitUntilWaiting()
+        let edited = AgentCLI(command: "aider", title: "Aider", taskPassing: .lastArgument)
+        await detector.update(clis: [edited])
+        await gate.open()
+        #expect(await refresh.value == [edited])
+    }
+
+    @Test func aDraftRoundTripsEveryTaskPassing() throws {
+        for cli in [AgentCLI(command: "a", title: "A", taskPassing: .lastArgument),
+                    AgentCLI(command: "b", title: "B", taskPassing: .flag("-i"), appWords: ["bee", "b-cli"],
+                             helpSignature: "Bee CLI"),
+                    AgentCLI(command: "c", title: "C", taskPassing: .arguments(withTask: ["run", "-s", "-t"],
+                                                                                 withoutTask: ["session"])),
+                    AgentCLI(command: "d", title: "D", taskPassing: .unsupported)] {
+            #expect(try AgentCLIDraft(cli).build().get() == cli)
+        }
+    }
+
+    @Test func aDraftCleansUpWhatWasTyped() throws {
+        var draft = AgentCLIDraft()
+        draft.command = " goose "
+        draft.title = " Goose "
+        draft.passing = .subcommand
+        draft.withTask = " run  -s -t "
+        draft.withoutTask = ""
+        draft.appWords = "Goose, goose-ai  GOOSE2"
+        draft.helpSignature = "  "
+        #expect(try draft.build().get() == AgentCLI(
+            command: "goose", title: "Goose", taskPassing: .arguments(withTask: ["run", "-s", "-t"], withoutTask: []),
+            appWords: ["goose", "goose-ai", "goose2"]))
+    }
+
+    @Test func aDraftSaysWhatIsWrong() {
+        var draft = AgentCLIDraft()
+        draft.command = "a;b"
+        draft.title = "T"
+        #expect(draft.problem == .invalidCommand)
+        draft.command = "tool"
+        draft.title = " "
+        #expect(draft.problem == .emptyTitle)
+        draft.title = "Tool"
+        draft.passing = .flag
+        #expect(draft.problem == .invalidFlag)
+        draft.flag = "-i -x"
+        #expect(draft.problem == .invalidFlag)
+        draft.flag = "-i"
+        #expect(draft.problem == nil)
+        draft.passing = .subcommand
+        #expect(draft.problem == .emptySubcommand)
+        draft.withTask = "chat"
+        #expect(draft.problem == nil)
+    }
+}
+
+/// Holds a detection until the test opens it.
+actor AsyncGate {
+    private var opened = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var waitingWatchers: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        if opened { return }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+            waitingWatchers.forEach { $0.resume() }
+            waitingWatchers = []
+        }
+    }
+
+    func waitUntilWaiting() async {
+        if !waiters.isEmpty { return }
+        await withCheckedContinuation { waitingWatchers.append($0) }
+    }
+
+    func open() {
+        opened = true
+        waiters.forEach { $0.resume() }
+        waiters = []
+    }
+}

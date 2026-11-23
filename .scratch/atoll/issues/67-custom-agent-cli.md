@@ -13,4 +13,14 @@
 
 **Blocked by:** 66
 
-**Status:** needs-triage
+**Status:** claimed
+
+## Comments
+
+- 2026-11-23（agent）：command 與 catalog 重複時，使用者決定**自訂覆蓋內建**（原位取代，option id 仍是 `builtin:<command>`，舊 recipe／preset 照樣對得上）。實作：
+  - `AgentCLI`、`TaskPassing` 改為 `Codable`，存在 `customAgentCLIs`（JSON）
+  - `AgentCLI.isValidCommand`：command 未經引號放進偵測 script，限 `[A-Za-z0-9][A-Za-z0-9._+-]*`；其他欄位只進 argv 或 Swift 比對
+  - `AgentCLI.merged(custom:)`：覆蓋同名、追加其餘，略過不合法與重複
+  - `AgentCLIDetector.update(clis:)`：Settings 變更時換清單，`lastKnown` 與進行中的偵測結果都依 command 對應到新定義
+  - `AgentCLIDraft`：Settings 編輯器的字串欄位與驗證，`IslandModel.agentCLIs` 給 `matching(app:in:)` 與啟動表單使用
+  - Settings 新增「Agent CLIs」：列表、Add／Edit sheet（task 方式：Last argument／After a flag／After arguments／Not supported）、與內建同名時標 `replaces built-in`
