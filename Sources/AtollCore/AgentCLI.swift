@@ -2,18 +2,28 @@ import Foundation
 
 /// How a tool takes the launch form's starting task.
 public enum TaskPassing: Hashable, Sendable {
-    /// `tool <task>` (Claude Code, Codex, templates).
+    /// `tool <task>` (Claude Code, Codex).
     case lastArgument
     /// `tool <flag> <task>`, for CLIs whose positional argument means something else.
     case flag(String)
+    /// `tool <withTask…> <task>`, or `tool <withoutTask…>` with no task: for CLIs that take a first prompt only
+    /// through a subcommand (`goose run -s -t <task>`, but `goose session` to just start).
+    case arguments(withTask: [String], withoutTask: [String])
     /// The CLI has no way to open an interactive session with a first prompt.
     case unsupported
+    /// A herdr-core template: core sends the task to the program itself, so it reaches it as written.
+    case verbatim
 
-    /// The argv and task to launch with; an empty task adds nothing.
+    /// The argv and task to launch with; an empty task adds nothing. A task passed as an argument that starts
+    /// with `-` (a markdown list) gets a leading space, so argument parsers (clap, argparse) take it as a value
+    /// rather than a flag.
     public func apply(argv: [String], task: String) -> (argv: [String], task: String) {
-        switch self {
-        case .lastArgument: (argv, task)
+        if case .verbatim = self { return (argv, task) }
+        let task = task.hasPrefix("-") ? " " + task : task
+        return switch self {
+        case .lastArgument, .verbatim: (argv, task)
         case .flag(let flag): (task.isEmpty ? argv : argv + [flag], task)
+        case .arguments(let withTask, let withoutTask): (argv + (task.isEmpty ? withoutTask : withTask), task)
         case .unsupported: (argv, "")
         }
     }
@@ -62,6 +72,18 @@ public struct AgentCLI: Equatable, Sendable {
         AgentCLI(command: "auggie", title: "Auggie", taskPassing: .lastArgument),
         AgentCLI(command: "vibe", title: "Mistral Vibe", taskPassing: .lastArgument, helpSignature: "Mistral Vibe"),
         AgentCLI(command: "pi", title: "Pi", taskPassing: .lastArgument, helpSignature: "AI coding assistant"),
+        // A bare `kiro-cli` is `kiro-cli chat`.
+        AgentCLI(command: "kiro-cli", title: "Kiro CLI", taskPassing: .arguments(withTask: ["chat"], withoutTask: []),
+                 appWords: ["kiro"]),
+        // `-q` seeds an interactive session on a TTY (Hermes 0.21+; earlier it answered and exited). `hermes` is
+        // also the Hermes JavaScript engine's CLI, hence the signature (the parser's description).
+        AgentCLI(command: "hermes", title: "Hermes Agent",
+                 taskPassing: .arguments(withTask: ["chat", "-q"], withoutTask: ["chat"]), helpSignature: "Hermes Agent"),
+        // Without `-s`, `goose run` exits after the task. `goose` is also pressly's database migration tool, hence
+        // the signature (the `session` subcommand's description).
+        AgentCLI(command: "goose", title: "Goose",
+                 taskPassing: .arguments(withTask: ["run", "-s", "-t"], withoutTask: ["session"]),
+                 helpSignature: "interactive chat sessions"),
     ]
 
     /// The catalog CLI an agent's OSC 7501 `app` word names ("opencode", "copilot-cli", "antigravity" …), if any.
