@@ -87,14 +87,14 @@ public struct AgentCLI: Equatable, Sendable, Codable {
     ]
 
     /// The catalog CLI an agent's OSC 7501 `app` word names ("opencode", "copilot-cli", "antigravity" …), if any.
-    /// An exact command or app word anywhere in `clis` wins over a `<name>-…` prefix, so a Settings CLI named
-    /// `opencode-dev` isn't taken for OpenCode.
+    /// Most specific first, each across all of `clis`: a command, then an app word, then a `<name>-…` prefix.
+    /// So a Settings CLI named `opencode-dev` isn't taken for OpenCode, nor one named `antigravity` for agy.
     public static func matching(app: String, in clis: [AgentCLI] = catalog) -> AgentCLI? {
         let word = app.lowercased()
         func names(_ cli: AgentCLI) -> [String] { [cli.command.lowercased()] + cli.appWords.map { $0.lowercased() } }
-        func exact(_ cli: AgentCLI) -> Bool { names(cli).contains(word) }
-        func prefixed(_ cli: AgentCLI) -> Bool { names(cli).contains { word.hasPrefix($0 + "-") } }
-        return clis.first(where: exact) ?? clis.first(where: prefixed)
+        return clis.first { $0.command.lowercased() == word }
+            ?? clis.first { $0.appWords.contains { $0.lowercased() == word } }
+            ?? clis.first { names($0).contains { word.hasPrefix($0 + "-") } }
     }
 
     /// Always offered by the launch form (`LaunchOption.builtIns`), so not definable in Settings.
@@ -109,10 +109,20 @@ public struct AgentCLI: Equatable, Sendable, Codable {
     }
 
     /// Whether a command name is safe to put unquoted in the detection script: letters, digits, `.`, `_`, `+`, `-`,
-    /// not starting with a punctuation mark.
+    /// not starting with a punctuation mark, and not a shell keyword or builtin (which `command -v` always finds).
     public static func isValidCommand(_ command: String) -> Bool {
         command.range(of: "^[A-Za-z0-9][A-Za-z0-9._+-]*$", options: .regularExpression) != nil
+            && !shellWords.contains(command.lowercased())
     }
+
+    static let shellWords: Set<String> = [
+        "if", "then", "else", "elif", "fi", "for", "while", "until", "do", "done", "case", "esac", "function",
+        "select", "time", "in", "test", "echo", "printf", "cd", "pwd", "exit", "export", "source", "alias",
+        "unalias", "type", "command", "builtin", "eval", "exec", "read", "set", "unset", "true", "false", "kill",
+        "jobs", "wait", "trap", "shift", "return", "break", "continue", "let", "local", "declare", "typeset",
+        "hash", "history", "fg", "bg", "umask", "ulimit", "getopts", "which", "where", "whence", "and", "or", "not",
+        "end", "begin", "functions", "set_color", "string", "math", "status", "contains", "count",
+    ]
 
     /// Stored Settings CLIs, dropping only entries this version can't read (rather than all of them).
     public static func decodeList(_ data: Data) -> [AgentCLI] {

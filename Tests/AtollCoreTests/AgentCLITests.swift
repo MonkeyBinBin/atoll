@@ -543,6 +543,35 @@ struct CustomAgentCLITests {
         #expect(draft.builtInLeftOut == nil)
     }
 
+    @Test func aCommandBeatsAnotherCLIsAppWord() {
+        let mine = AgentCLI(command: "antigravity", title: "Other tool", taskPassing: .lastArgument)
+        let clis = AgentCLI.merged(custom: [mine])
+        #expect(AgentCLI.matching(app: "antigravity", in: clis) == mine)
+        #expect(!OutputFilter.isAntigravity(app: "antigravity", clis: clis))
+        #expect(OutputFilter.isAntigravity(app: "agy", clis: clis))
+    }
+
+    @Test func valuesTypedBeforeTheCommandAreKept() {
+        var draft = AgentCLIDraft()
+        draft.passing = .flag
+        draft.flag = "-p"
+        draft.appWords = "myagent"
+        draft.command = "kilo"
+        draft.followCommand()
+        #expect(draft.flag == "-p" && draft.appWords == "myagent" && draft.title.isEmpty)
+    }
+
+    @Test func shellBuiltinsArentCommands() {
+        for word in ["test", "cd", "echo", "If", "source"] {
+            #expect(!AgentCLI.isValidCommand(word), "\(word)")
+        }
+        var draft = AgentCLIDraft()
+        draft.command = "vibe"
+        draft.title = "Mine"
+        draft.helpSignature = "mistral vibe"
+        #expect(draft.builtInLeftOut == nil)
+    }
+
     /// Typing `pixel-agent` passes through `pi`: Pi's definition must not stick.
     @Test func typingPastABuiltInCommandClearsItsDefinition() {
         var draft = AgentCLIDraft()

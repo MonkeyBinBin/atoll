@@ -87,12 +87,13 @@ struct LaunchFormView: View {
     private var store: AgentStore { model.store }
     /// Installed CLIs as Settings defines them now: a detection may still carry a definition from before an edit.
     private var options: [LaunchOption] {
-        // One removed from Settings meanwhile keeps its old definition rather than vanishing under the selection;
-        // one now asking for a different help signature waits for a detection to check it (as the detector does).
+        // One removed from Settings meanwhile, or now asking for a help signature it wasn't detected with, keeps
+        // the definition it was detected under until the next detection, rather than vanishing under the selection.
         let all = model.agentCLIs
-        let current = installed.compactMap { cli -> AgentCLI? in
-            guard let now = all.first(where: { $0.command == cli.command }) else { return cli }
-            return now.helpSignature == nil || now.helpSignature == cli.helpSignature ? now : nil
+        let current = installed.map { cli -> AgentCLI in
+            guard let now = all.first(where: { $0.command == cli.command }),
+                  now.helpSignature == nil || now.helpSignature == cli.helpSignature else { return cli }
+            return now
         }
         return LaunchOption.builtIns + current.map(LaunchOption.detected) + templateOptions
     }
@@ -269,6 +270,13 @@ struct LaunchFormView: View {
         }
         .padding(14)
         .task { await load() }
+        // A CLI added or changed in Settings while the form is open: detect again (the detector also does).
+        .onChange(of: model.agentCLIs) { _, _ in
+            Task {
+                guard toolsLoaded, let fresh = await model.agentCLIDetector.refresh() else { return }
+                takeRefreshed(fresh)
+            }
+        }
         .task(id: folder) {
             source = nil
             sourceFolder = nil

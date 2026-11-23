@@ -12,7 +12,7 @@ public struct AgentCLIDraft: Equatable, Sendable {
 
         public var message: String {
             switch self {
-            case .invalidCommand: "Command: letters, digits, . _ + - only, starting with a letter or digit"
+            case .invalidCommand: "Command: letters, digits, . _ + - only, starting with a letter or digit; not a shell builtin"
             case .reservedCommand: "Names starting with claude or codex are tracked as Claude Code / Codex"
             case .emptyTitle: "Title is empty"
             case .invalidFlag: "Flag: one argument, no spaces (use After arguments for several)"
@@ -80,7 +80,8 @@ public struct AgentCLIDraft: Equatable, Sendable {
                 return
             }
         }
-        guard adoptedFrom == nil, title.trimmingCharacters(in: .whitespaces).isEmpty,
+        // Only into an untouched draft: values typed before the command aren't replaced.
+        guard adoptedFrom == nil, fields == AgentCLIDraft().fields,
               let entry = AgentCLI.catalog.first(where: { $0.command == typed.lowercased() }) else { return }
         self = AgentCLIDraft(entry)
         command = typed
@@ -104,7 +105,8 @@ public struct AgentCLIDraft: Equatable, Sendable {
         let missing = entry.appWords.filter { !words.contains($0) }
         var parts: [String] = []
         if !missing.isEmpty { parts.append("app words \(missing.joined(separator: ", "))") }
-        if let signature = entry.helpSignature, helpSignature.trimmingCharacters(in: .whitespaces) != signature {
+        if let signature = entry.helpSignature,
+           helpSignature.trimmingCharacters(in: .whitespaces).caseInsensitiveCompare(signature) != .orderedSame {
             parts.append("help signature \"\(signature)\"")
         }
         return parts.isEmpty ? nil : "Built-in \(entry.title) also has " + parts.joined(separator: " and ")

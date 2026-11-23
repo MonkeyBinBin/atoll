@@ -67,13 +67,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             store.pendingSpaceNames = settings.pendingSpaceNames
             store.onSpacesCached = { [weak self] spaces in self?.settings.herdrSpaceCache = spaces }
             store.onPendingSpaceNamesChanged = { [weak self] names in self?.settings.pendingSpaceNames = names }
-            let detector = AgentCLIDetector(clis: model.agentCLIs, saved: settings.detectedAgentCLIs, onDetected: { [weak self] commands in
-                Task { @MainActor in self?.settings.detectedAgentCLIs = commands }
+            // Saves what the detector knows when the save runs, not the commands it was called with: these
+            // tasks may run out of order, and an older list must not win.
+            let detector = AgentCLIDetector(clis: model.agentCLIs, saved: settings.detectedAgentCLIs, onDetected: { [weak self] _ in
+                Task { @MainActor in
+                    guard let self, let known = await self.model.agentCLIDetector.lastKnown else { return }
+                    self.settings.detectedAgentCLIs = known.map(\.command)
+                }
             })
             model.agentCLIDetector = detector
         }
         // Demo mode too: the panel already reads Settings CLIs through the model.
         store.agentCLIs = model.agentCLIs
+        // Demo mode keeps the default detector, made with the catalog only.
+        if demo { Task { [detector = model.agentCLIDetector, clis = model.agentCLIs] in await detector.update(clis: clis) } }
         var listVersion = 0
         settings.onCustomAgentCLIsChanged = { [weak self] custom in
             guard let self else { return }
